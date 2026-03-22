@@ -139,6 +139,10 @@ if st.session_state.results:
             'Ring No':              item.get('ring_no') or '',
             'Groove':               item.get('rtj_groove_type') or '',
             'BHN':                  item.get('rtj_hardness_bhn') or '',
+            'SW Winding':           item.get('sw_winding_material') or '',
+            'SW Filler':            item.get('sw_filler') or '',
+            'SW Outer Ring':        item.get('sw_outer_ring') or '',
+            'SW Inner Ring':        item.get('sw_inner_ring') or '',
             'Qty':                  item.get('quantity') or '',
             'UoM':                  item.get('uom') or 'NOS',
             'Special':              item.get('special') or '',
@@ -153,29 +157,38 @@ if st.session_state.results:
     with st.expander('Bulk Edit — apply a value to multiple rows at once', expanded=False):
         st.caption('Tick **Select** on the rows you want to change (leave all un-ticked to apply to every row), fill the fields below, then click **Apply Bulk Edit**.')
         bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
-        bulk_type   = bc1.selectbox('Type',       ['(no change)'] + TYPE_OPTIONS,   key='bulk_type')
-        bulk_moc    = bc2.text_input('MOC',        placeholder='e.g. CNAF',          key='bulk_moc')
-        bulk_rating = bc3.text_input('Rating',     placeholder='e.g. 150#',          key='bulk_rating')
-        bulk_face   = bc4.selectbox('Face',        ['(no change)'] + FACE_OPTIONS,   key='bulk_face')
-        bulk_groove = bc5.selectbox('Groove',      ['(no change)'] + GROOVE_OPTIONS, key='bulk_groove')
-        bulk_thk    = bc6.number_input('Thk (mm)', value=0.0, min_value=0.0, step=0.5, key='bulk_thk',
-                                       help='0 = no change')
-        bulk_bhn    = bc7.number_input('BHN',      value=0,   min_value=0, step=10,   key='bulk_bhn',
-                                       help='0 = no change')
-        bulk_uom    = bc8.selectbox('UoM',         ['(no change)'] + UOM_OPTIONS,    key='bulk_uom')
+        bulk_type    = bc1.selectbox('Type',        ['(no change)'] + TYPE_OPTIONS,   key='bulk_type')
+        bulk_moc     = bc2.text_input('MOC',         placeholder='e.g. CNAF',          key='bulk_moc')
+        bulk_rating  = bc3.text_input('Rating',      placeholder='e.g. 150#',          key='bulk_rating')
+        bulk_face    = bc4.selectbox('Face',         ['(no change)'] + FACE_OPTIONS,   key='bulk_face')
+        bulk_groove  = bc5.selectbox('Groove',       ['(no change)'] + GROOVE_OPTIONS, key='bulk_groove')
+        bulk_thk     = bc6.number_input('Thk (mm)',  value=0.0, min_value=0.0, step=0.5, key='bulk_thk',
+                                        help='0 = no change')
+        bulk_bhn     = bc7.number_input('BHN',       value=0,   min_value=0, step=10,   key='bulk_bhn',
+                                        help='0 = no change')
+        bulk_uom     = bc8.selectbox('UoM',          ['(no change)'] + UOM_OPTIONS,    key='bulk_uom')
+        bc9, bc10, bc11, bc12 = st.columns(4)
+        bulk_winding = bc9.text_input('SW Winding',  placeholder='e.g. SS316',         key='bulk_winding')
+        bulk_filler  = bc10.text_input('SW Filler',  placeholder='e.g. GRAPHITE',      key='bulk_filler')
+        bulk_outer   = bc11.text_input('SW Outer Ring', placeholder='e.g. CS',         key='bulk_outer')
+        bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',      key='bulk_inner')
 
         if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
             sel_col = df['Select']
             target_mask = sel_col if sel_col.any() else pd.Series([True] * len(df))
             for idx in df.index[target_mask]:
-                if bulk_type   != '(no change)':  df.at[idx, 'Type']    = bulk_type
-                if bulk_moc.strip():               df.at[idx, 'MOC']     = bulk_moc.strip().upper()
-                if bulk_rating.strip():            df.at[idx, 'Rating']  = bulk_rating.strip()
-                if bulk_face   != '(no change)':  df.at[idx, 'Face']    = bulk_face
-                if bulk_groove != '(no change)':  df.at[idx, 'Groove']  = bulk_groove
-                if bulk_thk    > 0:               df.at[idx, 'Thk (mm)']= bulk_thk
-                if bulk_bhn    > 0:               df.at[idx, 'BHN']     = bulk_bhn
-                if bulk_uom    != '(no change)':  df.at[idx, 'UoM']     = bulk_uom
+                if bulk_type    != '(no change)':  df.at[idx, 'Type']         = bulk_type
+                if bulk_moc.strip():               df.at[idx, 'MOC']          = bulk_moc.strip().upper()
+                if bulk_rating.strip():            df.at[idx, 'Rating']       = bulk_rating.strip()
+                if bulk_face    != '(no change)':  df.at[idx, 'Face']         = bulk_face
+                if bulk_groove  != '(no change)':  df.at[idx, 'Groove']       = bulk_groove
+                if bulk_thk     > 0:               df.at[idx, 'Thk (mm)']     = bulk_thk
+                if bulk_bhn     > 0:               df.at[idx, 'BHN']          = bulk_bhn
+                if bulk_uom     != '(no change)':  df.at[idx, 'UoM']          = bulk_uom
+                if bulk_winding.strip():           df.at[idx, 'SW Winding']   = bulk_winding.strip().upper()
+                if bulk_filler.strip():            df.at[idx, 'SW Filler']    = bulk_filler.strip().upper()
+                if bulk_outer.strip():             df.at[idx, 'SW Outer Ring']= bulk_outer.strip().upper()
+                if bulk_inner.strip():             df.at[idx, 'SW Inner Ring']= bulk_inner.strip().upper()
             st.session_state['_bulk_df'] = df.copy()
             st.success(f'Applied to {int(target_mask.sum())} row(s). Click **Update** below to regenerate descriptions.')
 
@@ -201,6 +214,10 @@ if st.session_state.results:
             'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring designation e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
             'BHN':                  st.column_config.NumberColumn('BHN', width='small', min_value=0, help='RTJ hardness BHN'),
+            'SW Winding':           st.column_config.TextColumn('SW Winding', width='small', help='SPW/KAMM winding material e.g. SS304, SS316L'),
+            'SW Filler':            st.column_config.TextColumn('SW Filler', width='small', help='SPW filler e.g. GRAPHITE, PTFE'),
+            'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small', help='Outer centering ring e.g. CS, SS304'),
+            'SW Inner Ring':        st.column_config.TextColumn('SW Inner Ring', width='small', help='Inner ring material e.g. SS304'),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0),
             'UoM':                  st.column_config.SelectboxColumn('UoM', options=UOM_OPTIONS, width='small'),
             'Special':              st.column_config.TextColumn('Special', width='medium'),
@@ -215,18 +232,27 @@ if st.session_state.results:
         for i, row in edited_df.iterrows():
             base = items[i].copy()
             # Apply reviewer edits back into the item
-            base['gasket_type']      = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
-            base['size']             = row['Size'] or base.get('size')
-            base['rating']           = row['Rating'] or base.get('rating')
-            base['moc']              = row['MOC'] or None
-            base['face_type']        = row['Face'] or None
-            base['thickness_mm']     = row['Thk (mm)'] or None
-            base['ring_no']          = row['Ring No'] or None
-            base['rtj_groove_type']  = row['Groove'] or None
-            base['rtj_hardness_bhn'] = row['BHN'] or None
-            base['quantity']         = row['Qty'] or base.get('quantity')
-            base['uom']              = row['UoM'] or 'NOS'
-            base['special']          = row['Special'] or None
+            base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
+            base['size']               = row['Size'] or base.get('size')
+            base['rating']             = row['Rating'] or base.get('rating')
+            base['moc']                = row['MOC'] or None
+            base['face_type']          = row['Face'] or None
+            base['thickness_mm']       = row['Thk (mm)'] or None
+            base['ring_no']            = row['Ring No'] or None
+            base['rtj_groove_type']    = row['Groove'] or None
+            base['rtj_hardness_bhn']   = row['BHN'] or None
+            base['sw_winding_material']= row['SW Winding'] or None
+            base['sw_filler']          = row['SW Filler'] or None
+            base['sw_outer_ring']      = row['SW Outer Ring'] or None
+            base['sw_inner_ring']      = row['SW Inner Ring'] or None
+            # When SW fields are edited, clear the assembled MOC so it rebuilds
+            if base.get('gasket_type') == 'SPIRAL_WOUND' and any([
+                row['SW Winding'], row['SW Filler'], row['SW Outer Ring'], row['SW Inner Ring']
+            ]):
+                base['moc'] = None
+            base['quantity']           = row['Qty'] or base.get('quantity')
+            base['uom']                = row['UoM'] or 'NOS'
+            base['special']            = row['Special'] or None
             # Clear derived fields so rules engine recalculates cleanly
             for f in ('size_norm', 'rating_norm', 'status', 'flags', 'applied_defaults', 'dimensions'):
                 base.pop(f, None)

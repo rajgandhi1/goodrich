@@ -67,7 +67,7 @@ def _parse_line(line: str) -> "dict | None":
             pass
 
     # Last resort: entire line is a description with no quantity
-    # Strip leading sl.no if present
+    # Strip leading sl.no if present (handles "1." / "1)" prefixes — NOT comma, as "8, GASKET" may mean 8" size)
     desc = re.sub(r'^\d+[\.\)]\s*', '', line).strip()
     if _looks_like_gasket(desc):
         return {'line_no': None, 'description': desc, 'quantity': None, 'uom': 'NOS'}
@@ -79,7 +79,10 @@ def _looks_like_gasket(text: str) -> bool:
     text_lower = text.lower()
     # Must contain gasket-related keyword or size indicator
     gasket_kws = ['gasket', 'gkt', 'rubber', 'ptfe', 'neoprene', 'epdm', 'cnaf',
-                  'viton', 'graphite', 'pn', '150#', '300#', '600#', 'asme', 'ansi']
+                  'viton', 'graphite', 'pn', '150#', '300#', '600#', 'asme', 'ansi',
+                  'rtj', 'r.t.j', 'ring joint', 'joint tore', 'tore', 'spiral', 'winding',
+                  'spw', 'sw gasket', 'kammprofile', 'camprofile', 'insulating gasket',
+                  'isk', 'soft iron', 'softiron', 'octagonal', 'oval ring']
     has_kw = any(k in text_lower for k in gasket_kws)
     has_size = bool(re.search(r'\d+["\']|\d+\s*(?:nb|nps|inch|mm)', text_lower, re.IGNORECASE))
     return has_kw or has_size

@@ -111,10 +111,18 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     item['sw_inner_ring'] = inner_ring
     item['sw_filler'] = filler
 
+    # Handle "SS" without grade — ambiguous, cannot build valid MOC
+    grade_flag_fired = False
+    if winding_mat == 'SS':
+        flags.append('Spiral wound: winding grade not specified — confirm SS304/SS316/SS316L/etc.')
+        grade_flag_fired = True
+        winding_mat = None
+        item['sw_winding_material'] = None
+
     # Build MOC string if not already set
     if not item.get('moc') and winding_mat:
         item['moc'] = _build_sw_moc(winding_mat, filler, inner_ring, outer_ring)
-    elif not item.get('moc'):
+    elif not item.get('moc') and not grade_flag_fired:
         flags.append('Spiral wound: winding material not identified — verify SS304/SS316/etc.')
 
     # Default thickness to 4.5mm
