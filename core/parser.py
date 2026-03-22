@@ -67,8 +67,8 @@ def _parse_line(line: str) -> "dict | None":
             pass
 
     # Last resort: entire line is a description with no quantity
-    # Strip leading sl.no if present (handles "1." / "1)" prefixes — NOT comma, as "8, GASKET" may mean 8" size)
-    desc = re.sub(r'^\d+[\.\)]\s*', '', line).strip()
+    # Strip leading sl.no if present: "1. " / "1) " — but NOT "1.5" or "1.1/2" (period followed by digit)
+    desc = re.sub(r'^\d+[\.\)](?!\d)\s*', '', line).strip()
     if _looks_like_gasket(desc):
         return {'line_no': None, 'description': desc, 'quantity': None, 'uom': 'NOS'}
 

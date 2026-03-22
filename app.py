@@ -138,7 +138,7 @@ if st.session_state.results:
             'Thk (mm)':             item.get('thickness_mm') or '',
             'Ring No':              item.get('ring_no') or '',
             'Groove':               item.get('rtj_groove_type') or '',
-            'BHN':                  item.get('rtj_hardness_bhn') or '',
+            'BHN':                  item.get('rtj_hardness_spec') or item.get('rtj_hardness_bhn') or '',
             'SW Winding':           item.get('sw_winding_material') or '',
             'SW Filler':            item.get('sw_filler') or '',
             'SW Outer Ring':        item.get('sw_outer_ring') or '',
@@ -213,7 +213,7 @@ if st.session_state.results:
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
             'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring designation e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
-            'BHN':                  st.column_config.NumberColumn('BHN', width='small', min_value=0, help='RTJ hardness BHN'),
+            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='RTJ hardness (e.g. 90 BHN HARDNESS or 22 HRC MAX)'),
             'SW Winding':           st.column_config.TextColumn('SW Winding', width='small', help='SPW/KAMM winding material e.g. SS304, SS316L'),
             'SW Filler':            st.column_config.TextColumn('SW Filler', width='small', help='SPW filler e.g. GRAPHITE, PTFE'),
             'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small', help='Outer centering ring e.g. CS, SS304'),
@@ -240,7 +240,17 @@ if st.session_state.results:
             base['thickness_mm']       = row['Thk (mm)'] or None
             base['ring_no']            = row['Ring No'] or None
             base['rtj_groove_type']    = row['Groove'] or None
-            base['rtj_hardness_bhn']   = row['BHN'] or None
+            # BHN column may now contain "90 BHN HARDNESS" or "22 HRC MAX" strings
+            bhn_val = row['BHN'] or None
+            if bhn_val:
+                base['rtj_hardness_spec'] = str(bhn_val)
+                try:
+                    base['rtj_hardness_bhn'] = int(float(str(bhn_val).split()[0]))
+                except (ValueError, IndexError):
+                    base['rtj_hardness_bhn'] = None
+            else:
+                base['rtj_hardness_spec'] = None
+                base['rtj_hardness_bhn'] = None
             base['sw_winding_material']= row['SW Winding'] or None
             base['sw_filler']          = row['SW Filler'] or None
             base['sw_outer_ring']      = row['SW Outer Ring'] or None

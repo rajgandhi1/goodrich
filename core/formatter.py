@@ -68,16 +68,19 @@ def format_description(item: dict) -> str:
 
 
 def _fmt_rtj(item: dict) -> str:
-    """SIZE : R-23 ,RTJ , OCT ,SOFTIRON GALVANISED ,90 BHN HARDNESS ,ASME B16.20"""
+    """SIZE : R-23 ,RTJ , OCT ,SOFTIRON ,90 BHN HARDNESS ,ASME B16.20"""
     ring_no = item.get('ring_no')
     moc = item.get('moc')
     groove = item.get('rtj_groove_type') or 'OCT'
+    hardness_spec = item.get('rtj_hardness_spec')
     bhn = item.get('rtj_hardness_bhn')
     standard = item.get('standard') or 'ASME B16.20'
     if not (ring_no and moc):
         return ''
     parts = [f'SIZE : {ring_no} ,RTJ , {groove} ,{moc}']
-    if bhn:
+    if hardness_spec:
+        parts.append(f',{hardness_spec}')
+    elif bhn:
         parts.append(f',{int(bhn)} BHN HARDNESS')
     parts.append(f',{standard}')
     return ' '.join(parts)

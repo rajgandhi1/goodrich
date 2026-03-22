@@ -72,17 +72,19 @@ Each extraction must follow this schema:
 Rules:
 - size: NPS in inches (e.g. "6\\"") or OD×ID in mm. If NB given, convert: 15NB=0.5\\", 20NB=0.75\\", 25NB=1\\", 32NB=1.25\\", 40NB=1.5\\", 50NB=2\\", 65NB=2.5\\", 80NB=3\\", 100NB=4\\", 150NB=6\\", 200NB=8\\", 250NB=10\\", 300NB=12\\", 350NB=14\\", 400NB=16\\", 450NB=18\\", 500NB=20\\", 600NB=24\\". DN = NB.
 - rating: use format "150#", "300#", "PN 10", "PN 16". Valid ASME classes: 150, 300, 600, 900, 1500, 2500, 3000.
-- gasket_type: SPIRAL_WOUND if description mentions "spiral wound", "spiral seal", "spiral winding", "SPW", "SW gasket", "SPIRL WOUND" (typo), or combination of winding material + filler + ring
-- gasket_type: RTJ if description mentions "ring joint", "RTJ", "R.T.J", "ring type joint", "octagonal ring", "oval ring", "JOINT TORE" (French), "JOINT TORIQUE" (French), or RTJ ring number (R-nn)
-- For SPIRAL_WOUND: set sw_winding_material (e.g. SS304), sw_filler (GRAPHITE/PTFE/MICA), sw_outer_ring (e.g. CS), sw_inner_ring if present; leave moc null
+- gasket_type: SPIRAL_WOUND if description mentions "spiral wound", "spiral seal", "spiral winding", "SPW", "SPWD", "SPRL-WND", "SW gasket", "SPIRL WOUND" (typo), or combination of winding material + filler + ring
+- gasket_type: RTJ if description mentions "ring joint", "RTJ", "R.T.J", "ring type joint", "ring type gasket", "octagonal ring", "oval ring", "JOINT TORE" (French), "JOINT TORIQUE" (French), RTJ ring number (R-nn), or API 6A ring numbers (RX-nn, BX-nn)
+- For SPIRAL_WOUND: set sw_winding_material (e.g. SS304), sw_filler (GRAPHITE/PTFE/MICA/CNAF), sw_outer_ring (e.g. CS), sw_inner_ring if present; leave moc null
 - For SOFT_CUT: set moc, leave sw_* and rtj_* fields null
-- For RTJ: set moc (e.g. SOFTIRON, SOFTIRON GALVANISED, SS316, LOW CARBON STEEL), rtj_groove_type (OCT or OVAL), rtj_hardness_bhn (90 for soft iron, 120 for LCS, 160 for SS); set ring_no if stated (e.g. "R-24"); leave sw_* fields null; standard is ASME B16.20
-- Normalize winding materials: "304 SS"/"SS 304"/"304SS"/"304 STAINLESS STEEL"/"304 S.S." → "SS304"; "316 SS"/"316 STAINLESS STEEL" → "SS316"; "316L SS" → "SS316L"; "STAINLESS STEEL" alone (no grade) → null (ambiguous)
-- Normalize ring materials: "CARBON STEEL"/"MS"/"C.S."/"CN/ZN PLATED CARBON STEEL" → "CS"
-- Normalize RTJ MOC: "SOFT IRON"/"SOFTIRON" → "SOFTIRON"; "SOFT IRON GALVANISED"/"GALVANISED SOFT IRON" → "SOFTIRON GALVANISED"; "LOW CARBON STEEL"/"LCS"/"CARBON STEEL"/"CN/ZN PLATED CARBON STEEL" → "LOW CARBON STEEL"; "316 S"/"STAINLESS STEEL 316" → "SS316"
+- For RTJ: set moc (e.g. SOFTIRON, SOFTIRON GALVANISED, SS316, LOW CARBON STEEL), rtj_groove_type (OCT or OVAL), rtj_hardness_bhn (90 for soft iron, 120 for LCS, 160 for SS); set ring_no if stated (e.g. "R-24", "RX-53", "BX-152"); leave sw_* fields null; standard is ASME B16.20
+- Normalize winding materials: "304 SS"/"SS 304"/"304SS"/"304 STAINLESS STEEL"/"304-SS"/"AISI 304" → "SS304"; "316 SS"/"316 STAINLESS STEEL"/"316-SS" → "SS316"; "316L SS"/"316L-SS" → "SS316L"; "SUPER DUPLEX"/"SDSS" → "SDSS (UNS S32750)"; "STAINLESS STEEL" alone (no grade) → null
+- Normalize ring materials: "CARBON STEEL"/"MS"/"C.S."/"CS OR"/"CS" → "CS"; "SS316 IR"/"316-SS IR" → "SS316" inner ring; "SS IR" generic inner ring
+- Normalize RTJ MOC: "SOFT IRON"/"SOFTIRON" → "SOFTIRON"; "SOFT IRON GALVANISED" → "SOFTIRON GALVANISED"; "LOW CARBON STEEL"/"LCS"/"CARBON STEEL"/"CN/ZN PLATED CARBON STEEL" → "LOW CARBON STEEL"; "316 S"/"STAINLESS STEEL 316" → "SS316"; "UNS S32205" / "UNS S32750" → keep as-is e.g. "UNS S32205"
+- For RTJ: capture ring_no including RX and BX prefixes (API 6A): "RX53" → "RX-53", "BX-152" → "BX-152"
+- For RTJ hardness: "90 BHN MAX" → rtj_hardness_bhn=90; "22 HRC" or "MAX HARDNESS 22 HRC" → note in special; "83 HRBW" → note in special
 - face_type: null for spiral wound and RTJ; RF/FF/null for soft cut
 - thickness_mm: null for RTJ (rings have no thickness field); extract number for others; null if not stated
-- standard: ASME B16.21 for soft cut; ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound; API 6A if stated
+- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut; ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound
 - special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc.
 - confidence: HIGH if all key fields clear, LOW if ambiguous"""
 
@@ -228,6 +230,8 @@ _SW_DETECT_PATTERN = re.compile(
     r'|\bSPIRAL\s*(?:SEAL|WINDING)\b'                # "SPIRAL SEAL" / "SPIRAL WINDING"
     r'|\bSPIRL\s*WOUND\b'                             # common typo "SPIRL WOUND"
     r'|\bSPRIL\s*WOUND\b'                             # common typo "SPRIL WOUND"
+    r'|\bSPRL[-\s]?WND\b'                             # "SPRL-WND" abbreviated
+    r'|\bSPWD\b'                                      # "SPWD" abbreviation
     r'|\bSPW\b'                                       # abbreviation SPW
     r'|\bS\.?W\.?\s*GASKET\b'                         # "SW GASKET"
     r'|(?:SS\s*3\d{2}L?|304\s*SS|316\s*SS)\s*\+'     # "304 SS +" shorthand (metal + filler + ring)
@@ -237,12 +241,14 @@ _SW_DETECT_PATTERN = re.compile(
 
 _RTJ_DETECT_PATTERN = re.compile(
     r'\bRING\s*(?:TYPE\s*)?JOINT\b'                  # "Ring Joint" / "Ring Type Joint"
+    r'|\bRING\s*TYPE\s*GASKET\b'                     # "Ring Type Gasket"
     r'|\bRTJ\b'                                       # abbreviation
     r'|\bR\.T\.J\b'
     r'|\bOCTAGONAL\s*RING\b'
     r'|\bOVAL\s*RING\b'
     r'|\bJOINT\s*TOR(?:E|IQUE)?\b'                   # French: "JOINT TORE" / "JOINT TORIQUE"
-    r'|\bTOR(?:E|IQUE)\s*JOINT\b',                   # French reverse order
+    r'|\bTOR(?:E|IQUE)\s*JOINT\b'                    # French reverse order
+    r'|\b(?:RX|BX)-?\d{2,4}\b',                      # API 6A ring numbers RX-53, BX-151
     re.IGNORECASE,
 )
 
@@ -270,26 +276,45 @@ _ISK_DETECT_PATTERN = re.compile(
 )
 
 _SW_WINDING_PATTERN = re.compile(
-    r'\b(SS\s*304L?|SS\s*316L?|SS\s*321|SS\s*347|304L?\s*SS|316L?\s*SS|321\s*SS|347\s*SS'
+    r'\b(SS\s*304L?|SS\s*316L?|SS\s*321|SS\s*347|SS\s*904L?'
+    r'|304L?\s*SS|316L?\s*SS|321\s*SS|347\s*SS'
+    r'|316L?-SS|304L?-SS|321-SS|347-SS'               # dash format "316-SS", "316L-SS"
+    r'|AISI\s*304L?|AISI\s*316L?|AISI\s*321|AISI\s*347'  # AISI grades
     r'|304L?\s*STAINLESS\s*STEEL|316L?\s*STAINLESS\s*STEEL'  # "304 STAINLESS STEEL WINDING"
     r'|321\s*STAINLESS\s*STEEL|347\s*STAINLESS\s*STEEL'
-    r'|INCONEL\s*\d*|HASTELLOY\s*[A-Z]\d*|MONEL\s*\d*'
-    r'|DUPLEX|TITANIUM'
-    r'|STAINLESS\s*STEEL)\b',                         # generic — must stay last; triggers grade flag
+    r'|INCONEL\s*625|INCONEL\s*600|INCONEL\s*800'
+    r'|INCONEL\s*\d*'                                  # other INCONEL grades
+    r'|HASTELLOY\s*C[-\s]?276|HASTELLOY\s*B[-\s]?2|HASTELLOY\s*[A-Z]\d*'
+    r'|MONEL\s*400|MONEL\s*\d*'
+    r'|SUPER\s*DUPLEX|SDSS|HDSS'                       # duplex grades (generic)
+    r'|ALLOY\s*20|AL\s*6XN'
+    r'|DUPLEX|TITANIUM|ZIRCONIUM|TANTALUM'
+    r'|STAINLESS\s*STEEL)\b',                          # generic — must stay last; triggers grade flag
     re.IGNORECASE,
 )
 _SW_FILLER_PATTERN = re.compile(
-    r'\b(FLEXIBLE\s+GRAPHITE|GRAPHITE|PTFE|TEFLON|MICA|CERAMIC|MINERAL\s*WOOL)\b',
+    r'\b(FLEXIBLE\s+GRAPHITE|GRAPHITE|GRH[-\s]?FILL|GRH\b'  # GRAPHITE incl. GRH-FILL abbreviation
+    r'|PTFE|TEFLON'
+    r'|CNAF|NON[-\s]?ASBESTOS\s*FILLER|COMPRESSED\s*NON[-\s]?ASBESTOS'
+    r'|THERMICULITE|THERMICULIT'
+    r'|MICA|CERAMIC\s*(?:FIBER|FIBRE)?|MINERAL\s*WOOL'
+    r'|STAINLESS\s*(?:STEEL\s*)?FILLER|STAINLESSFILLER)\b',   # "STAINLESSFILLER" concatenation
     re.IGNORECASE,
 )
 _SW_OUTER_RING_PATTERN = re.compile(
-    r'\b(CS|CARBON\s*STEEL|M\.?S\.?|SS\s*304L?|SS\s*316L?|304\s*SS|316\s*SS)\s*(?:OUTER\s*)?(?:CENTERING\s*)?RING\b'
-    r'|\bOUTER\s*RING[:\s]+\s*(CS|CARBON\s*STEEL|M\.?S\.?|SS\s*\d{3}L?|\d{3}L?\s*SS)',  # "Outer ring: SS316"
+    r'\b(CS|CARBON\s*STEEL|M\.?S\.?|SS\s*304L?|SS\s*316L?|304\s*SS|316\s*SS|316L?-SS|304L?-SS)\s*(?:OUTER\s*)?(?:CENTERING\s*)?RING\b'
+    r'|\bOUTER\s*RING[:\s]+\s*(CS|CARBON\s*STEEL|M\.?S\.?|SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)'  # "Outer ring: SS316"
+    r'|\b(CS|SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)\s+OR\b'  # "CS OR", "316-SS OR"
+    r'|\bW/(?:I)?OR\s+(CS|SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)\b'  # "W/OR 316-SS", "W/IOR SS316"
+    r'|\bRING\s*=\s*(CS|SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)\b',   # "RING=316-SS"
     re.IGNORECASE,
 )
 _SW_INNER_RING_PATTERN = re.compile(
     r'(?:\bINR\b|\bINNER\s+RING\b|\bINNER\s+CENTERING)\s*[,:]?\s*'
-    r'(SS\s*\d{3}L?(?:/\d{3}L?)?|CS|CARBON\s*STEEL|304\s*SS|316\s*SS|UNS\s*[A-Z]\d+)',
+    r'(SS\s*\d{3}L?(?:/\d{3}L?)?|CS|CARBON\s*STEEL|304\s*SS|316\s*SS|\d{3}L?-SS|UNS\s*[A-Z]\d+)'
+    r'|\b(SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS|CS)\s+IR\b'  # "SS316 IR", "316-SS IR"
+    r'|\bSS\s+IR\b'                                           # "SS IR" generic inner ring
+    r'|\bW/IOR\s+(CS|SS\s*\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)\b',  # "W/IOR SS316"
     re.IGNORECASE,
 )
 
@@ -310,6 +335,21 @@ _SW_MATERIAL_NORM = {
     'STAINLESS STEEL': 'SS',   # no grade — will trigger flag in rules engine
     'CARBON STEEL': 'CS', 'CARBON  STEEL': 'CS', 'MS': 'CS', 'M.S.': 'CS', 'C.S.': 'CS',
     'INCONEL': 'INCONEL 625', 'HASTELLOY': 'HASTELLOY C276', 'MONEL': 'MONEL 400',
+    # Dash-format "316-SS", "316L-SS"
+    '316-SS': 'SS316', '316L-SS': 'SS316L', '304-SS': 'SS304', '304L-SS': 'SS304L',
+    '321-SS': 'SS321', '347-SS': 'SS347',
+    # AISI grades
+    'AISI 304': 'SS304', 'AISI 316': 'SS316', 'AISI 316L': 'SS316L',
+    'AISI 304L': 'SS304L', 'AISI 321': 'SS321', 'AISI 347': 'SS347',
+    'AISI304': 'SS304', 'AISI316': 'SS316', 'AISI316L': 'SS316L',
+    # Duplex grades
+    'SUPER DUPLEX': 'SDSS (UNS S32750)', 'SDSS': 'SDSS (UNS S32750)',
+    'HDSS': 'HDSS',
+    # INCONEL explicit grades
+    'INCONEL 625': 'INCONEL 625', 'INCONEL 600': 'INCONEL 600', 'INCONEL 800': 'INCONEL 800',
+    # Filler material that appears as winding (edge case)
+    'STAINLESSFILLER': 'SS',  # concatenation artifact — treat as unknown SS grade
+    'STAINLESS FILLER': 'SS',
 }
 
 
@@ -323,6 +363,9 @@ def _norm_sw_material(raw: str) -> str:
     compact = key.replace(' ', '')
     if compact in _SW_MATERIAL_NORM:
         return _SW_MATERIAL_NORM[compact]
+    # UNS materials pass through as-is (e.g. UNS N08825)
+    if key.startswith('UNS ') or key.startswith('UNS-'):
+        return key
     return key
 
 
@@ -338,6 +381,13 @@ def _extract_sw_components(desc: str) -> dict:
     m = _SW_FILLER_PATTERN.search(desc)
     if m:
         filler = re.sub(r'\s+', ' ', m.group(1).upper())  # normalize spaces, keep FLEXIBLE GRAPHITE
+        # Normalize filler abbreviations
+        if re.search(r'^GRH', filler):
+            filler = 'GRAPHITE'
+        elif 'CNAF' in filler or 'NON-ASBESTOS' in filler or 'NON ASBESTOS' in filler:
+            filler = 'CNAF'
+        elif 'STAINLESS' in filler or filler == 'STAINLESSFILLER':
+            filler = 'GRAPHITE'  # "STAINLESSFILLER" is a trade name for flexible graphite facing
 
     outer_ring = None
     inner_ring = None
@@ -350,11 +400,15 @@ def _extract_sw_components(desc: str) -> dict:
     else:
         m = _SW_OUTER_RING_PATTERN.search(desc)
         if m:
-            # Handle both capture groups from the two alternatives in the pattern
-            outer_ring = _norm_sw_material(m.group(1) or m.group(2))
+            # Find first non-None group (pattern has multiple capture group alternatives)
+            mat_raw = next((g for g in m.groups() if g), None)
+            if mat_raw:
+                outer_ring = _norm_sw_material(mat_raw)
         m = _SW_INNER_RING_PATTERN.search(desc)
         if m:
-            inner_ring = _norm_sw_material(m.group(1))
+            mat_raw = next((g for g in m.groups() if g), None)
+            if mat_raw and mat_raw.upper() not in ('SS', 'IR'):  # skip bare "SS IR" with no grade
+                inner_ring = _norm_sw_material(mat_raw)
 
     # Find winding material — mask ring-label positions first to avoid false matches
     # (e.g. "Outer ring: SS316" should not be classified as winding material)
@@ -441,6 +495,15 @@ def _extract_rtj_moc(desc: str) -> str | None:
     has_galvanised = 'GALVANISED' in desc or 'GALVANIZED' in desc
     if has_softiron and has_galvanised:
         return 'SOFTIRON GALVANISED'
+    # UNS material (e.g. UNS S32205, UNS S32750, UNS N08825)
+    m = re.search(r'\bUNS\s+([A-Z]\d{4,6})\b', desc)
+    if m:
+        return f"UNS {m.group(1)}"
+    # AISI grade
+    if re.search(r'AISI\s*316L\b', desc): return 'SS316L'
+    if re.search(r'AISI\s*316\b', desc): return 'SS316'
+    if re.search(r'AISI\s*304L\b', desc): return 'SS304L'
+    if re.search(r'AISI\s*304\b', desc): return 'SS304'
     for raw, canon in _RTJ_MOC_MAP.items():
         if raw.upper() in desc:
             return canon
@@ -463,6 +526,25 @@ def _extract_rtj_groove(desc: str) -> str:
     return 'OCT'  # octagonal is default for RTJ
 
 
+def _extract_rtj_hardness(desc: str) -> tuple[int | None, str | None]:
+    """Extract hardness: returns (bhn_int_or_None, display_string_or_None)."""
+    # "90 BHN MAX" / "90 BHN" / "90 HB"
+    m = re.search(r'(\d+)\s*(?:BHN|HB)\b', desc, re.IGNORECASE)
+    if m:
+        val = int(m.group(1))
+        return val, f"{val} BHN HARDNESS"
+    # "MAX HARDNESS OF 22 HRC" / "22 HRC MAX" / "HARDNESS 22 HRC"
+    m = re.search(r'(?:MAX(?:IMUM)?\s*HARDNESS(?:\s*OF)?\s*(\d+)|(\d+)\s*HRC\b)', desc, re.IGNORECASE)
+    if m:
+        val = m.group(1) or m.group(2)
+        return None, f"MAX HARDNESS {val} HRC"
+    # "83 HRBW MAX" / "HARDNESS 83 HRBW"
+    m = re.search(r'(\d+)\s*HRBW\b', desc, re.IGNORECASE)
+    if m:
+        return None, f"MAX HARDNESS {m.group(1)} HRBW"
+    return None, None
+
+
 def _extract_kamm_components(desc: str) -> dict:
     """Extract KAMMPROFILE-specific fields."""
     winding_m = _SW_WINDING_PATTERN.search(desc)
@@ -480,9 +562,13 @@ def _extract_kamm_components(desc: str) -> dict:
         outer_ring = mat
     else:
         outer_m = _SW_OUTER_RING_PATTERN.search(desc)
-        outer_ring = _norm_sw_material(outer_m.group(1)) if outer_m else None
+        if outer_m:
+            mat_raw = next((g for g in outer_m.groups() if g), None)
+            outer_ring = _norm_sw_material(mat_raw) if mat_raw else None
         inner_m = _SW_INNER_RING_PATTERN.search(desc)
-        inner_ring = _norm_sw_material(inner_m.group(1)) if inner_m else None
+        if inner_m:
+            mat_raw = next((g for g in inner_m.groups() if g), None)
+            inner_ring = _norm_sw_material(mat_raw) if mat_raw and mat_raw.upper() not in ('SS', 'IR') else None
 
     return {
         'sw_winding_material': winding_mat,
@@ -522,7 +608,7 @@ def _regex_extract(description: str) -> dict:
 
     _base_sw_none = {'sw_winding_material': None, 'sw_filler': None,
                      'sw_inner_ring': None, 'sw_outer_ring': None}
-    _base_rtj_none = {'rtj_groove_type': None, 'rtj_hardness_bhn': None}
+    _base_rtj_none = {'rtj_groove_type': None, 'rtj_hardness_bhn': None, 'rtj_hardness_spec': None}
 
     # --- Priority 1: ISK (insulating gasket kit) — before RTJ since ISK-RTJ exists ---
     if _ISK_DETECT_PATTERN.search(desc):
@@ -601,10 +687,18 @@ def _regex_extract(description: str) -> dict:
         size, size_type = _extract_size(desc)
         rtj_moc = _extract_rtj_moc(desc)
         groove = _extract_rtj_groove(desc)
-        hardness = _RTJ_HARDNESS.get(rtj_moc) if rtj_moc else None
-        # Extract ring number directly from description text (e.g. "R24", "R-37", "R49")
-        m_ring = re.search(r'\bR-?(\d{2,3})\b', desc)
-        ring_from_desc = f"R-{m_ring.group(1)}" if m_ring else None
+        # Hardness from description text (BHN/HRC/HRBW)
+        hardness_bhn, hardness_spec = _extract_rtj_hardness(desc)
+        if hardness_bhn is None and hardness_spec is None:
+            hardness_bhn = _RTJ_HARDNESS.get(rtj_moc) if rtj_moc else None
+            hardness_spec = f"{hardness_bhn} BHN HARDNESS" if hardness_bhn else None
+        # Extract ring number from description text — supports R, RX, BX prefixes
+        m_ring = re.search(r'\b(RX|BX|R)-?(\d{2,4})\b', desc, re.IGNORECASE)
+        ring_from_desc = None
+        if m_ring:
+            prefix = m_ring.group(1).upper()
+            num = m_ring.group(2)
+            ring_from_desc = f"{prefix}-{num}"
         rating = _extract_rating(desc)
         return {
             'size': size, 'size_type': size_type,
@@ -618,7 +712,8 @@ def _regex_extract(description: str) -> dict:
             'special': _extract_special(desc),
             **_base_sw_none,
             'rtj_groove_type': groove,
-            'rtj_hardness_bhn': hardness,
+            'rtj_hardness_bhn': hardness_bhn,
+            'rtj_hardness_spec': hardness_spec,
             'ring_no': ring_from_desc,
             'confidence': 'HIGH' if (size and rating and rtj_moc) else 'MEDIUM',
         }
@@ -696,6 +791,18 @@ def _extract_size(desc: str) -> tuple[str | None, str]:
     m = re.match(r'^(\d+(?:\.\d+)?)\s*GASKET\b', desc, re.IGNORECASE)
     if m:
         return m.group(1) + '"', 'NPS'
+    # "1-1/2\"" / "2-1/2\"" — dash used as separator between whole number and fraction
+    m = re.search(r'(\d+)-(\d+/\d+)\s*["\']', desc)
+    if m:
+        norm = normalize_size(f"{m.group(1)} {m.group(2)}")
+        if norm:
+            return norm, 'NPS'
+    # "1.1/2\"" / "1.1/4\"" — period used as separator instead of space (customer data quality)
+    m = re.search(r'(\d+)\.(\d+/\d+)\s*["\']', desc)
+    if m:
+        norm = normalize_size(f"{m.group(1)} {m.group(2)}")
+        if norm:
+            return norm, 'NPS'
     # Fractional NPS: "1 1/2\"", "3/4\"", "1 1/2 \"" (must check before plain digit pattern)
     m = re.search(r'(\d+\s+\d+/\d+|\d+/\d+)\s*["\']', desc)
     if m:
@@ -723,13 +830,17 @@ def _nb_to_nps(nb: int, nb_map: dict) -> str:
     return nb_map.get(nb, f'{nb}"')
 
 
-_VALID_RATINGS = frozenset(('150', '300', '600', '900', '1500', '2500', '3000', '6000'))
+_VALID_RATINGS = frozenset(('150', '300', '600', '900', '1500', '2500', '3000', '5000', '6000', '10000', '15000'))
 
 
 def _extract_rating(desc: str) -> str | None:
     m = re.search(r'PN\s*(\d+)', desc, re.IGNORECASE)
     if m:
         return f"PN {m.group(1)}"
+    # API 6A pressure ratings: "API 5000", "API 10000", "API 15000"
+    m = re.search(r'\bAPI[-\s]?(\d{4,5})\b', desc, re.IGNORECASE)
+    if m and m.group(1) in _VALID_RATINGS:
+        return f"API {m.group(1)}"
     m = re.search(r'(?:CL|CLASS|#)\s*[-.\s]*(\d+)|(\d+)\s*(?:#|LBS?)\b', desc, re.IGNORECASE)
     if m:
         val = m.group(1) or m.group(2)
@@ -739,8 +850,7 @@ def _extract_rating(desc: str) -> str | None:
     m = re.search(r'\d+["\']\s*[-/]\s*(150|300|600|900|1500|2500|3000)', desc, re.IGNORECASE)
     if m:
         return f"{m.group(1)}#"
-    # Standalone rating class with no suffix (e.g. "DN80-150#" already handled but "DN80-150" not)
-    # Match only if preceded by a dash/space and followed by space/end (not part of larger number)
+    # Standalone rating class with no suffix (e.g. "DN80-150" not handled above)
     m = re.search(r'(?:[-\s])(150|300|600|900|1500|2500|3000)(?=\s|$|[,;#])', desc)
     if m:
         return f"{m.group(1)}#"
@@ -785,12 +895,20 @@ def _extract_thickness(desc: str) -> float | None:
 def _extract_standard(desc: str) -> str | None:
     if 'B16.47' in desc:
         return 'ASME B16.47 ( SERIES B )' if 'SERIES B' in desc else 'ASME B16.47'
-    if 'B16.20' in desc:
+    if 'B16.20' in desc or re.search(r'B16/A\b', desc, re.IGNORECASE):
         return 'ASME B16.20'
-    if 'B16.21' in desc or 'ASME' in desc or 'ANSI' in desc:
+    if 'B16.21' in desc:
         return 'ASME B16.21'
-    if re.search(r'EN\s*1514|BS\s*7531|DIN', desc):
+    if re.search(r'\bAPI\s*6A\b', desc):
+        return 'API 6A'
+    if re.search(r'\bAPI\s*6D\b', desc):
+        return 'API 6D'
+    if re.search(r'\bAPI\s*STD[-\s]?601\b', desc):
+        return 'API STD 601'
+    if re.search(r'EN\s*1514|BS\s*7531|\bDIN\b', desc):
         return 'EN 1514-1'
+    # "ANSI" alone → leave as None; let type-specific rules apply correct ASME standard
+    # "ASME" alone without specific B16 standard → return None for same reason
     return None
 
 

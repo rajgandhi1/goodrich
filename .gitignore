@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.DS_Store
+core/__pycache__/exporter.cpython-312.pyc
+core/__pycache__/exporter.cpython-312.pyc
+core/__pycache__/parser.cpython-312.pyc

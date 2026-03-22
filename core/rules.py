@@ -154,6 +154,11 @@ _RTJ_HARDNESS_DEFAULTS = {
     'SS316': 160, 'SS316L': 160, 'F316': 160, 'F316L': 160,
     'MONEL 400': 130,
     'INCONEL 625': 160,
+    'UNS S31600': 160,  # SS316
+    'UNS S31603': 160,  # SS316L
+    'UNS S30400': 160,  # SS304
+    # UNS S32205 (Duplex 2205) max 22 HRC — don't default BHN, let hardness_spec cover it
+    # UNS S32750 (Super Duplex) — same
 }
 
 _RTJ_MOC_ALIASES = {
@@ -178,7 +183,11 @@ _RTJ_MOC_ALIASES = {
 def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # Normalize MOC
     raw_moc = (item.get('moc') or '').strip().upper()
-    norm_moc = _RTJ_MOC_ALIASES.get(raw_moc, raw_moc) if raw_moc else None
+    # UNS materials pass through as-is
+    if raw_moc.startswith('UNS '):
+        norm_moc = raw_moc
+    else:
+        norm_moc = _RTJ_MOC_ALIASES.get(raw_moc, raw_moc) if raw_moc else None
     item['moc'] = norm_moc
 
     # Groove type — default OCT
@@ -187,11 +196,14 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         applied_defaults.append('groove type defaulted to OCT')
 
     # BHN hardness — default from MOC
-    if not item.get('rtj_hardness_bhn') and norm_moc:
+    if not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and norm_moc:
         bhn = _RTJ_HARDNESS_DEFAULTS.get(norm_moc)
         if bhn:
             item['rtj_hardness_bhn'] = bhn
+            item['rtj_hardness_spec'] = f"{bhn} BHN HARDNESS"
             applied_defaults.append(f'BHN hardness defaulted to {bhn} for {norm_moc}')
+    elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
+        item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
 
     # Ring number lookup
     if not item.get('ring_no'):
@@ -203,7 +215,12 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
             flags.append('Ring number not in lookup table — enter manually (check ASME B16.20)')
             item['ring_no'] = None
 
-    item['standard'] = item.get('standard') or 'ASME B16.20'
+    # API pressure class rating (API 5000, API 10000, etc.) → API 6A standard
+    rating = item.get('rating') or ''
+    if rating.startswith('API ') and item.get('standard') != 'API 6A':
+        item['standard'] = 'API 6A'
+    elif not item.get('standard'):
+        item['standard'] = 'ASME B16.20'
     item['face_type'] = None
     item['thickness_mm'] = None
 
@@ -357,6 +374,15 @@ def apply_rules(item: dict) -> dict:
         item['dimensions'] = dims
         if not dims and size_norm:
             flags.append('Size/rating not found in standard dimension table — may be non-standard')
+
+    # Business rule: NPS inch size + ASME # pressure class → standard must be ASME (not EN/DIN/BS)
+    if size_norm and '"' in str(size_norm) and is_asme:
+        current_std = item.get('standard') or ''
+        if current_std.startswith('EN') or current_std.startswith('DIN') or current_std.startswith('BS'):
+            if gasket_type in ('SPIRAL_WOUND', 'RTJ', 'KAMM'):
+                item['standard'] = 'ASME B16.20'
+            else:
+                item['standard'] = 'ASME B16.21'
 
     # --- Default: UoM ---
     if item.get('uom') == 'M':
