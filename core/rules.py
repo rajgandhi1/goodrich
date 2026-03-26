@@ -17,35 +17,118 @@ STATUS_MISSING = 'missing'
 CRITICAL_FIELDS = ['size', 'rating', 'moc']
 
 _MOC_ALIASES = {
+    # --- Non-asbestos fiber ---
     'COMPRESSED NON ASBESTOS FIBER': 'CNAF',
+    'COMPRESSED NON-ASBESTOS FIBER': 'CNAF',
+    'NON ASBESTOS FIBER': 'CNAF',
+    'NON-ASBESTOS FIBER': 'CNAF',
+    'NON ASBESTOS FIBRE': 'CNAF',
+    'NON ASB': 'CNAF',
+    'NAF': 'CNAF',
     'NON ASBESTOS': 'NON ASBESTOS',
     'CNAF': 'CNAF',
+    # --- Rubber types ---
     'NEOPRENE': 'NEOPRENE',
     'CHLOROPRENE': 'NEOPRENE',
+    'CHLOROPRENE RUBBER': 'NEOPRENE',
+    'POLYCHLOROPRENE': 'NEOPRENE',
+    'POLYCHLOROPRENE RUBBER': 'NEOPRENE',
     'NATURAL RUBBER': 'NATURAL RUBBER',
+    'NR': 'NATURAL RUBBER',
     'EPDM': 'EPDM',
-    'EXPANDED PTFE': 'EXPANDED PTFE',
-    'EPTFE': 'EXPANDED PTFE',
-    'PTFE ENVELOPED': 'NON ASBESTOS PTFE ENVELOPED',
-    'PTFE': 'PTFE',
-    'TEFLON': 'PTFE',
-    'VITON': 'VITON',
-    'FKM': 'VITON',
-    'GRAPHITE': 'GRAPHITE',
-    'GRAFOIL': 'GRAPHITE',
-    'FLEXIBLE GRAPHITE': 'GRAPHITE',
+    'EPDM RUBBER': 'EPDM',
+    'ETHYLENE PROPYLENE': 'EPDM',
     'BUTYL RUBBER': 'BUTYL RUBBER',
     'BUTYL': 'BUTYL RUBBER',
+    'IIR': 'BUTYL RUBBER',
     'NITRILE BUTADIENE RUBBER': 'NITRILE BUTADIENE RUBBER',
+    'NITRILE RUBBER': 'NITRILE BUTADIENE RUBBER',
     'NBR': 'NITRILE BUTADIENE RUBBER',
     'BUNA-N': 'BUNA-N',
     'NITRILE': 'NITRILE BUTADIENE RUBBER',
-    'ELASTOMER': 'ELASTOMER',
+    'HNBR': 'HNBR RUBBER',
+    'HNBR RUBBER': 'HNBR RUBBER',
+    'HYDROGENATED NITRILE': 'HNBR RUBBER',
+    'HYDROGENATED NBR': 'HNBR RUBBER',
+    'SILICONE': 'SILICONE RUBBER',
+    'SILICONE RUBBER': 'SILICONE RUBBER',
+    'VMQ': 'SILICONE RUBBER',
+    'VITON': 'VITON',
+    'FKM': 'VITON',
+    'FLUOROCARBON RUBBER': 'VITON',
+    'FLUOROELASTOMER': 'VITON',
+    'SBR': 'STYRENE-BUTADIENE RUBBER',
+    'STYRENE BUTADIENE RUBBER': 'STYRENE-BUTADIENE RUBBER',
+    'STYRENE-BUTADIENE RUBBER': 'STYRENE-BUTADIENE RUBBER',
+    'CHLOROSULFONATED RUBBER': 'CHLOROSULFONATED POLYETHYLENE RUBBER',
+    'CHLOROSULFONATED POLYETHYLENE RUBBER': 'CHLOROSULFONATED POLYETHYLENE RUBBER',
+    'CSM': 'CHLOROSULFONATED POLYETHYLENE RUBBER',
+    'HYPALON': 'CHLOROSULFONATED POLYETHYLENE RUBBER',
+    'POLYURETHANE': 'POLYURETHANE RUBBER',
+    'POLYURETHANE RUBBER': 'POLYURETHANE RUBBER',
+    'PU': 'POLYURETHANE RUBBER',
+    'THERMOPLASTIC POLYURETHANE RUBBER': 'THERMOPLASTIC POLYURETHANE RUBBER',
+    'TPU': 'THERMOPLASTIC POLYURETHANE RUBBER',
+    'THERMOPLASTIC RUBBER': 'THERMOPLASTIC RUBBER',
+    'TPR': 'THERMOPLASTIC RUBBER',
+    'POLYISOPRENE RUBBER': 'POLYISOPRENE RUBBER',
+    'POLYISOPRENE': 'POLYISOPRENE RUBBER',
+    'POLYISOBUTYLENE RUBBER': 'POLYISOBUTYLENE RUBBER',
+    'PIB': 'POLYISOBUTYLENE RUBBER',
+    'ETHYLENE-VINYL ACETATE RUBBER': 'ETHYLENE-VINYL ACETATE RUBBER',
+    'ETHYLENE VINYL ACETATE': 'ETHYLENE-VINYL ACETATE RUBBER',
+    'EVA': 'ETHYLENE-VINYL ACETATE RUBBER',
+    'ACRYLONITRILE BUTADIENE STYRENE RUBBER': 'ACRYLONITRILE BUTADIENE STYRENE RUBBER',
+    'ABS RUBBER': 'ACRYLONITRILE BUTADIENE STYRENE RUBBER',
+    'STYRENE-ETHYLENE-BUTYLENE-STYRENE RUBBER': 'STYRENE-ETHYLENE-BUTYLENE-STYRENE RUBBER',
+    'SEBS': 'STYRENE-ETHYLENE-BUTYLENE-STYRENE RUBBER',
+    'STYRENE-ISOPRENE-STYRENE RUBBER': 'STYRENE-ISOPRENE-STYRENE RUBBER',
+    'SIS': 'STYRENE-ISOPRENE-STYRENE RUBBER',
+    'POLYAMIDE RUBBER': 'POLYAMIDE RUBBER',
+    'NYLON RUBBER': 'NYLON RUBBER',
+    'NYLON': 'NYLON RUBBER',
     'WIRE REINFORCED NEOPRENE RUBBER': 'WIRE REINFORCED NEOPRENE RUBBER',
-    'SYNTHETIC FIBRE': 'SYNTHETIC FIBRE',
-    'CHLOROPRENE RUBBER': 'NEOPRENE',
+    'ELASTOMER': 'ELASTOMER',
+    # --- PTFE / Fluoropolymer ---
+    'PTFE': 'PTFE',
+    'TEFLON': 'PTFE',
+    'VIRGIN PTFE': 'PTFE',
+    'PURE PTFE': 'PTFE',
+    'EXPANDED PTFE': 'EXPANDED PTFE',
+    'EPTFE': 'EXPANDED PTFE',
+    'E-PTFE': 'EXPANDED PTFE',
+    'EXPENDED PTFE': 'EXPANDED PTFE',
     'REINFORCED PTFE': 'REINFORCED PTFE',
+    'PTFE ENVELOPED': 'NON ASBESTOS PTFE ENVELOPED',
     'POLYVINYLIDENE FLUORIDE': 'POLYVINYLIDENE FLUORIDE',
+    'PVDF': 'POLYVINYLIDENE FLUORIDE',
+    # --- Graphite ---
+    'GRAPHITE': 'GRAPHITE',
+    'GRAFOIL': 'GRAPHITE',
+    'FLEXIBLE GRAPHITE': 'GRAPHITE',
+    'EXFOLIATED GRAPHITE': 'GRAPHITE',
+    'EXPANDED GRAPHITE': 'GRAPHITE',
+    # --- Fiber / specialty ---
+    'ARAMID FIBER': 'ARAMID FIBER',
+    'ARAMID FIBRE': 'ARAMID FIBER',
+    'ARAMIDE FIBER': 'ARAMID FIBER',
+    'ARAMIDE FIBRE': 'ARAMID FIBER',
+    'ARAMID': 'ARAMID FIBER',
+    'KEVLAR': 'ARAMID FIBER',
+    'ARAMID FIBER WITH NBR BINDER': 'ARAMID FIBER WITH NBR BINDER',
+    'ARAMID FIBRE WITH NBR BINDER': 'ARAMID FIBER WITH NBR BINDER',
+    'ARAMID W/ NITRILE BINDER': 'ARAMID FIBER WITH NITRILE BINDER',
+    'ARAMID FIBER WITH NITRILE BINDER': 'ARAMID FIBER WITH NITRILE BINDER',
+    'NON-ASB SYNTHETIC FIBER WITH NITRILE BINDER': 'CNAF',
+    'SYNTHETIC FIBRE': 'SYNTHETIC FIBRE',
+    'CERAMIC FIBER': 'CERAMIC FIBER',
+    'CERAMIC FIBRE': 'CERAMIC FIBER',
+    'CERAMIC': 'CERAMIC FIBER',
+    'CORK': 'CORK',
+    'LEATHER': 'LEATHER',
+    'ASBESTOS': 'CAF',
+    'COMPRESSED ASBESTOS FIBER': 'CAF',
+    'CAF': 'CAF',
 }
 
 # Generic "RUBBER" is ambiguous — must ask customer
@@ -56,12 +139,82 @@ _AMBIGUOUS_MOC = {'RUBBER'}
 # ---------------------------------------------------------------------------
 
 _SW_RING_ALIASES = {
+    # --- Carbon/mild steel ---
     'CARBON STEEL': 'CS', 'C.S.': 'CS', 'MS': 'CS', 'M.S.': 'CS',
-    'CS': 'CS', 'SS304': 'SS304', 'SS316': 'SS316', 'SS316L': 'SS316L',
-    '304 SS': 'SS304', '316 SS': 'SS316',
-    'INCOLOY 825': 'INCOLOY 825', 'INCOLOY825': 'INCOLOY 825',
-    'INCOLOY 800': 'INCOLOY 800', 'INCOLOY800': 'INCOLOY 800',
+    'MILD STEEL': 'CS', 'CS': 'CS',
+    # --- SS300-series austenitic ---
+    'SS304': 'SS304', 'SS 304': 'SS304', '304': 'SS304', '304SS': 'SS304',
+    '304 SS': 'SS304', 'AISI 304': 'SS304', 'TYPE 304': 'SS304',
+    'SS304L': 'SS304L', 'SS 304L': 'SS304L', '304L': 'SS304L', 'AISI 304L': 'SS304L',
+    'SS310': 'SS310', 'SS 310': 'SS310', '310': 'SS310', 'AISI 310': 'SS310',
+    'SS310S': 'SS310S', 'SS 310S': 'SS310S', '310S': 'SS310S',
+    'SS316': 'SS316', 'SS 316': 'SS316', '316': 'SS316', '316SS': 'SS316',
+    '316 SS': 'SS316', 'AISI 316': 'SS316', 'TYPE 316': 'SS316',
+    'SS316L': 'SS316L', 'SS 316L': 'SS316L', '316L': 'SS316L', 'AISI 316L': 'SS316L',
+    'SS316H': 'SS316H', 'SS 316H': 'SS316H', '316H': 'SS316H',
+    'SS317': 'SS317', 'SS 317': 'SS317', '317': 'SS317',
+    'SS317L': 'SS317L', 'SS 317L': 'SS317L', '317L': 'SS317L',
+    'SS321': 'SS321', 'SS 321': 'SS321', '321': 'SS321',
+    'SS321H': 'SS321H', 'SS 321H': 'SS321H', '321H': 'SS321H',
+    'SS347': 'SS347', 'SS 347': 'SS347', '347': 'SS347',
+    'SS347H': 'SS347H', 'SS 347H': 'SS347H', '347H': 'SS347H',
+    # --- SS400-series ferritic/martensitic ---
+    'SS410': 'SS410', 'SS 410': 'SS410', '410': 'SS410',
+    'SS410S': 'SS410S', 'SS 410S': 'SS410S', '410S': 'SS410S',
+    # --- Nickel alloys ---
+    'INCOLOY 825': 'INCOLOY 825', 'INCOLOY825': 'INCOLOY 825', 'INCOLY 825': 'INCOLOY 825',
+    'INC 825': 'INCOLOY 825', 'INC825': 'INCOLOY 825', 'INCOLOY': 'INCOLOY 825',
+    'INCOLOY 800': 'INCOLOY 800', 'INCOLOY800': 'INCOLOY 800', 'INCOLY 800': 'INCOLOY 800',
+    'INC 800': 'INCOLOY 800', 'INC800': 'INCOLOY 800',
     'INCONEL 625': 'INCONEL 625', 'INCONEL625': 'INCONEL 625',
+    'INC 625': 'INCONEL 625', 'INC625': 'INCONEL 625', 'ALLOY 625': 'INCONEL 625',
+    'INCOLY 625': 'INCONEL 625', 'INCONEL': 'INCONEL 625',
+    'UNS N06625': 'INCONEL 625', 'N06625': 'INCONEL 625',
+    # --- Other nickel/high alloys ---
+    'HASTELLOY C276': 'HASTELLOY C276', 'HAST ALLOY C276': 'HASTELLOY C276',
+    'HASTELLOY C-276': 'HASTELLOY C276', 'C276': 'HASTELLOY C276',
+    'MONEL 400': 'MONEL 400', 'MONEL400': 'MONEL 400', 'MONEL': 'MONEL 400', 'ALLOY 400': 'MONEL 400',
+    'MONEL 800': 'MONEL 800', 'MONEL800': 'MONEL 800',
+    'ALLOY 20': 'ALLOY 20', 'ALLOY20': 'ALLOY 20', 'CARPENTER 20': 'ALLOY 20',
+    '6MO': '6MO', '6 MO': '6MO', '6-MO': '6MO', '6% MO': '6MO',
+    # --- UNS designations ---
+    'UNS S31254': 'UNS S31254', 'S31254': 'UNS S31254', 'UNS31254': 'UNS S31254', '31254': 'UNS S31254',
+    'UNS S31803': 'UNS S31803', 'S31803': 'UNS S31803', 'UNS31803': 'UNS S31803', '31803': 'UNS S31803',
+    'UNS S32205': 'UNS S32205', 'S32205': 'UNS S32205', 'UNS32205': 'UNS S32205', '32205': 'UNS S32205',
+    'UNS S32750': 'UNS S32750', 'S32750': 'UNS S32750', 'UNS32750': 'UNS S32750', '32750': 'UNS S32750',
+    # --- Titanium ---
+    'TITANIUM GR.2': 'TITANIUM GR.2', 'TITANIUM GRADE 2': 'TITANIUM GR.2', 'TI GR2': 'TITANIUM GR.2',
+    'TITANIUM GR.12': 'TITANIUM GR.12', 'TITANIUM GRADE 12': 'TITANIUM GR.12', 'TI GR12': 'TITANIUM GR.12',
+    # --- Non-ferrous metals ---
+    'CU-NI 70/30': 'CU-NI 70/30', 'CUNI 70/30': 'CU-NI 70/30', 'CU-NI/70-30': 'CU-NI 70/30',
+    'COPPER NICKEL 70/30': 'CU-NI 70/30',
+    'BRASS': 'BRASS',
+    'BRONZE': 'BRONZE',
+    'ALUMINIUM': 'ALUMINIUM', 'ALUMINUM': 'ALUMINIUM', 'AL': 'ALUMINIUM',
+    # --- Low temperature / special ---
+    'LTCS': 'LTCS', 'LOW TEMP CARBON STEEL': 'LTCS', 'LOW TEMPERATURE CARBON STEEL': 'LTCS',
+    # --- Soft iron (also used as winding/ring in some contexts) ---
+    'SOFT IRON': 'SOFT IRON', 'SI': 'SOFT IRON', 'S.I.': 'SOFT IRON',
+    # --- Duplex / super duplex (common aliases) ---
+    'DUPLEX': 'UNS S31803', '2205': 'UNS S32205',
+    'SUPER DUPLEX': 'UNS S32750', 'SDSS': 'UNS S32750', '2507': 'UNS S32750',
+}
+
+
+# Filler material codes/aliases for spiral wound and KAMM gaskets
+# Source: Customer Enq - Quote Data - Material .csv (Filler Material section)
+_SW_FILLER_ALIASES = {
+    'FG': 'GRAPHITE', 'FLEXIBLE GRAPHITE': 'GRAPHITE', 'GRAPHITE': 'GRAPHITE',
+    'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
+    'PTFE': 'PTFE', 'TEFLON': 'PTFE', 'VIRGIN PTFE': 'PTFE',
+    'CNAF': 'CNAF', 'NON ASBESTOS': 'CNAF', 'NAF': 'CNAF',
+    'CAF': 'CAF', 'ASBESTOS': 'CAF',
+    'ARA': 'ARAMID', 'ARAMID': 'ARAMID', 'ARAMID FIBER': 'ARAMID', 'ARAMID FIBRE': 'ARAMID',
+    'CER': 'CERAMIC', 'CERAMIC': 'CERAMIC', 'CERAMIC FIBER': 'CERAMIC', 'CERAMIC FIBRE': 'CERAMIC',
+    'MICA': 'MICA', 'FLEXIBLE MICA': 'MICA', 'PHLOGOPITE MICA': 'MICA',
+    'VERM': 'VERMICULITE', 'VERMICULITE': 'VERMICULITE',
+    'GF': 'GLASS FIBER', 'GLASS FIBER': 'GLASS FIBER', 'GLASS FIBRE': 'GLASS FIBER', 'FIBERGLASS': 'GLASS FIBER',
+    'NONE': None,
 }
 
 
@@ -70,6 +223,13 @@ def _norm_ring(raw: str | None) -> str | None:
         return None
     key = raw.strip().upper()
     return _SW_RING_ALIASES.get(key, key)
+
+
+def _norm_filler(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    key = raw.strip().upper()
+    return _SW_FILLER_ALIASES.get(key, key)
 
 
 def _size_nps_value(size_norm: str | None) -> float | None:
@@ -92,26 +252,18 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
 def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     """Apply spiral wound-specific defaults and validation (mutates item in place)."""
     winding_mat = item.get('sw_winding_material')
-    filler = item.get('sw_filler')
+    filler = _norm_filler(item.get('sw_filler'))
     outer_ring = _norm_ring(item.get('sw_outer_ring'))
     inner_ring = _norm_ring(item.get('sw_inner_ring'))
 
-    # Default outer ring to CS if not specified
-    if not outer_ring:
-        outer_ring = 'CS'
-        applied_defaults.append('outer ring defaulted to CS')
     if not filler:
         filler = 'GRAPHITE'
         applied_defaults.append('filler defaulted to GRAPHITE')
 
-    # Auto-add inner ring for large-diameter flanges (NPS ≥ 26")
     size_val = _size_nps_value(item.get('size_norm'))
-    if size_val is not None and size_val >= 26 and not inner_ring:
-        inner_ring = winding_mat or 'SS304'
-        applied_defaults.append(f'inner ring added ({inner_ring}) for NPS≥26"')
 
-    item['sw_outer_ring'] = outer_ring
-    item['sw_inner_ring'] = inner_ring
+    item['sw_outer_ring'] = outer_ring or None
+    item['sw_inner_ring'] = inner_ring or None
     item['sw_filler'] = filler
 
     # Handle "SS" without grade — ambiguous, cannot build valid MOC
@@ -153,40 +305,91 @@ _RTJ_HARDNESS_DEFAULTS = {
     'SOFTIRON': 90,
     'SOFTIRON GALVANISED': 90,
     'LOW CARBON STEEL': 120,
+    'LTCS': 120,
+    # SS300-series austenitic
     'SS304': 160, 'SS304L': 160, 'F304': 160,
-    'SS316': 160, 'SS316L': 160, 'F316': 160, 'F316L': 160,
-    'MONEL 400': 130,
+    'SS310': 160, 'SS310S': 160,
+    'SS316': 160, 'SS316L': 160, 'SS316H': 160, 'F316': 160, 'F316L': 160,
+    'SS317': 160, 'SS317L': 160,
+    'SS321': 160, 'SS321H': 160,
+    'SS347': 160, 'SS347H': 160,
+    # SS400-series ferritic/martensitic (harder)
+    'SS410': 170, 'SS410S': 150,
+    # Nickel alloys
+    'MONEL 400': 130, 'MONEL 800': 150,
     'INCONEL 625': 160,
-    'INCOLOY 825': 160,   # Incoloy 825 (UNS N08825) — max ~160 BHN
-    'INCOLOY 800': 160,   # Incoloy 800 (UNS N08800) — similar hardness
-    'UNS N08825': 160,
-    'UNS N08800': 160,
+    'HASTELLOY C276': 200,
+    'ALLOY 20': 160,
+    'INCOLOY 825': 160,
+    'INCOLOY 800': 160,
+    '6MO': 200,  # UNS S31254 (6% Mo super austenitic)
+    # UNS designations
+    'UNS N08825': 160,  # Incoloy 825
+    'UNS N08800': 160,  # Incoloy 800
     'UNS S31600': 160,  # SS316
     'UNS S31603': 160,  # SS316L
     'UNS S30400': 160,  # SS304
-    # UNS S32205 (Duplex 2205) max 22 HRC — don't default BHN, let hardness_spec cover it
+    'UNS N06625': 160,  # Inconel 625
+    'UNS S31254': 200,  # 6Mo
+    # Titanium
+    'TITANIUM GR.2': 200, 'TITANIUM GR.12': 200,
+    # Non-ferrous
+    'CU-NI 70/30': 100, 'BRASS': 80, 'BRONZE': 80, 'ALUMINIUM': 35,
+    # Duplex/super duplex — BHN not defaulted (hardness spec set per applicable spec)
+    # UNS S31803 / S32205 (Duplex 2205) max 22 HRC (~250 BHN) — flag for manual entry
     # UNS S32750 (Super Duplex) — same
 }
 
 _RTJ_MOC_ALIASES = {
-    'SOFT IRON': 'SOFTIRON',
-    'SOFTIRON': 'SOFTIRON',
+    # Soft iron
+    'SOFT IRON': 'SOFTIRON', 'SOFTIRON': 'SOFTIRON', 'SI': 'SOFTIRON', 'S.I.': 'SOFTIRON',
     'SOFT IRON GALVANISED': 'SOFTIRON GALVANISED',
     'SOFT IRON GALVANIZED': 'SOFTIRON GALVANISED',
     'GALVANISED SOFT IRON': 'SOFTIRON GALVANISED',
     'GALVANIZED SOFT IRON': 'SOFTIRON GALVANISED',
-    'LOW CARBON STEEL': 'LOW CARBON STEEL',
-    'LCS': 'LOW CARBON STEEL',
+    # Carbon/low-alloy steel
+    'LOW CARBON STEEL': 'LOW CARBON STEEL', 'LCS': 'LOW CARBON STEEL',
     'CARBON STEEL': 'LOW CARBON STEEL',
-    'SS316': 'SS316', 'SS 316': 'SS316', '316SS': 'SS316', '316 SS': 'SS316',
-    'SS304': 'SS304', 'SS 304': 'SS304', '304SS': 'SS304', '304 SS': 'SS304',
-    'SS316L': 'SS316L', 'SS 316L': 'SS316L',
+    'LTCS': 'LTCS', 'LOW TEMPERATURE CARBON STEEL': 'LTCS', 'LOW TEMP CARBON STEEL': 'LTCS',
+    # SS austenitic
+    'SS304': 'SS304', 'SS 304': 'SS304', '304SS': 'SS304', '304 SS': 'SS304', 'AISI 304': 'SS304',
+    'SS304L': 'SS304L', 'SS 304L': 'SS304L', '304L': 'SS304L',
+    'SS310': 'SS310', 'SS 310': 'SS310', 'SS310S': 'SS310S', 'SS 310S': 'SS310S',
+    'SS316': 'SS316', 'SS 316': 'SS316', '316SS': 'SS316', '316 SS': 'SS316', 'AISI 316': 'SS316',
+    'SS316L': 'SS316L', 'SS 316L': 'SS316L', '316L': 'SS316L',
+    'SS316H': 'SS316H', 'SS 316H': 'SS316H', '316H': 'SS316H',
+    'SS317': 'SS317', 'SS317L': 'SS317L',
+    'SS321': 'SS321', 'SS321H': 'SS321H',
+    'SS347': 'SS347', 'SS347H': 'SS347H',
+    'SS410': 'SS410', 'SS410S': 'SS410S',
     'F304': 'F304', 'F316': 'F316', 'F316L': 'F316L',
-    'MONEL': 'MONEL 400', 'MONEL 400': 'MONEL 400',
-    'INCONEL': 'INCONEL 625', 'INCONEL 625': 'INCONEL 625',
-    'INCOLOY 825': 'INCOLOY 825', 'INCOLOY825': 'INCOLOY 825',
-    'INCOLOY': 'INCOLOY 825',  # "Incoloy" alone most commonly means 825 in RTJ context
-    'INCOLOY 800': 'INCOLOY 800', 'INCOLOY800': 'INCOLOY 800',
+    # Nickel alloys
+    'MONEL': 'MONEL 400', 'MONEL 400': 'MONEL 400', 'MONEL400': 'MONEL 400', 'ALLOY 400': 'MONEL 400',
+    'MONEL 800': 'MONEL 800', 'MONEL800': 'MONEL 800',
+    'INCONEL': 'INCONEL 625', 'INCONEL 625': 'INCONEL 625', 'INCONEL625': 'INCONEL 625',
+    'INC 625': 'INCONEL 625', 'INC625': 'INCONEL 625',
+    'INCOLOY 825': 'INCOLOY 825', 'INCOLOY825': 'INCOLOY 825', 'INCOLY 825': 'INCOLOY 825',
+    'INCOLOY': 'INCOLOY 825',   # bare "Incoloy" is most commonly 825 in RTJ context
+    'INCOLOY 800': 'INCOLOY 800', 'INCOLOY800': 'INCOLOY 800', 'INCOLY 800': 'INCOLOY 800',
+    'HASTELLOY C276': 'HASTELLOY C276', 'HAST ALLOY C276': 'HASTELLOY C276', 'C276': 'HASTELLOY C276',
+    'ALLOY 20': 'ALLOY 20', 'ALLOY20': 'ALLOY 20', 'CARPENTER 20': 'ALLOY 20',
+    '6MO': '6MO', '6 MO': '6MO',
+    # UNS numbers
+    'UNS N06625': 'INCONEL 625', 'N06625': 'INCONEL 625',
+    'UNS S31254': 'UNS S31254', 'S31254': 'UNS S31254',
+    'UNS S31803': 'UNS S31803', 'S31803': 'UNS S31803',
+    'UNS S32205': 'UNS S32205', 'S32205': 'UNS S32205',
+    'UNS S32750': 'UNS S32750', 'S32750': 'UNS S32750',
+    # Duplex aliases
+    'DUPLEX': 'UNS S31803', '2205': 'UNS S32205',
+    'SUPER DUPLEX': 'UNS S32750', 'SDSS': 'UNS S32750', '2507': 'UNS S32750',
+    # Titanium
+    'TITANIUM GR.2': 'TITANIUM GR.2', 'TI GR2': 'TITANIUM GR.2', 'TITANIUM GRADE 2': 'TITANIUM GR.2',
+    'TITANIUM GR.12': 'TITANIUM GR.12', 'TI GR12': 'TITANIUM GR.12', 'TITANIUM GRADE 12': 'TITANIUM GR.12',
+    # Non-ferrous
+    'CU-NI 70/30': 'CU-NI 70/30', 'CUNI 70/30': 'CU-NI 70/30', 'COPPER NICKEL 70/30': 'CU-NI 70/30',
+    'BRASS': 'BRASS', 'BRONZE': 'BRONZE',
+    'ALUMINIUM': 'ALUMINIUM', 'ALUMINUM': 'ALUMINIUM',
 }
 
 
@@ -241,21 +444,16 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
 def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
     winding_mat = item.get('sw_winding_material')
-    filler = item.get('sw_filler') or 'GRAPHITE'
+    filler = _norm_filler(item.get('sw_filler')) or 'GRAPHITE'
     outer_ring = _norm_ring(item.get('sw_outer_ring'))
     inner_ring = _norm_ring(item.get('sw_inner_ring'))
 
     if not filler:
         applied_defaults.append('filler defaulted to GRAPHITE')
-    # Default outer ring to CS only for NPS-rated KAMM (not custom OD/ID)
-    is_od_id = item.get('size_type') == 'OD_ID'
-    if not outer_ring and not is_od_id:
-        outer_ring = 'CS'
-        applied_defaults.append('outer ring defaulted to CS')
 
     item['sw_filler'] = filler
-    item['sw_outer_ring'] = outer_ring
-    item['sw_inner_ring'] = inner_ring
+    item['sw_outer_ring'] = outer_ring or None
+    item['sw_inner_ring'] = inner_ring or None
 
     if not item.get('moc') and winding_mat:
         if inner_ring and outer_ring:
