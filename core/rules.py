@@ -418,6 +418,16 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
         item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
 
+    # Normalize ring_no: "BX 156" / "R 24" / "RX53" / "R14" → "BX-156" / "R-24" / "RX-53" / "R-14"
+    if item.get('ring_no'):
+        rn = str(item['ring_no']).strip()
+        # Space separator: "BX 156" → "BX-156"
+        rn = re.sub(r'\b(BX|RX|R)\s+(\d+)\b', r'\1-\2', rn, flags=re.IGNORECASE)
+        # No separator: "R14" → "R-14", "BX156" → "BX-156"
+        rn = re.sub(r'\b(BX|RX)(\d+)\b', r'\1-\2', rn, flags=re.IGNORECASE)
+        rn = re.sub(r'\bR(\d+)\b', r'R-\1', rn, flags=re.IGNORECASE)
+        item['ring_no'] = rn.upper()
+
     # Ring number lookup
     if not item.get('ring_no'):
         ring = lookup_rtj_ring(item.get('size_norm'), item.get('rating'))
@@ -506,11 +516,34 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     item['standard'] = item.get('standard') or 'ASME B16.5'
 
 
+def _sanitize_llm_nulls(item: dict) -> dict:
+    """Convert LLM-returned string 'null' / 'none' / '' to actual None.
+    Also strips unit suffixes from numeric fields (e.g. '4.5MM' → 4.5).
+    """
+    _NULL_STRINGS = {'null', 'none', 'n/a', 'na', ''}
+    _NUMERIC_FIELDS = ('thickness_mm', 'od_mm', 'id_mm', 'rtj_hardness_bhn')
+    for key, val in item.items():
+        if not isinstance(val, str):
+            continue
+        stripped = val.strip()
+        if stripped.lower() in _NULL_STRINGS:
+            item[key] = None
+        elif key in _NUMERIC_FIELDS:
+            # Strip units and try to parse as float: "4.5MM" → 4.5, "3 THK" → 3
+            cleaned = re.sub(r'\s*(?:MM|THK|INCH|IN|M)\s*$', '', stripped, flags=re.IGNORECASE).strip()
+            try:
+                item[key] = float(cleaned)
+            except ValueError:
+                item[key] = None
+    return item
+
+
 def apply_rules(item: dict) -> dict:
     """
     Normalize, apply defaults, validate, and assign status + flags.
     Returns updated item dict.
     """
+    _sanitize_llm_nulls(item)
     flags = []
     applied_defaults = []
 
@@ -600,7 +633,12 @@ def apply_rules(item: dict) -> dict:
     if gasket_type == 'RTJ':
         crit = ['size', 'rating', 'moc', 'ring_no']
     elif gasket_type == 'KAMM':
-        crit = ['size', 'rating', 'sw_winding_material']
+        # OD/ID KAMM: check od_mm + id_mm + moc (moc built from sw_winding_material by rules engine)
+        # NPS KAMM: check size + rating + moc
+        if item.get('size_type') == 'OD_ID':
+            crit = ['od_mm', 'id_mm', 'moc']
+        else:
+            crit = ['size', 'rating', 'moc']
     elif gasket_type == 'DJI':
         crit = ['od_mm', 'id_mm', 'thickness_mm', 'moc']
     elif gasket_type in ('ISK', 'ISK_RTJ'):

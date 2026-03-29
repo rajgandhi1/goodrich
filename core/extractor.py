@@ -114,13 +114,46 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
             needs_llm.append(desc)
 
     # Pass 2: batch LLM for ambiguous items
+    # Keep regex results indexed so we can guard against LLM type downgrades
+    regex_cache = {desc: _regex_extract(desc) for desc in needs_llm}
+
+    _NON_DEFAULT_TYPES = {'SPIRAL_WOUND', 'RTJ', 'KAMM', 'DJI', 'ISK', 'ISK_RTJ'}
+
     if needs_llm:
         client = _get_groq_client()
         for batch_start in range(0, len(needs_llm), _BATCH_SIZE):
             batch = needs_llm[batch_start:batch_start + _BATCH_SIZE]
             llm_results = _llm_extract_batch(client, batch) if client else [None] * len(batch)
             for desc, llm_result in zip(batch, llm_results):
-                cache[desc] = llm_result if llm_result else _regex_extract(desc)
+                regex_result = regex_cache[desc]
+                if llm_result:
+                    regex_type = regex_result.get('gasket_type', 'SOFT_CUT')
+                    # Always trust regex for non-default types — prevents DJI→SPW, SPW→RTJ
+                    # lateral misclassifications by LLM
+                    if regex_type in _NON_DEFAULT_TYPES:
+                        llm_result['gasket_type'] = regex_type
+                    # Back-fill regex-extracted SW/RTJ components that LLM missed
+                    _sw_fields = ('sw_winding_material', 'sw_filler', 'sw_inner_ring', 'sw_outer_ring')
+                    for field in _sw_fields:
+                        if regex_result.get(field) and not llm_result.get(field):
+                            llm_result[field] = regex_result[field]
+                    if regex_result.get('ring_no') and not llm_result.get('ring_no'):
+                        llm_result['ring_no'] = regex_result['ring_no']
+                    # Back-fill OD/ID dimensions for KAMM/DJI when LLM missed them
+                    for dim_field in ('od_mm', 'id_mm'):
+                        if regex_result.get(dim_field) and not llm_result.get(dim_field):
+                            llm_result[dim_field] = regex_result[dim_field]
+                    if regex_result.get('size_type') == 'OD_ID' and llm_result.get('size_type') != 'OD_ID':
+                        llm_result['size_type'] = 'OD_ID'
+                        if regex_result.get('size') and not llm_result.get('od_mm'):
+                            llm_result['size'] = regex_result['size']
+                    # Back-fill size and rating when LLM returns null but regex found them
+                    for field in ('size', 'size_type', 'rating'):
+                        if regex_result.get(field) and not llm_result.get(field):
+                            llm_result[field] = regex_result[field]
+                    cache[desc] = llm_result
+                else:
+                    cache[desc] = regex_result
                 done += 1
                 if progress_cb:
                     progress_cb(done, total)
@@ -218,16 +251,27 @@ _THICKNESS_PATTERN = re.compile(
     re.IGNORECASE
 )
 _OD_ID_PATTERN = re.compile(
-    r'OD\s*[=]?\s*(\d+(?:\.\d+)?)\s*(?:MM)?\s*[Xx×,]?\s*ID\s*[=]?\s*(\d+(?:\.\d+)?)',
+    # Format 1: label before value — "OD 584MM X ID 510MM" / "O/D 584 X I/D 510"
+    r'O/?D\s*[=]?\s*(\d+(?:\.\d+)?)\s*(?:MM)?\s*[Xx×,]?\s*I/?D\s*[=]?\s*(\d+(?:\.\d+)?)'
+    # Format 2: value before label — "1650 mm O/D x 1550 mm I/D"
+    r'|(\d+(?:\.\d+)?)\s*(?:MM)?\s*O/?D\s*[Xx×,\s]+(\d+(?:\.\d+)?)\s*(?:MM)?\s*I/?D',
     re.IGNORECASE
 )
+
+
+def _od_id_values(m) -> tuple[float, float]:
+    """Extract (OD, ID) from an _OD_ID_PATTERN match, handling both format alternatives."""
+    if m.group(1) is not None:
+        return float(m.group(1)), float(m.group(2))   # Format 1: OD, ID
+    return float(m.group(3)), float(m.group(4))        # Format 2: OD, ID
 
 # ---------------------------------------------------------------------------
 # Spiral wound detection & extraction helpers
 # ---------------------------------------------------------------------------
 
 _SW_DETECT_PATTERN = re.compile(
-    r'\bSPIRAL\s*WOUND\b'                             # explicit "SPIRAL WOUND"
+    r'\bSPIRAL[-\s]*WOUND\b'                          # "SPIRAL WOUND" or "SPIRAL-WOUND" (hyphenated)
+    r'|SPIRAL-WOUND'                                  # concatenated without word boundary (e.g. "SS-GRAPHITESPIRAL-WOUND")
     r'|\bSPIRAL\s*(?:SEAL|WINDING)\b'                # "SPIRAL SEAL" / "SPIRAL WINDING"
     r'|\bSPIRL\s*WOUND\b'                             # common typo "SPIRL WOUND"
     r'|\bSPRIL\s*WOUND\b'                             # common typo "SPRIL WOUND"
@@ -262,16 +306,16 @@ _KAMM_DETECT_PATTERN = re.compile(
 )
 
 _DJI_DETECT_PATTERN = re.compile(
-    r'\bDOUBLE\s*JACKET\b'
+    r'\bDOUBLE\s*JACKET(?:ED)?\b'                    # "DOUBLE JACKET" or "DOUBLE JACKETED"
     r'|\bDJI\b'
-    r'|\bJACKET\s*GASKET\b'
-    r'|\bCOPPER\s*JACKET\b',
+    r'|\bJACKET(?:ED)?\s*GASKET\b'                   # "JACKET GASKET" or "JACKETED GASKET"
+    r'|\bCOPPER\s*JACKET(?:ED)?\b',
     re.IGNORECASE,
 )
 
 _ISK_DETECT_PATTERN = re.compile(
-    r'\bINSULAT(?:ING|ION)\s*GASKET\b'
-    r'|\bINSULATING\s*(?:GASKET\s*)?KIT\b'
+    r'\bINSULAT(?:ING|ED|ION)\s*GASKETS?(?![A-Za-z])'  # "Insulating/Insulated Gasket(s)" (allows trailing _, digit, space)
+    r'|\bINSULAT(?:ING|ED)\s*(?:GASKET\s*)?KITS?\b'    # "Insulating/Insulated Kit(s)" / "Insulating Gasket Kit"
     r'|\bISK\b'
     r'|\bGSKT\s*INSUL',
     re.IGNORECASE,
@@ -294,7 +338,8 @@ _SW_WINDING_PATTERN = re.compile(
     r'|ALLOY\s*20|AL\s*6XN'
     r'|LTCS|LCS'                                       # Low Temp / Low Carbon Steel (ring material)
     r'|DUPLEX|TITANIUM|ZIRCONIUM|TANTALUM'
-    r'|STAINLESS\s*STEEL)\b',                          # generic — must stay last; triggers grade flag
+    r'|STAINLESS\s*STEEL'                              # generic — triggers grade flag
+    r'|UNS\s+[A-Z]\d+)\b',                            # UNS materials e.g. UNS N06625, UNS N08825
     re.IGNORECASE,
 )
 _SW_FILLER_PATTERN = re.compile(
@@ -320,6 +365,7 @@ _SW_OUTER_RING_PATTERN = re.compile(
 _SW_INNER_RING_PATTERN = re.compile(
     r'(?:\bINR\b|\bINNER\s+RING\b|\bINNER\s+CENTERING)\s*[,:]?\s*'
     r'(SS\s*\d{3}L?(?:/\d{3}L?)?|SS-\d{3}L?|CS|CARBON\s*STEEL|LTCS|LCS|304\s*SS|316\s*SS|\d{3}L?-SS|ALLOY\s*20|INCONEL\s*\d+|INCOLOY\s*\d+|UNS\s*[A-Z]\d+)'
+    r'|\bINNER\s+RING\s+(\d{3}L?)\s+S\b'                     # "INNER RING 304 S" (S = stainless shorthand)
     r'|\b(SS\s*\d{3}L?|SS-\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS|CS|LTCS|LCS)\s+IR\b'  # "SS316 IR", "316-SS IR"
     r'|\bSS\s+IR\b'                                           # "SS IR" generic inner ring
     r'|\bW/IOR\s+(CS|SS\s*\d{3}L?|SS-\d{3}L?|\d{3}L?\s*SS|\d{3}L?-SS)\b'  # "W/IOR SS316"
@@ -435,6 +481,10 @@ def _extract_sw_components(desc: str) -> dict:
     m = _SW_WINDING_PATTERN.search(masked)
     if m:
         winding_mat = _norm_sw_material(m.group(1))
+    # If no explicit winding but inner ring found, infer winding = inner ring
+    # (common in API 601 descriptions: "SPIRAL WOUND ... INNER RING 304 S" implies SS304 winding)
+    if winding_mat is None and inner_ring is not None and inner_ring not in ('CS',):
+        winding_mat = inner_ring
 
     return {
         'sw_winding_material': winding_mat,
@@ -523,8 +573,8 @@ def _extract_rtj_moc(desc: str) -> str | None:
     for raw, canon in _RTJ_MOC_MAP.items():
         if raw.upper() in desc:
             return canon
-    # "STAINLESS STEEL" + grade number (e.g. "stainless steel material 316 S", "inox 316")
-    if 'STAINLESS STEEL' in desc or 'INOX' in desc:
+    # "STAINLESS STEEL" / "INOX" / "ACIER" (French for steel) + grade number
+    if 'STAINLESS STEEL' in desc or 'INOX' in desc or 'ACIER' in desc:
         if re.search(r'\b316L\b', desc):
             return 'SS316L'
         if re.search(r'\b316\b', desc):
@@ -603,6 +653,20 @@ def _extract_dji_dims(desc: str) -> tuple[float | None, float | None, float | No
         od = float(m.group(2).replace(',', '.'))
         thk = float(m.group(3).replace(',', '.'))
         return id_, od, thk
+    # Explicit "OD nnn ... ID nnn" / "O/D nnn ... I/D nnn" notation
+    od_m = re.search(r'\bO/?D\s*(\d+(?:[.,]\d+)?)', desc, re.IGNORECASE)
+    id_m = re.search(r'\bI/?D\s*(\d+(?:[.,]\d+)?)', desc, re.IGNORECASE)
+    if od_m and id_m:
+        od = float(od_m.group(1).replace(',', '.'))
+        id_ = float(id_m.group(1).replace(',', '.'))
+        # Thickness: find a number adjacent to MM that is neither OD nor ID
+        thk = None
+        for m2 in re.finditer(r'\b(\d+(?:[.,]\d+)?)\s*(?:[Xx×]\s*)?MM\b', desc, re.IGNORECASE):
+            val = float(m2.group(1).replace(',', '.'))
+            if val != od and val != id_:
+                thk = val
+                break
+        return id_, od, thk
     return None, None, None
 
 
@@ -621,6 +685,9 @@ def _extract_dji_moc(desc: str) -> str:
 
 def _regex_extract(description: str) -> dict:
     desc = description.upper()
+    # Normalize Unicode dashes/minuses (U+2212 minus, en-dash, em-dash) to ASCII hyphen
+    # so patterns like "OR−SS316" are treated the same as "OR-SS316"
+    desc = desc.replace('\u2212', '-').replace('\u2013', '-').replace('\u2014', '-')
 
     _base_sw_none = {'sw_winding_material': None, 'sw_filler': None,
                      'sw_inner_ring': None, 'sw_outer_ring': None}
@@ -648,11 +715,12 @@ def _regex_extract(description: str) -> dict:
     if _KAMM_DETECT_PATTERN.search(desc):
         od_id = _OD_ID_PATTERN.search(desc)
         if od_id:
+            od_mm, id_mm = _od_id_values(od_id)
             kamm = _extract_kamm_components(desc)
             return {
-                'size': f"OD {od_id.group(1)}MM x ID {od_id.group(2)}MM",
+                'size': f"OD {od_mm}MM x ID {id_mm}MM",
                 'size_type': 'OD_ID',
-                'od_mm': float(od_id.group(1)), 'id_mm': float(od_id.group(2)),
+                'od_mm': od_mm, 'id_mm': id_mm,
                 'rating': None,
                 'gasket_type': 'KAMM',
                 'moc': None,  # built from sw_winding_material by rules engine
@@ -661,7 +729,7 @@ def _regex_extract(description: str) -> dict:
                 'standard': None,  # no standard for custom OD/ID KAMM
                 'special': _extract_special(desc),
                 **kamm, **_base_rtj_none,
-                'confidence': 'MEDIUM',
+                'confidence': 'HIGH' if (od_mm and id_mm and kamm.get('sw_winding_material')) else 'MEDIUM',
             }
         size, size_type = _extract_size(desc)
         kamm = _extract_kamm_components(desc)
@@ -738,10 +806,11 @@ def _regex_extract(description: str) -> dict:
     if _SW_DETECT_PATTERN.search(desc):
         size, size_type = _extract_size(desc)
         sw = _extract_sw_components(desc)
+        rating = _extract_rating(desc)
         return {
             'size': size, 'size_type': size_type,
             'od_mm': None, 'id_mm': None,
-            'rating': _extract_rating(desc),
+            'rating': rating,
             'gasket_type': 'SPIRAL_WOUND',
             'moc': None,
             'face_type': None,
@@ -749,17 +818,18 @@ def _regex_extract(description: str) -> dict:
             'standard': _extract_standard(desc),
             'special': _extract_special(desc),
             **sw, **_base_rtj_none,
-            'confidence': 'HIGH' if (size and _extract_rating(desc) and sw['sw_winding_material']) else 'MEDIUM',
+            'confidence': 'HIGH' if (size and rating and sw['sw_winding_material']) else 'MEDIUM',
         }
 
     # --- Priority 6: OD × ID soft cut ---
     od_id = _OD_ID_PATTERN.search(desc)
     if od_id:
+        od_mm, id_mm = _od_id_values(od_id)
         return {
-            'size': f"OD {od_id.group(1)}MM x ID {od_id.group(2)}MM",
+            'size': f"OD {od_mm}MM x ID {id_mm}MM",
             'size_type': 'OD_ID',
-            'od_mm': float(od_id.group(1)),
-            'id_mm': float(od_id.group(2)),
+            'od_mm': od_mm,
+            'id_mm': id_mm,
             'rating': _extract_rating(desc),
             'gasket_type': 'SOFT_CUT',
             'moc': _extract_moc(desc),
@@ -799,8 +869,8 @@ def _extract_size(desc: str) -> tuple[str | None, str]:
     m = re.search(r'(\d+(?:\.\d+)?)\s*(?:NB|DN)\b', desc, re.IGNORECASE)
     if m:
         return _nb_to_nps(int(float(m.group(1))), NB_TO_NPS), 'NB'
-    # "NPS 2", "NPS 1.5" — NPS prefix with space (common in enquiry descriptions)
-    m = re.search(r'\bNPS\s+(\d+(?:\.\d+)?)\b', desc, re.IGNORECASE)
+    # "NPS 2", "NPS 1.5", "NPS: 16" — NPS prefix with optional colon
+    m = re.search(r'\bNPS\s*:?\s*(\d+(?:\.\d+)?)\b', desc, re.IGNORECASE)
     if m:
         return m.group(1) + '"', 'NPS'
     # "24GASKET", "32GASKET" — bare number at start of KAMM/SPW descriptions
@@ -834,8 +904,17 @@ def _extract_size(desc: str) -> tuple[str | None, str]:
     if m:
         return m.group(1) + '"', 'NPS'
     # "8, GASKET (RTJ)..." or "4, GASKET (RTJ)..." — leading NPS before comma
-    _VALID_NPS = {'0.5','0.75','1','1.25','1.5','2','2.5','3','4','6','8','10','12','14','16','18','20','24','26','28','30','32'}
+    _VALID_NPS = {'0.5','0.75','1','1.25','1.5','2','2.5','3','3.5','4','5','6','8','10','12','14','16','18','20','24','26','28','30','32','36','42','48'}
     m = re.match(r'^(\d+(?:\.\d+)?)\s*,', desc)
+    if m and m.group(1) in _VALID_NPS:
+        return m.group(1) + '"', 'NPS'
+    # "rating,size,description" structured CSV — e.g. "150#,0.75,Neoprene" / "300 RF,0.75,API 601..."
+    m = re.search(r'[^,]+,\s*(\d+(?:\.\d+)?)\s*,', desc)
+    if m and m.group(1) in _VALID_NPS:
+        return m.group(1) + '"', 'NPS'
+    # "4300#SPIRAL WOUND" / "2150#SPIRAL" — NPS size digit(s) mashed directly with rating+#
+    # Match: (valid NPS size)(valid rating class)# at word boundary
+    m = re.search(r'\b(\d+(?:\.\d+)?)(150|300|600|900|1500|2500|3000)#', desc, re.IGNORECASE)
     if m and m.group(1) in _VALID_NPS:
         return m.group(1) + '"', 'NPS'
     return None, 'UNKNOWN'
@@ -857,15 +936,25 @@ def _extract_rating(desc: str) -> str | None:
     m = re.search(r'\bAPI[-\s]?(\d{4,5})\b', desc, re.IGNORECASE)
     if m and m.group(1) in _VALID_RATINGS:
         return f"API {m.group(1)}"
-    m = re.search(r'(?:CL|CLASS|#)\s*[-.\s]*(\d+)|(\d+)\s*(?:#|LBS?)\b', desc, re.IGNORECASE)
+    # "CL150", "CLASS 300", "#600", "150#", "300LB", "150 LBS"
+    # Note: trailing \b after # fails at end-of-string since # is non-word; use # as standalone delimiter
+    m = re.search(r'(?:CL|CLASS|#)\s*[-.\s]*(\d+)|(\d+)\s*#|(\d+)\s*LBS?\b', desc, re.IGNORECASE)
     if m:
-        val = m.group(1) or m.group(2)
+        val = m.group(1) or m.group(2) or m.group(3)
         if val in _VALID_RATINGS:
             return f"{val}#"
+    # "4300#" / "2150#" — mashed size+rating; extract the trailing rating part
+    m = re.search(r'\b\d+(?:\.\d+)?(150|300|600|900|1500|2500|3000)#', desc, re.IGNORECASE)
+    if m:
+        return f"{m.group(1)}#"
     # "16\"-600 RF" or "6\"/150" — SIZE-RATING dash/slash format
     m = re.search(r'\d+["\']\s*[-/]\s*(150|300|600|900|1500|2500|3000)', desc, re.IGNORECASE)
     if m:
         return f"{m.group(1)}#"
+    # "300/600RF" / "300/600" — dual rating; use the higher (more conservative) value
+    m = re.search(r'\b(150|300|600|900|1500|2500)/(300|600|900|1500|2500|3000)\b', desc, re.IGNORECASE)
+    if m:
+        return f"{m.group(2)}#"  # group(2) is always the higher value in this pattern
     # Standalone rating class with no suffix (e.g. "DN80-150" not handled above)
     m = re.search(r'(?:[-\s])(150|300|600|900|1500|2500|3000)(?=\s|$|[,;#])', desc)
     if m:
