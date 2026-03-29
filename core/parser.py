@@ -11,7 +11,7 @@ import openpyxl
 def parse_email_text(text: str) -> list[dict]:
     """Extract line items from pasted email body text."""
     items = []
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    lines = _merge_continuation_lines([l.strip() for l in text.splitlines() if l.strip()])
     for line in lines:
         item = _parse_line(line)
         if item:
@@ -21,6 +21,36 @@ def parse_email_text(text: str) -> list[dict]:
         if not item.get('line_no'):
             item['line_no'] = i
     return items
+
+
+def _merge_continuation_lines(lines: list[str]) -> list[str]:
+    """Merge lines that are mid-sentence continuations of the previous line.
+
+    Handles cases where a long gasket description wraps across two lines,
+    e.g. Excel cell content copied as text where a description ends with
+    'OUTER RING' and the next line starts with 'MATERIAL: Carbon Steel...'.
+    """
+    merged = []
+    for line in lines:
+        if not merged:
+            merged.append(line)
+            continue
+        prev = merged[-1]
+        # A line is a continuation if:
+        # 1. It does NOT start with a digit (new serial number), AND
+        # 2. The previous line ended with a comma, OR ended with RING/MATERIAL/OUTER/INNER
+        #    (cut mid-phrase), OR the current line starts with a field-label ("WORD:") pattern
+        starts_with_number = bool(re.match(r'^\d', line))
+        prev_ends_mid = (
+            prev.endswith(',')
+            or re.search(r'\b(?:OUTER\s*RING|INNER\s*RING|OUTER|RING|MATERIAL)\s*$', prev, re.IGNORECASE)
+        )
+        curr_is_field_continuation = bool(re.match(r'^[A-Z][A-Z\s]+:\s*\S', line))
+        if not starts_with_number and (prev_ends_mid or curr_is_field_continuation):
+            merged[-1] = prev + ' ' + line
+        else:
+            merged.append(line)
+    return merged
 
 
 def _parse_line(line: str) -> "dict | None":
@@ -79,9 +109,10 @@ def _looks_like_gasket(text: str) -> bool:
     text_lower = text.lower()
     # Must contain gasket-related keyword or size indicator
     gasket_kws = ['gasket', 'gkt', 'rubber', 'ptfe', 'neoprene', 'epdm', 'cnaf',
-                  'viton', 'graphite', 'pn', '150#', '300#', '600#', 'asme', 'ansi',
+                  'viton', 'graphite', 'grph', 'graph fill', 'pn', '150#', '300#', '600#',
+                  'asme', 'ansi', 'b16.20', 'b16.21',
                   'rtj', 'r.t.j', 'ring joint', 'joint tore', 'tore', 'spiral', 'winding',
-                  'spw', 'sw gasket', 'kammprofile', 'camprofile', 'insulating gasket',
+                  'spw', 'wnd', 'sw gasket', 'kammprofile', 'camprofile', 'insulating gasket',
                   'isk', 'soft iron', 'softiron', 'octagonal', 'oval ring']
     has_kw = any(k in text_lower for k in gasket_kws)
     has_size = bool(re.search(r'\d+["\']|\d+\s*(?:nb|nps|inch|mm)', text_lower, re.IGNORECASE))
