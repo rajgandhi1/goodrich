@@ -60,7 +60,7 @@ if groq_key:
     import core.extractor as _ext
     if os.environ.get('GROQ_API_KEY') != groq_key:
         os.environ['GROQ_API_KEY'] = groq_key
-        _ext._groq_client = None  # reset cached client when key changes
+        _ext._groq_client = None
     st.sidebar.success('Groq API key set')
 else:
     st.sidebar.info('No Groq key — using rule-based extraction')
@@ -105,11 +105,10 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
         st.session_state.results = processed
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)
-        st.session_state.pop('row_multiselect', None)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helper — build table rows (no Select column; added separately)
 # ---------------------------------------------------------------------------
 def _build_rows(items):
     rows = []
@@ -118,7 +117,6 @@ def _build_rows(items):
         flags = item.get('flags', [])
         defaults = item.get('applied_defaults', [])
         parts = list(flags) + [f'[default] {d}' for d in defaults]
-        notes = '; '.join(parts)
         rows.append({
             '#':                    item.get('line_no', ''),
             'Customer Description': item.get('raw_description', ''),
@@ -140,14 +138,13 @@ def _build_rows(items):
             'Special':              item.get('special') or '',
             'GGPL Description':     item.get('ggpl_description', ''),
             'Status':               status_icon,
-            'Notes / Flags':        notes,
+            'Notes / Flags':        '; '.join(parts),
         })
     return rows
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — Review & Edit  (isolated fragment — only this section reruns on
-#           table edits / row selection, the rest of the page stays still)
+# Step 2 — Review & Edit  (fragment — only this section reruns on interactions)
 # ---------------------------------------------------------------------------
 @st.fragment
 def _step2_fragment(items):
@@ -161,37 +158,20 @@ def _step2_fragment(items):
     c3.metric('Check defaults 🟡', n_check)
     c4.metric('Action needed 🔴', n_missing)
 
-    # ---- Row selection via multiselect (no per-checkbox reruns) --------------
-    def _row_label(i):
-        item = items[i]
-        line = item.get('line_no', i + 1)
-        desc = str(item.get('raw_description') or '').strip()
-        icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}.get(item['status'], '')
-        return f"{icon} #{line}  {desc[:70]}"
+    st.caption('Use **Bulk Edit** to fill a field across many rows at once, then fine-tune individual cells in the table.')
 
-    sa1, sa2, _ = st.columns([1, 1.3, 7])
+    # ---- Select All / Deselect All -------------------------------------------
+    sa1, sa2, _ = st.columns([1, 1.3, 8])
     if sa1.button('Select All', key='sel_all_btn'):
-        st.session_state['row_multiselect'] = list(range(len(items)))
+        st.session_state._selected_rows = set(range(len(items)))
     if sa2.button('Deselect All', key='desel_all_btn'):
-        st.session_state['row_multiselect'] = []
+        st.session_state._selected_rows = set()
 
-    selected_indices = st.multiselect(
-        'Rows targeted by Bulk Edit:',
-        options=list(range(len(items))),
-        format_func=_row_label,
-        key='row_multiselect',
-        placeholder='Pick rows to target with Bulk Edit — leave empty to apply to all rows…',
-        label_visibility='collapsed',
-    )
-    st.session_state._selected_rows = set(selected_indices)
-
-    # ---- Bulk Edit panel -----------------------------------------------------
-    n_target = len(selected_indices) if selected_indices else len(items)
-    with st.expander(f'Bulk Edit — targeting {"all" if not selected_indices else len(selected_indices)} row(s)', expanded=False):
-        st.caption(
-            f'Targeting **{"all " + str(len(items)) + " rows" if not selected_indices else str(len(selected_indices)) + " selected row(s)"}**. '
-            'Fill any fields below and click **Apply Bulk Edit**.'
-        )
+    # ---- Bulk Edit panel ------------------------------------------------------
+    n_sel = len(st.session_state._selected_rows)
+    target_label = f'all {len(items)} rows' if n_sel == 0 else f'{n_sel} selected row(s)'
+    with st.expander(f'Bulk Edit — targeting {target_label}', expanded=False):
+        st.caption('Tick **Select** on the rows you want, fill fields below, then click **Apply Bulk Edit**.')
         bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
         bulk_type    = bc1.selectbox('Type',        ['(no change)'] + TYPE_OPTIONS,   key='bulk_type')
         bulk_moc     = bc2.text_input('MOC',         placeholder='e.g. CNAF',          key='bulk_moc')
@@ -210,10 +190,10 @@ def _step2_fragment(items):
         bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',    key='bulk_inner')
 
         if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
-            # Start from existing bulk_df if present (preserves prior bulk edits)
             df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
                       else pd.DataFrame(_build_rows(items))
-            target = selected_indices if selected_indices else list(range(len(df_bulk)))
+            selected = st.session_state._selected_rows
+            target = list(selected) if selected else list(range(len(df_bulk)))
             for idx in target:
                 if bulk_type    != '(no change)':  df_bulk.at[idx, 'Type']          = bulk_type
                 if bulk_moc.strip():               df_bulk.at[idx, 'MOC']           = bulk_moc.strip().upper()
@@ -230,9 +210,12 @@ def _step2_fragment(items):
             st.session_state['_bulk_df'] = df_bulk
             st.success(f'Applied to {len(target)} row(s). Click **Update** below to regenerate descriptions.')
 
-    # ---- Data editor ---------------------------------------------------------
+    # ---- Data editor with Select checkboxes ----------------------------------
     df = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
          else pd.DataFrame(_build_rows(items))
+
+    # Prepend Select column, driven by session state so Select All/Deselect All work
+    df.insert(0, 'Select', [i in st.session_state._selected_rows for i in range(len(df))])
 
     edited_df = st.data_editor(
         df,
@@ -240,6 +223,7 @@ def _step2_fragment(items):
         height=min(80 + 35 * len(items), 620),
         hide_index=True,
         column_config={
+            'Select':               st.column_config.CheckboxColumn('Select', width='small'),
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
             'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
@@ -263,6 +247,9 @@ def _step2_fragment(items):
             'Notes / Flags':        st.column_config.TextColumn('Notes / Flags', width='large', disabled=True),
         },
     )
+
+    # Sync checkbox state back to session state for next Bulk Edit
+    st.session_state._selected_rows = {i for i, row in edited_df.iterrows() if row['Select']}
 
     if st.button('Update', type='secondary'):
         updated = []
@@ -305,7 +292,6 @@ def _step2_fragment(items):
         st.session_state.results = updated
         st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
-        st.session_state.pop('row_multiselect', None)
         st.rerun(scope='app')
 
     # Missing info summary + RFI draft
@@ -335,7 +321,6 @@ if st.session_state.results:
     items = st.session_state.results
     st.divider()
     st.subheader('Step 2 — Review & Edit')
-    st.caption('Select rows in the multiselect for targeted Bulk Edit, or leave empty to apply to all.')
     _step2_fragment(items)
 
     # -------------------------------------------------------------------------
