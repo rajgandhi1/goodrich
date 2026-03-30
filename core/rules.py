@@ -266,6 +266,14 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     item['sw_inner_ring'] = inner_ring or None
     item['sw_filler'] = filler
 
+    # Outer ring is mandatory for spiral wound gaskets
+    if not outer_ring:
+        flags.append('Missing critical field: outer ring (mandatory for spiral wound gaskets — e.g. CS, SS304)')
+
+    # Inner ring is optional but should be confirmed
+    if not inner_ring:
+        flags.append('Inner ring not specified — confirm if inner ring is required')
+
     # Handle "SS" without grade — ambiguous, cannot build valid MOC
     grade_flag_fired = False
     if winding_mat == 'SS':
@@ -661,7 +669,7 @@ def apply_rules(item: dict) -> dict:
     # --- Assign status ---
     if missing_critical or any('ambiguous' in f.lower() or 'missing critical' in f.lower() for f in flags):
         item['status'] = STATUS_MISSING
-    elif applied_defaults:
+    elif applied_defaults or flags:
         item['status'] = STATUS_CHECK
         item['applied_defaults'] = applied_defaults
     else:

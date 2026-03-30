@@ -17,6 +17,8 @@ st.set_page_config(page_title='Gasket Quote Processor', layout='wide')
 # ---------------------------------------------------------------------------
 if 'results' not in st.session_state:
     st.session_state.results = []
+if '_selected_rows' not in st.session_state:
+    st.session_state._selected_rows = set()
 
 # ---------------------------------------------------------------------------
 # Header
@@ -121,13 +123,14 @@ if st.session_state.results:
     GROOVE_OPTIONS = ['OCT', 'OVAL', '']
 
     rows = []
-    for item in items:
+    for idx, item in enumerate(items):
         status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}.get(item['status'], '')
         flags = item.get('flags', [])
         defaults = item.get('applied_defaults', [])
-        notes = '; '.join(flags) or ('; '.join(f'[default] {d}' for d in defaults)) or ''
+        parts = list(flags) + [f'[default] {d}' for d in defaults]
+        notes = '; '.join(parts)
         rows.append({
-            'Select':               False,
+            'Select':               idx in st.session_state._selected_rows,
             '#':                    item.get('line_no', ''),
             'Customer Description': item.get('raw_description', ''),
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
@@ -153,6 +156,15 @@ if st.session_state.results:
 
     df = pd.DataFrame(rows)
 
+    # ---- Select All / Deselect All buttons ------------------------------------
+    sa_col1, sa_col2, _ = st.columns([1, 1, 8])
+    if sa_col1.button('Select All', key='sel_all_btn'):
+        st.session_state._selected_rows = set(range(len(items)))
+        st.rerun()
+    if sa_col2.button('Deselect All', key='desel_all_btn'):
+        st.session_state._selected_rows = set()
+        st.rerun()
+
     # ---- Bulk Edit panel -------------------------------------------------------
     with st.expander('Bulk Edit — apply a value to multiple rows at once', expanded=False):
         st.caption('Tick **Select** on the rows you want to change (leave all un-ticked to apply to every row), fill the fields below, then click **Apply Bulk Edit**.')
@@ -174,8 +186,9 @@ if st.session_state.results:
         bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',      key='bulk_inner')
 
         if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
-            sel_col = df['Select']
-            target_mask = sel_col if sel_col.any() else pd.Series([True] * len(df))
+            selected = st.session_state._selected_rows
+            target_indices = list(selected) if selected else list(range(len(df)))
+            target_mask = pd.Series([i in set(target_indices) for i in df.index])
             for idx in df.index[target_mask]:
                 if bulk_type    != '(no change)':  df.at[idx, 'Type']         = bulk_type
                 if bulk_moc.strip():               df.at[idx, 'MOC']          = bulk_moc.strip().upper()
@@ -195,6 +208,10 @@ if st.session_state.results:
     # Use bulk-edited df if available, else the default one
     if '_bulk_df' in st.session_state:
         df = st.session_state['_bulk_df']
+
+    # Keep Select column in sync with session state selection
+    for i in range(len(df)):
+        df.at[i, 'Select'] = i in st.session_state._selected_rows
 
     edited_df = st.data_editor(
         df,
@@ -226,6 +243,11 @@ if st.session_state.results:
             'Notes / Flags':        st.column_config.TextColumn('Notes / Flags', width='large', disabled=True),
         },
     )
+
+    # Sync selection state back from data editor
+    new_selected = {i for i, row in edited_df.iterrows() if row['Select']}
+    if new_selected != st.session_state._selected_rows:
+        st.session_state._selected_rows = new_selected
 
     if st.button('Update', type='secondary'):
         updated = []
@@ -271,6 +293,7 @@ if st.session_state.results:
             updated.append(item)
         st.session_state.results = updated
         st.session_state.pop('_bulk_df', None)
+        st.session_state._selected_rows = set()
         st.rerun()
 
     # Missing info summary + RFI draft
