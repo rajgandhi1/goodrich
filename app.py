@@ -1,6 +1,6 @@
 """
 Gasket Quote Processor — Streamlit MVP
-Soft cut gaskets only.
+Soft cut & spiral wound gaskets.
 """
 import streamlit as st
 import pandas as pd
@@ -27,6 +27,8 @@ if 'results' not in st.session_state:
     st.session_state.results = []
 if '_selected_rows' not in st.session_state:
     st.session_state._selected_rows = set()
+if 'filter_mode' not in st.session_state:
+    st.session_state.filter_mode = 'All'
 
 # ---------------------------------------------------------------------------
 # Header
@@ -105,10 +107,11 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
         st.session_state.results = processed
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)
+        st.session_state.filter_mode = 'All'
 
 
 # ---------------------------------------------------------------------------
-# Helper
+# Helper — build display rows from item list
 # ---------------------------------------------------------------------------
 def _build_rows(items):
     rows = []
@@ -138,32 +141,39 @@ def _build_rows(items):
             'Special':              item.get('special') or '',
             'GGPL Description':     item.get('ggpl_description', ''),
             'Status':               status_icon,
+            'AI':                   item.get('confidence', ''),
             'Notes / Flags':        '; '.join(parts),
         })
     return rows
 
 
 # ---------------------------------------------------------------------------
-# Tiny fragment — ONLY the data editor + Update button.
-# Checkbox clicks rerun only this, nothing else on the page moves.
+# Fragment — data editor + Update/Delete
+# Reruns only itself on checkbox changes, keeping the rest of the page stable.
+# display_indices: list of indices into the full `items` list to show.
 # ---------------------------------------------------------------------------
 @st.fragment
-def _editor_fragment(items):
+def _editor_fragment(items, display_indices):
+    display_items = [items[i] for i in display_indices]
+
     if '_bulk_df' in st.session_state:
         df = st.session_state['_bulk_df'].copy()
     else:
-        df = pd.DataFrame(_build_rows(items))
+        df = pd.DataFrame(_build_rows(display_items))
 
-    # Inject Select column from session state so Select All/Deselect All work
+    # Inject Select and Delete columns at the front (_bulk_df never stores these)
+    df = df.drop(columns=[c for c in ('Select', 'Delete') if c in df.columns])
+    df.insert(0, 'Delete', False)
     df.insert(0, 'Select', [i in st.session_state._selected_rows for i in range(len(df))])
 
     edited_df = st.data_editor(
         df,
         use_container_width=True,
-        height=min(80 + 35 * len(items), 620),
+        height=min(80 + 35 * len(display_items), 620),
         hide_index=True,
         column_config={
             'Select':               st.column_config.CheckboxColumn('Select', width='small'),
+            'Delete':               st.column_config.CheckboxColumn('🗑', width='small', help='Tick to delete this row on Update'),
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
             'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
@@ -184,17 +194,26 @@ def _editor_fragment(items):
             'Special':              st.column_config.TextColumn('Special', width='medium'),
             'GGPL Description':     st.column_config.TextColumn('GGPL Description', width='large', disabled=True),
             'Status':               st.column_config.TextColumn('Status', width='small', disabled=True),
+            'AI':                   st.column_config.TextColumn('AI', width='small', disabled=True,
+                                        help='Extraction confidence: HIGH / MEDIUM / LOW (blank = regex fallback)'),
             'Notes / Flags':        st.column_config.TextColumn('Notes / Flags', width='large', disabled=True),
         },
     )
 
-    # Sync checkbox state back — available next time Bulk Edit panel reads it
+    # Sync checkbox state back for Bulk Edit to read
     st.session_state._selected_rows = {i for i, row in edited_df.iterrows() if row['Select']}
 
     if st.button('Update', type='secondary', key='update_btn'):
-        updated = []
+        # Work on a copy of the full results list so non-visible rows are preserved
+        updated_full = list(items)
+        to_delete = set()
+
         for i, row in edited_df.iterrows():
-            base = items[i].copy()
+            orig_idx = display_indices[i]
+            if row.get('Delete'):
+                to_delete.add(orig_idx)
+                continue
+            base = items[orig_idx].copy()
             base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
             base['size']               = row['Size'] or base.get('size')
             base['rating']             = row['Rating'] or base.get('rating')
@@ -228,8 +247,14 @@ def _editor_fragment(items):
                 base.pop(f, None)
             item = apply_rules(base)
             item['ggpl_description'] = format_description(item)
-            updated.append(item)
-        st.session_state.results = updated
+            updated_full[orig_idx] = item
+
+        # Remove deleted rows and renumber
+        final = [item for idx, item in enumerate(updated_full) if idx not in to_delete]
+        for j, item in enumerate(final, 1):
+            item['line_no'] = j
+
+        st.session_state.results = final
         st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
         st.rerun(scope='app')
@@ -253,58 +278,102 @@ if st.session_state.results:
     c3.metric('Check defaults 🟡', n_check)
     c4.metric('Action needed 🔴', n_missing)
 
-    # Select All / Deselect All
-    sa1, sa2, _ = st.columns([1, 1.3, 8])
-    if sa1.button('Select All', key='sel_all_btn'):
-        st.session_state._selected_rows = set(range(len(items)))
-    if sa2.button('Deselect All', key='desel_all_btn'):
+    # Filter
+    filter_col, spacer = st.columns([3, 7])
+    with filter_col:
+        filter_mode = st.radio(
+            'Show',
+            ['All', 'Issues (🟡 + 🔴)', 'Missing only (🔴)'],
+            horizontal=True,
+            key='filter_mode',
+            label_visibility='collapsed',
+        )
+
+    # Invalidate bulk-df cache and selections when filter changes
+    if st.session_state.get('_last_filter_mode') != filter_mode:
+        st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
+        st.session_state['_last_filter_mode'] = filter_mode
 
-    # Bulk Edit
-    n_sel = len(st.session_state._selected_rows)
-    target_label = f'all {len(items)} rows' if n_sel == 0 else f'{n_sel} selected row(s)'
-    with st.expander(f'Bulk Edit — targeting {target_label}', expanded=False):
-        st.caption('Tick **Select** on the rows you want to change, fill fields below, then click **Apply Bulk Edit**.')
-        bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
-        bulk_type    = bc1.selectbox('Type',        ['(no change)'] + TYPE_OPTIONS,   key='bulk_type')
-        bulk_moc     = bc2.text_input('MOC',         placeholder='e.g. CNAF',          key='bulk_moc')
-        bulk_rating  = bc3.text_input('Rating',      placeholder='e.g. 150#',          key='bulk_rating')
-        bulk_face    = bc4.selectbox('Face',         ['(no change)'] + FACE_OPTIONS,   key='bulk_face')
-        bulk_groove  = bc5.selectbox('Groove',       ['(no change)'] + GROOVE_OPTIONS, key='bulk_groove')
-        bulk_thk     = bc6.number_input('Thk (mm)',  value=0.0, min_value=0.0, step=0.5, key='bulk_thk',
-                                        help='0 = no change')
-        bulk_bhn     = bc7.number_input('BHN',       value=0,   min_value=0, step=10,   key='bulk_bhn',
-                                        help='0 = no change')
-        bulk_uom     = bc8.selectbox('UoM',          ['(no change)'] + UOM_OPTIONS,    key='bulk_uom')
-        bc9, bc10, bc11, bc12 = st.columns(4)
-        bulk_winding = bc9.text_input('SW Winding',     placeholder='e.g. SS316',    key='bulk_winding')
-        bulk_filler  = bc10.text_input('SW Filler',     placeholder='e.g. GRAPHITE', key='bulk_filler')
-        bulk_outer   = bc11.text_input('SW Outer Ring', placeholder='e.g. CS',       key='bulk_outer')
-        bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',    key='bulk_inner')
+    # Compute which rows to display
+    if filter_mode == 'Issues (🟡 + 🔴)':
+        display_indices = [i for i, item in enumerate(items)
+                           if item['status'] in (STATUS_CHECK, STATUS_MISSING)]
+    elif filter_mode == 'Missing only (🔴)':
+        display_indices = [i for i, item in enumerate(items)
+                           if item['status'] == STATUS_MISSING]
+    else:
+        display_indices = list(range(len(items)))
 
-        if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
-            df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
-                      else pd.DataFrame(_build_rows(items))
-            selected = st.session_state._selected_rows
-            target = list(selected) if selected else list(range(len(df_bulk)))
-            for idx in target:
-                if bulk_type    != '(no change)':  df_bulk.at[idx, 'Type']          = bulk_type
-                if bulk_moc.strip():               df_bulk.at[idx, 'MOC']           = bulk_moc.strip().upper()
-                if bulk_rating.strip():            df_bulk.at[idx, 'Rating']        = bulk_rating.strip()
-                if bulk_face    != '(no change)':  df_bulk.at[idx, 'Face']          = bulk_face
-                if bulk_groove  != '(no change)':  df_bulk.at[idx, 'Groove']        = bulk_groove
-                if bulk_thk     > 0:               df_bulk.at[idx, 'Thk (mm)']      = bulk_thk
-                if bulk_bhn     > 0:               df_bulk.at[idx, 'BHN']           = bulk_bhn
-                if bulk_uom     != '(no change)':  df_bulk.at[idx, 'UoM']           = bulk_uom
-                if bulk_winding.strip():           df_bulk.at[idx, 'SW Winding']    = bulk_winding.strip().upper()
-                if bulk_filler.strip():            df_bulk.at[idx, 'SW Filler']     = bulk_filler.strip().upper()
-                if bulk_outer.strip():             df_bulk.at[idx, 'SW Outer Ring'] = bulk_outer.strip().upper()
-                if bulk_inner.strip():             df_bulk.at[idx, 'SW Inner Ring'] = bulk_inner.strip().upper()
-            st.session_state['_bulk_df'] = df_bulk
-            st.success(f'Applied to {len(target)} row(s). Click **Update** below to regenerate descriptions.')
+    if not display_indices:
+        st.success('No items match this filter.')
+    else:
+        # Select All / Deselect All (scoped to visible rows)
+        sa1, sa2, sa3, _ = st.columns([1, 1.3, 1.3, 7])
+        if sa1.button('Select All', key='sel_all_btn'):
+            st.session_state._selected_rows = set(range(len(display_indices)))
+        if sa2.button('Deselect All', key='desel_all_btn'):
+            st.session_state._selected_rows = set()
+        if sa3.button('+ Add Row', key='add_row_btn'):
+            new_item = apply_rules({
+                'line_no': len(items) + 1,
+                'raw_description': '',
+                'gasket_type': 'SOFT_CUT',
+            })
+            new_item['ggpl_description'] = format_description(new_item)
+            st.session_state.results.append(new_item)
+            st.session_state.pop('_bulk_df', None)
+            st.session_state._selected_rows = set()
+            st.rerun(scope='app')
 
-    # ---- The only thing that reruns on checkbox clicks ----
-    _editor_fragment(items)
+        # Bulk Edit
+        n_sel = len(st.session_state._selected_rows)
+        n_visible = len(display_indices)
+        target_label = f'all {n_visible} visible rows' if n_sel == 0 else f'{n_sel} selected row(s)'
+        with st.expander(f'Bulk Edit — targeting {target_label}', expanded=False):
+            st.caption('Tick **Select** on the rows you want to change, fill fields below, then click **Apply Bulk Edit**.')
+            bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
+            bulk_type    = bc1.selectbox('Type',        ['(no change)'] + TYPE_OPTIONS,   key='bulk_type')
+            bulk_moc     = bc2.text_input('MOC',         placeholder='e.g. CNAF',          key='bulk_moc')
+            bulk_rating  = bc3.text_input('Rating',      placeholder='e.g. 150#',          key='bulk_rating')
+            bulk_face    = bc4.selectbox('Face',         ['(no change)'] + FACE_OPTIONS,   key='bulk_face')
+            bulk_groove  = bc5.selectbox('Groove',       ['(no change)'] + GROOVE_OPTIONS, key='bulk_groove')
+            bulk_thk     = bc6.number_input('Thk (mm)',  value=0.0, min_value=0.0, step=0.5, key='bulk_thk',
+                                            help='0 = no change')
+            bulk_bhn     = bc7.number_input('BHN',       value=0,   min_value=0, step=10,   key='bulk_bhn',
+                                            help='0 = no change')
+            bulk_uom     = bc8.selectbox('UoM',          ['(no change)'] + UOM_OPTIONS,    key='bulk_uom')
+            bc9, bc10, bc11, bc12 = st.columns(4)
+            bulk_winding = bc9.text_input('SW Winding',     placeholder='e.g. SS316',    key='bulk_winding')
+            bulk_filler  = bc10.text_input('SW Filler',     placeholder='e.g. GRAPHITE', key='bulk_filler')
+            bulk_outer   = bc11.text_input('SW Outer Ring', placeholder='e.g. CS',       key='bulk_outer')
+            bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',    key='bulk_inner')
+
+            if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
+                df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
+                          else pd.DataFrame(_build_rows([items[i] for i in display_indices]))
+                # _bulk_df never stores Select/Delete — fragment always injects them fresh
+                df_bulk = df_bulk.drop(columns=[c for c in ('Select', 'Delete') if c in df_bulk.columns])
+                selected = st.session_state._selected_rows
+                target = list(selected) if selected else list(range(len(df_bulk)))
+                for idx in target:
+                    if bulk_type    != '(no change)':  df_bulk.at[idx, 'Type']          = bulk_type
+                    if bulk_moc.strip():               df_bulk.at[idx, 'MOC']           = bulk_moc.strip().upper()
+                    if bulk_rating.strip():            df_bulk.at[idx, 'Rating']        = bulk_rating.strip()
+                    if bulk_face    != '(no change)':  df_bulk.at[idx, 'Face']          = bulk_face
+                    if bulk_groove  != '(no change)':  df_bulk.at[idx, 'Groove']        = bulk_groove
+                    if bulk_thk     > 0:               df_bulk.at[idx, 'Thk (mm)']      = bulk_thk
+                    if bulk_bhn     > 0:               df_bulk.at[idx, 'BHN']           = bulk_bhn
+                    if bulk_uom     != '(no change)':  df_bulk.at[idx, 'UoM']           = bulk_uom
+                    if bulk_winding.strip():           df_bulk.at[idx, 'SW Winding']    = bulk_winding.strip().upper()
+                    if bulk_filler.strip():            df_bulk.at[idx, 'SW Filler']     = bulk_filler.strip().upper()
+                    if bulk_outer.strip():             df_bulk.at[idx, 'SW Outer Ring'] = bulk_outer.strip().upper()
+                    if bulk_inner.strip():             df_bulk.at[idx, 'SW Inner Ring'] = bulk_inner.strip().upper()
+                st.session_state['_bulk_df'] = df_bulk
+                st.success(f'Applied to {len(target)} row(s). Click **Update** below to regenerate descriptions.')
+
+        # ---- The only thing that reruns on checkbox clicks ----
+        _editor_fragment(items, display_indices)
 
     # Missing info summary + RFI draft
     missing_items = [i for i in items if i['status'] == STATUS_MISSING]
@@ -323,7 +392,14 @@ if st.session_state.results:
                     + '\n'.join(rfi_lines)
                     + '\n\nWith regards,\nGoodrich Gasket')
         with st.expander('Draft RFI email'):
-            st.text_area('RFI draft', value=rfi_text, height=200, label_visibility='collapsed')
+            st.code(rfi_text, language=None)
+            st.download_button(
+                label='Download RFI as .txt',
+                data=rfi_text.encode(),
+                file_name=f"RFI_{project_ref or customer or 'enquiry'}.txt".replace(' ', '_'),
+                mime='text/plain',
+                key='rfi_download',
+            )
 
     # -------------------------------------------------------------------------
     # Step 3 — Export
