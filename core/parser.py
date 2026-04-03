@@ -113,9 +113,11 @@ def _looks_like_gasket(text: str) -> bool:
                   'asme', 'ansi', 'b16.20', 'b16.21',
                   'rtj', 'r.t.j', 'ring joint', 'joint tore', 'tore', 'spiral', 'winding',
                   'spw', 'wnd', 'sw gasket', 'kammprofile', 'camprofile', 'insulating gasket',
-                  'isk', 'soft iron', 'softiron', 'octagonal', 'oval ring']
+                  'isk', 'soft iron', 'softiron', 'octagonal', 'oval ring',
+                  'nbr', 'nitrile', 'sbr', 'silicone', 'butyl', 'aramid', 'thermiculite',
+                  'expanded graphite', 'cork', 'leather', 'ceramic fiber', 'hnbr']
     has_kw = any(k in text_lower for k in gasket_kws)
-    has_size = bool(re.search(r'\d+["\']|\d+\s*(?:nb|nps|inch|mm)', text_lower, re.IGNORECASE))
+    has_size = bool(re.search(r'\d+["\']|\d+\s*(?:nb|dn|nps|inch|mm)|(?:nb|dn)\s*\d+', text_lower, re.IGNORECASE))
     return has_kw or has_size
 
 

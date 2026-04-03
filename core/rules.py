@@ -102,12 +102,35 @@ _MOC_ALIASES = {
     'PTFE ENVELOPED': 'NON ASBESTOS PTFE ENVELOPED',
     'POLYVINYLIDENE FLUORIDE': 'POLYVINYLIDENE FLUORIDE',
     'PVDF': 'POLYVINYLIDENE FLUORIDE',
-    # --- Graphite ---
+    # --- Graphite family ---
     'GRAPHITE': 'GRAPHITE',
     'GRAFOIL': 'GRAPHITE',
+    'GRAPHOIL': 'GRAPHITE',
     'FLEXIBLE GRAPHITE': 'GRAPHITE',
-    'EXFOLIATED GRAPHITE': 'GRAPHITE',
-    'EXPANDED GRAPHITE': 'GRAPHITE',
+    'EXFOLIATED GRAPHITE': 'EXPANDED GRAPHITE',
+    'EXFOLIATED EXPANDED GRAPHITE': 'EXPANDED GRAPHITE',
+    'EXPANDED GRAPHITE': 'EXPANDED GRAPHITE',
+    '98% EXPANDED GRAPHITE': 'EXPANDED GRAPHITE',
+    'FLEXIBLE/EXPANDED GRAPHITE': 'EXPANDED GRAPHITE',
+    'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT': 'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+    'EXPANDED GRAPHITE WITH SS304 RENFORCEMENT': 'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+    '98% EXPANDED GRAPHITE WITH SS304 RENFORCEMENT': 'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+    '98% EXPANDED GRAPHITE WITH SS304 REINFORCEMENT': 'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+    'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT': 'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+    'EXPANDED GRAPHITE WITH SS316 RENFORCEMENT': 'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+    '98% EXPANDED GRAPHITE WITH SS316 RENFORCEMENT': 'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+    '98% EXPANDED GRAPHITE WITH SS316 REINFORCEMENT': 'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+    'GRAPHITE WITH SS304 INSERT': 'FLEXIBLE GRAPHITE WITH SS304 INSERT',
+    'GRAPHITE WITH SS316 INSERT': 'FLEXIBLE GRAPHITE WITH SS316 INSERT',
+    'GRAPHITE WITH SS316L INSERT': 'FLEXIBLE GRAPHITE WITH SS316 INSERT',
+    'FLEXIBLE GRAPHITE WITH SS304 INSERT': 'FLEXIBLE GRAPHITE WITH SS304 INSERT',
+    'FLEXIBLE GRAPHITE WITH SS316 INSERT': 'FLEXIBLE GRAPHITE WITH SS316 INSERT',
+    'FLEXIBLE GRAPHITE REINFORCED W/SS316': 'FLEXIBLE GRAPHITE WITH SS316 INSERT',
+    'GRAPHITE WITH MS INSERT': 'FLEXIBLE GRAPHITE WITH MS INSERT',
+    'GRAPHITE WITH STEEL INSERT': 'FLEXIBLE GRAPHITE WITH STEEL INSERT',
+    'GRAPHITE WITH 2 METAL FOILS': 'GRAPHITE WITH 2 METAL FOILS',
+    'CORRUGATED GRAPHITE WITH SS316': 'CORRUGATED GRAPHITE WITH SS316',
+    'CORRUGATED GASKET SS316 ENCAPSULATED WITH GRAPHITE': 'CORRUGATED GRAPHITE WITH SS316',
     # --- Fiber / specialty ---
     'ARAMID FIBER': 'ARAMID FIBER',
     'ARAMID FIBRE': 'ARAMID FIBER',
@@ -120,15 +143,54 @@ _MOC_ALIASES = {
     'ARAMID W/ NITRILE BINDER': 'ARAMID FIBER WITH NITRILE BINDER',
     'ARAMID FIBER WITH NITRILE BINDER': 'ARAMID FIBER WITH NITRILE BINDER',
     'NON-ASB SYNTHETIC FIBER WITH NITRILE BINDER': 'CNAF',
+    'NON ASBESTOS SYNTHETIC FIBER': 'NON ASBESTOS SYNTHETIC FIBER',
+    'NON-ASBESTOS SHEET NBR BINDER': 'NON ASBESTOS SYNTHETIC FIBER',
     'SYNTHETIC FIBRE': 'SYNTHETIC FIBRE',
     'CERAMIC FIBER': 'CERAMIC FIBER',
     'CERAMIC FIBRE': 'CERAMIC FIBER',
     'CERAMIC': 'CERAMIC FIBER',
+    'CERAFELT': 'CERAMIC FIBER',
+    'NON ASBESTOS BS7531': 'NON ASBESTOS BS7531',
+    'NON ASBESTOS TYPE BS 7531': 'NON ASBESTOS BS7531',
+    'NONASBESTOSBS7531': 'NON ASBESTOS BS7531',
     'CORK': 'CORK',
     'LEATHER': 'LEATHER',
+    'ASBESTOS FREE': 'NON ASBESTOS',
+    'ASBESTOS FREE (WITH SBR)': 'SBR',
+    'ASBESTOS FREE WITH SBR': 'SBR',
+    'THERMICULITE 715': 'THERMICULITE 715',
+    'THERMICULITE 715 OR EQUIVALENT': 'THERMICULITE 715',
+    'FLEXITALLIC TYPE THERMICULITE 715 OR EQUIVALENT': 'THERMICULITE 715',
+    'THERMICULITE 835': 'THERMICULITE 835',
+    'THERMICULITE': 'THERMICULITE',
+    'LEAKBLOK P200': 'LEAKBLOK P200',
+    'LEAKBOK P200': 'LEAKBLOK P200',
+    'LEAKBOK P200 OR EQUIVALENT': 'LEAKBLOK P200',
+    'LEAKBLOK P200 OR EQUIVALENT': 'LEAKBLOK P200',
     'ASBESTOS': 'CAF',
     'COMPRESSED ASBESTOS FIBER': 'CAF',
+    'COMPRESSED ASBESTOS': 'CAF',
+    'IS 2712': 'CAF',
     'CAF': 'CAF',
+    # --- Rubber WITH INSERT pass-throughs (common combinations) ---
+    'EPDM WITH STEEL INSERT': 'EPDM WITH STEEL INSERT',
+    'EPDM RUBBER WITH STEEL INSERT': 'EPDM WITH STEEL INSERT',
+    'EPDM WITH SS304 INSERT': 'EPDM WITH SS304 INSERT',
+    'EPDM RUBBER WITH SS304 INSERT': 'EPDM WITH SS304 INSERT',
+    'EPDM WITH SS316 INSERT': 'EPDM WITH SS316 INSERT',
+    'EPDM RUBBER WITH SS316 INSERT': 'EPDM WITH SS316 INSERT',
+    'EPDM WITH MS INSERT': 'EPDM WITH MS INSERT',
+    'EPDM RUBBER WITH MS INSERT': 'EPDM WITH MS INSERT',
+    'PTFE WITH SS304 INSERT': 'PTFE WITH SS304 INSERT',
+    'PTFE WITH SS316 INSERT': 'PTFE WITH SS316 INSERT',
+    'PTFE WITH MS INSERT': 'PTFE WITH MS INSERT',
+    'PTFE WITH STEEL INSERT': 'PTFE WITH STEEL INSERT',
+    'NATURAL RUBBER WITH SS304 INSERT': 'NATURAL RUBBER WITH SS304 INSERT',
+    'NATURAL RUBBER WITH SS316 INSERT': 'NATURAL RUBBER WITH SS316 INSERT',
+    'NATURAL RUBBER WITH STEEL INSERT': 'NATURAL RUBBER WITH STEEL INSERT',
+    'NATURAL RUBBER WITH MS INSERT': 'NATURAL RUBBER WITH MS INSERT',
+    # --- Viton ---
+    'VITON GASKET': 'VITON GASKET',
 }
 
 # Generic "RUBBER" is ambiguous — must ask customer
@@ -233,11 +295,31 @@ def _norm_filler(raw: str | None) -> str | None:
 
 
 def _size_nps_value(size_norm: str | None) -> float | None:
-    """Return numeric NPS value from normalized size string like '28"'."""
+    """Return numeric NPS value from a size string like '28"' or '28 NB'.
+    For NB strings, returns None (NB number ≠ NPS number — must go through normalize_size first).
+    """
     if not size_norm:
         return None
-    m = re.search(r'([\d.]+)', size_norm)
+    s = str(size_norm)
+    # If it's an NB string (e.g. "450 NB"), return None — the NPS equivalent
+    # is stored in size_norm after normalize_size conversion.
+    if re.search(r'\bNB\b', s, re.IGNORECASE):
+        return None
+    m = re.search(r'([\d.]+)', s)
     return float(m.group(1)) if m else None
+
+
+def _size_nps_value_from_item(item: dict) -> float | None:
+    """Return NPS value, trying size_norm first then raw size (for un-mapped large NPS)."""
+    val = _size_nps_value(item.get('size_norm'))
+    if val is not None:
+        return val
+    # Fallback: parse raw size string if it contains '"' (NPS inches, just not in size_map)
+    raw = str(item.get('size') or '')
+    if '"' in raw and 'NB' not in raw.upper():
+        m = re.search(r'([\d.]+)', raw)
+        return float(m.group(1)) if m else None
+    return None
 
 
 def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_ring: str | None) -> str:
@@ -595,7 +677,16 @@ def apply_rules(item: dict) -> dict:
             item['moc'] = _MOC_ALIASES[raw_moc]
         elif raw_moc:
             item['moc'] = raw_moc
-            if raw_moc not in ACCEPTED_MOC and raw_moc not in _MOC_ALIASES:
+            # Don't flag composite MOCs like "EPDM WITH SS304 INSERT" or
+            # "EXPANDED GRAPHITE WITH SS316 REINFORCEMENT" — these are valid combinations
+            _is_composite = (
+                ' WITH ' in raw_moc and (
+                    'INSERT' in raw_moc
+                    or 'REINFORCEMENT' in raw_moc
+                    or 'RENFORCEMENT' in raw_moc
+                )
+            )
+            if not _is_composite and raw_moc not in ACCEPTED_MOC and raw_moc not in _MOC_ALIASES:
                 flags.append(f'MOC "{raw_moc}" not in standard list — verify spelling')
 
         # --- Default: face_type ---
@@ -613,15 +704,29 @@ def apply_rules(item: dict) -> dict:
 
         # --- Default: standard ---
         if not item.get('standard'):
-            item['standard'] = 'EN 1514-1' if is_pn else 'ASME B16.21'
-            applied_defaults.append('standard defaulted to ' + item['standard'])
+            if is_pn:
+                item['standard'] = 'EN 1514-1'
+                applied_defaults.append('standard defaulted to EN 1514-1')
+            else:
+                # NPS ≥ 26" → ASME B16.47 (large bore); below 26" → ASME B16.21
+                nps_val = _size_nps_value_from_item(item)
+                if nps_val is not None and nps_val >= 26:
+                    item['standard'] = 'ASME B16.47'
+                    applied_defaults.append('standard defaulted to ASME B16.47 (large bore NPS ≥ 26")')
+                    flags.append(
+                        'Large bore (NPS ≥ 26") — ASME B16.47 has Series A (API 605) and Series B (MSS SP-44): '
+                        'confirm which series with customer — dimensions differ'
+                    )
+                else:
+                    item['standard'] = 'ASME B16.21'
+                    applied_defaults.append('standard defaulted to ASME B16.21')
 
         # --- Dimension lookup ---
         dims = None
         if size_norm and rating_norm:
             dims = lookup_dimensions(size_norm, rating_norm, item['face_type'])
         item['dimensions'] = dims
-        if not dims and size_norm:
+        if not dims and size_norm and rating_norm:
             flags.append('Size/rating not found in standard dimension table — may be non-standard')
 
     # Business rule: NPS inch size + ASME # pressure class → standard must be ASME (not EN/DIN/BS)
@@ -631,7 +736,11 @@ def apply_rules(item: dict) -> dict:
             if gasket_type in ('SPIRAL_WOUND', 'RTJ', 'KAMM'):
                 item['standard'] = 'ASME B16.20'
             else:
-                item['standard'] = 'ASME B16.21'
+                nps_val = _size_nps_value_from_item(item)
+                if nps_val is not None and nps_val >= 26:
+                    item['standard'] = 'ASME B16.47'
+                else:
+                    item['standard'] = 'ASME B16.21'
 
     # --- Default: UoM ---
     if item.get('uom') == 'M':

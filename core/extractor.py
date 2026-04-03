@@ -56,7 +56,7 @@ _BATCH_SYSTEM_PROMPT = f"""You are a gasket specification extraction assistant f
 Extract gasket specs from customer descriptions and return ONLY valid JSON.
 
 Handle gasket types:
-1. SOFT_CUT: flat ring (RF/FF), materials like CNAF, PTFE, NEOPRENE, EPDM, NATURAL RUBBER, GRAPHITE, VITON, NON ASBESTOS
+1. SOFT_CUT: flat ring (RF/FF), materials like CNAF, PTFE, NEOPRENE, EPDM, NATURAL RUBBER, GRAPHITE, EXPANDED GRAPHITE, VITON, NON ASBESTOS, SBR, NBR, NITRILE RUBBER, SILICONE RUBBER, BUTYL RUBBER, ARAMID FIBER, CERAMIC FIBER, THERMICULITE, CORK, LEATHER. "EXPANDED GRAPHITE WITH SS304/SS316 REINFORCEMENT/RENFORCEMENT" is SOFT_CUT — SS304/SS316 here is a metallic insert/tanged reinforcement, NOT a spiral wound winding; set moc="EXPANDED GRAPHITE WITH SS304 REINFORCEMENT" (or SS316 as applicable). Similarly "X WITH SS304/SS316/MS/STEEL INSERT" combinations (e.g. EPDM WITH SS304 INSERT, PTFE WITH SS316 INSERT) are SOFT_CUT with a metallic insert. "VITON GASKET" = SOFT_CUT with moc="VITON GASKET".
 2. SPIRAL_WOUND: metallic wound gasket, typically with graphite/PTFE filler and centering/inner rings
 3. RTJ: Ring Type Joint — octagonal or oval metallic ring, e.g. Soft Iron, SS316, Low Carbon Steel
 4. KAMM: Kammprofile gasket — serrated metal core with graphite facing; similar ring/filler structure to SW
@@ -70,7 +70,7 @@ Each extraction must follow this schema:
 {_FIELD_SCHEMA}
 
 Rules:
-- size: NPS in inches (e.g. "6\\"") or OD×ID in mm. If NB given, convert: 15NB=0.5\\", 20NB=0.75\\", 25NB=1\\", 32NB=1.25\\", 40NB=1.5\\", 50NB=2\\", 65NB=2.5\\", 80NB=3\\", 100NB=4\\", 150NB=6\\", 200NB=8\\", 250NB=10\\", 300NB=12\\", 350NB=14\\", 400NB=16\\", 450NB=18\\", 500NB=20\\", 600NB=24\\". DN = NB.
+- size: If NPS/inch given (e.g. "6\\"", "1.5\\"") use as-is. If NB or DN given (metric nominal bore), output as "X NB" e.g. "25 NB", "100 NB", "450 NB" — do NOT convert to inches. DN = NB (identical). For OD×ID dimensions use "OD NNNmm x ID NNNmm". Set size_type accordingly: NPS for inch sizes, NB for NB/DN sizes, OD_ID for OD/ID dimensions.
 - rating: use format "150#", "300#", "PN 10", "PN 16". Valid ASME classes: 150, 300, 600, 900, 1500, 2500, 3000.
 - gasket_type: SPIRAL_WOUND if description mentions "spiral wound", "spiral seal", "spiral winding", "SPW", "SPWD", "SPRL-WND", "WND", "SW gasket", "SPIRL WOUND" (typo), or combination of winding material + filler + ring. "WND" alone means winding (e.g. "ALLOY 20 WND PTFE FILL ALLOY 20 I/R CS O/R" = SPIRAL_WOUND with ALLOY 20 winding, PTFE filler, ALLOY 20 inner ring, CS outer ring)
 - gasket_type: RTJ if description mentions "ring joint", "RTJ", "R.T.J", "ring type joint", "ring type gasket", "octagonal ring", "oval ring", "JOINT TORE" (French), "JOINT TORIQUE" (French), RTJ ring number (R-nn), or API 6A ring numbers (RX-nn, BX-nn)
@@ -84,7 +84,7 @@ Rules:
 - For RTJ hardness: "90 BHN MAX" → rtj_hardness_bhn=90; "22 HRC" or "MAX HARDNESS 22 HRC" → note in special; "83 HRBW" → note in special
 - face_type: null for spiral wound and RTJ; RF/FF/null for soft cut
 - thickness_mm: null for RTJ (rings have no thickness field); extract number for others; null if not stated
-- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut; ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound
+- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut NPS≤24"; ASME B16.47 for soft cut NPS≥26" (large bore); ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound. If customer specifies "SERIES A" or "SERIES B" in the description, include it: "ASME B16.47 ( SERIES A )" or "ASME B16.47 ( SERIES B )"
 - special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc.
 - SOFT_CUT brand-name materials: trade names like "KROLLER & ZILLER", "KLINGER", "DONIT", "GARLOCK" followed by a grade code (e.g. "G-S-T-P/S") are SOFT_CUT gaskets — set moc to the full brand + grade string (e.g. "KROLLER & ZILLER (G-S-T-P/S)"). "WITH SPACER" means a spacer ring is included but does NOT change the gasket_type — it remains SOFT_CUT; capture "WITH SPACER" in the special field.
 - confidence: HIGH if all key fields clear, LOW if ambiguous"""
@@ -151,6 +151,10 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
                     for field in ('size', 'size_type', 'rating'):
                         if regex_result.get(field) and not llm_result.get(field):
                             llm_result[field] = regex_result[field]
+                    # Always trust regex for NB/DN sizes — LLM may convert to NPS inches
+                    if regex_result.get('size_type') == 'NB' and regex_result.get('size'):
+                        llm_result['size'] = regex_result['size']
+                        llm_result['size_type'] = 'NB'
                     cache[desc] = llm_result
                 else:
                     cache[desc] = regex_result
@@ -495,22 +499,100 @@ def _extract_sw_components(desc: str) -> dict:
 
 
 _MOC_KEYWORDS = [
+    # --- Fibre / sheet materials ---
     ('CNAF', ['CNAF', 'COMPRESSED NON ASBESTOS FIBER', 'COMP SHEET', 'COMPRESSED SHEET',
               'COMPRESSED FIBRE', 'COMP FIBRE', 'COMP FIBER', 'COMPRESSED FIBER',
-              'NON ASBESTOS COMP', 'COMPRESSED NON-ASBESTOS']),
-    ('NON ASBESTOS', ['NON ASBESTOS', 'NON-ASBESTOS']),
-    ('NEOPRENE', ['NEOPRENE', 'CHLOROPRENE']),
-    ('NATURAL RUBBER', ['NATURAL RUBBER']),
-    ('EPDM', ['EPDM']),
-    ('EXPANDED PTFE', ['EXPANDED PTFE', 'EPTFE']),
-    ('PTFE ENVELOPED', ['PTFE ENVELOPED', 'PTFE ENVELOPE']),
+              'NON ASBESTOS COMP', 'COMPRESSED NON-ASBESTOS', 'CNAF NON GRAPHITE']),
+    ('NON ASBESTOS BS7531', ['NON ASBESTOS BS7531', 'NON ASBESTOS TYPE BS 7531',
+                             'NON-ASB BS7531', 'BS7531', 'NONASBESTOSBS7531']),
+    ('NON ASBESTOS SYNTHETIC FIBER', ['NON ASBESTOS SYNTHETIC FIBER', 'NON-ASB SYNT FIBER',
+                                      'NON-ASBESTOS SHEET NBR BINDER', 'NON-ASBESTOS SHEET']),
+    ('NON ASBESTOS', ['NON ASBESTOS', 'NON-ASBESTOS', 'ASBESTOS FREE']),
+    ('ARAMID FIBER WITH NBR BINDER', ['ARAMID FIBRE WITH NBR BINDER', 'ARAMID FIBER WITH NBR BINDER',
+                                      'ARAMID FIBRE WITH NBRBINDER', 'ARAMID FIBER WITH NBRBINDER',
+                                      'ARAMIDE FIBER WITH NBR', 'ARA']),
+    ('ARAMID FIBER', ['ARAMID FIBRE', 'ARAMID FIBER', 'ARAMIDE FIBER', 'ARAMIDE FIBRE', 'ARAMID']),
+    ('CERAMIC FIBER', ['CERAMIC FIBER', 'CERAMIC FIBRE', 'CERAFELT', 'CERAMIC WOOL',
+                       'CERAMIC PAPER', 'CERAFIBRE', 'CER']),
+    ('CORK', ['CORK']),
+    ('LEATHER', ['LEATHER']),
+    # --- PTFE family ---
+    ('EXPANDED PTFE', ['EXPANDED PTFE', 'EPTFE', 'GORE TEX', 'GORETEK', 'EXPENDED PTFE',
+                       'PTFE GORE TEX']),
+    ('PTFE ENVELOPED', ['PTFE ENVELOPED', 'PTFE ENVELOPE', 'PTFE ENVELOPE FILLED']),
     ('PTFE', ['PTFE', 'TEFLON']),
-    ('VITON', ['VITON', 'FKM']),
-    ('GRAPHITE', ['GRAPHITE', 'GRAFOIL', 'FLEXIBLE GRAPHITE']),
-    ('BUTYL RUBBER', ['BUTYL']),
-    ('NITRILE BUTADIENE RUBBER', ['NBR', 'NITRILE', 'BUNA-N', 'BUNA N']),
-    ('RUBBER', ['RUBBER']),  # generic — will be flagged
+    # --- Graphite family (most specific first) ---
+    ('EXPANDED GRAPHITE WITH SS316 REINFORCEMENT', [
+        '98% EXPANDED GRAPHITE WITH SS316 RENFORCEMENT',
+        '98% EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+        'EXPANDED GRAPHITE WITH SS316 RENFORCEMENT',
+        'EXPANDED GRAPHITE WITH SS316 REINFORCEMENT',
+    ]),
+    ('EXPANDED GRAPHITE WITH SS304 REINFORCEMENT', [
+        '98% EXPANDED GRAPHITE WITH SS304 RENFORCEMENT',
+        '98% EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+        'EXPANDED GRAPHITE WITH SS304 RENFORCEMENT',
+        'EXPANDED GRAPHITE WITH SS304 REINFORCEMENT',
+    ]),
+    ('FLEXIBLE GRAPHITE WITH SS316 INSERT', ['FLEXIBLE GRAPHITE REINFORCED W/SS316',
+                                              'FLEXIBLE GRAPHITE REINFORCED WITH SS316',
+                                              'GRAPHITE WITH SS316L INSERT', 'GRAPHITE WITH SS316 INSERT']),
+    ('FLEXIBLE GRAPHITE WITH SS304 INSERT', ['GRAPHITE WITH SS304 INSERT']),
+    ('FLEXIBLE GRAPHITE WITH STEEL INSERT', ['GRAPHITE WITH MS INSERT', 'GRAPHITE WITH STEEL INSERT',
+                                              'GRAPHITE WITH 2 METAL FOILS']),
+    ('CORRUGATED GRAPHITE WITH SS316', ['CORRUGATED GASKET SS316 ENCAPSULATED WITH GRAPHITE',
+                                        'CORRUGATED GASKET 316 ENCAPSULATED']),
+    ('EXPANDED GRAPHITE', ['EXPANDED GRAPHITE', '98% EXPANDED GRAPHITE', 'EXFOLIATED GRAPHITE',
+                           'EXFOLIATED EXPANDED GRAPHITE', 'FLEXIBLE/EXPANDED GRAPHITE',
+                           'LEXIBLE/EXPANDED GRAPHITE']),
+    ('GRAPHITE', ['GRAPHITE', 'GRAFOIL', 'FLEXIBLE GRAPHITE', 'GRAPHOIL']),
+    # --- Thermiculite / high-temp ---
+    ('THERMICULITE 835', ['THERMICULITE 835', 'THERMICULIT 835']),
+    ('THERMICULITE 715', ['THERMICULITE 715', 'FLEXITALLIC TYPE THERMICULITE 715',
+                          'THERMICULIT 715', 'THERMICULITE 715 OR EQUIVALENT',
+                          'FLEXITALLIC TYPE THERMICULITE 715 OR EQUIVALENT']),
+    ('THERMICULITE', ['THERMICULITE', 'THERMICULIT']),
+    ('LEAKBLOK P200', ['LEAKBLOK P200', 'LEAKBOK P200', 'LEAKBLOK P 200']),
+    # --- Rubber family ---
+    ('VITON GASKET', ['VITON GASKET']),
+    ('VITON', ['VITON', 'FKM', 'FLUOROCARBON RUBBER', 'FLUOROELASTOMER']),
+    ('NEOPRENE', ['NEOPRENE', 'CHLOROPRENE', 'POLYCHLOROPRENE', 'CHLOROPRENE RUBBER',
+                  'POLYCHLOROPRENE RUBBER']),
+    ('EPDM', ['EPDM', 'EPDM RUBBER']),
+    ('NATURAL RUBBER', ['NATURAL RUBBER', 'POLYISOPRENE RUBBER']),
+    ('NITRILE BUTADIENE RUBBER', ['NBR', 'NITRILE BUTADIENE RUBBER', 'NITRILE RUBBER',
+                                   'NITRILE', 'BUNA-N', 'BUNA N', 'HNBR RUBBER', 'HNBR']),
+    ('SBR', ['SBR', 'STYRENE-BUTADIENE RUBBER', 'STYRENE BUTADIENE RUBBER',
+             'ASBESTOS FREE (WITH SBR)', 'ASBESTOS FREE WITH SBR']),
+    ('BUTYL RUBBER', ['BUTYL RUBBER', 'BUTYL', 'POLYISOBUTYLENE RUBBER']),
+    ('SILICONE RUBBER', ['SILICONE RUBBER', 'SILICONE']),
+    ('CHLOROSULFONATED RUBBER', ['CHLOROSULFONATED RUBBER', 'HYPALON']),
+    ('POLYURETHANE RUBBER', ['POLYURETHANE RUBBER', 'THERMOPLASTIC POLYURETHANE RUBBER',
+                              'POLYURETHANE']),
+    ('THERMOPLASTIC RUBBER', ['THERMOPLASTIC RUBBER', 'TPR', 'STYRENE-ETHYLENE-BUTYLENE-STYRENE',
+                               'SEBS', 'STYRENE-ISOPRENE-STYRENE', 'SIS',
+                               'ACRYLONITRILE BUTADIENE STYRENE RUBBER', 'ABS RUBBER']),
+    ('ETHYLENE VINYL ACETATE RUBBER', ['ETHYLENE-VINYL ACETATE RUBBER', 'EVA RUBBER', 'EVA']),
+    ('POLYAMIDE RUBBER', ['POLYAMIDE RUBBER', 'NYLON RUBBER']),
+    ('RUBBER', ['RUBBER', 'REINFORCED CHLOROPRENE RUBBER']),  # generic — will be flagged
+    # --- Compressed Asbestos (obsolete, flag) ---
+    ('COMPRESSED ASBESTOS', ['COMPRESSED ASBESTOS', 'CAF', 'ASBESTOS FIBER',
+                              'IS 2712', 'ASBESTOS']),
 ]
+
+
+# --- Normalise INSERT material label ---
+_INSERT_MATERIAL_NORM = {
+    'SS304': 'SS304', 'SS 304': 'SS304', '304': 'SS304', 'SS304L': 'SS304L',
+    'SS316': 'SS316', 'SS 316': 'SS316', '316': 'SS316', 'SS316L': 'SS316L',
+    'MS': 'MS', 'MILD STEEL': 'MS',
+    'STEEL': 'STEEL',
+}
+
+
+def _normalize_insert(raw: str) -> str:
+    key = re.sub(r'\s+', ' ', raw.strip().upper())
+    return _INSERT_MATERIAL_NORM.get(key, key)
 
 
 _RTJ_MOC_MAP = {
@@ -864,11 +946,11 @@ def _extract_size(desc: str) -> tuple[str | None, str]:
     # "NB100", "NB 40", "DN15", "DN 25" — DN and NB are identical (metric nominal bore)
     m = re.search(r'\b(?:NB|DN)\s*(\d+(?:\.\d+)?)\b', desc, re.IGNORECASE)
     if m:
-        return _nb_to_nps(int(float(m.group(1))), NB_TO_NPS), 'NB'
+        return f"{int(float(m.group(1)))} NB", 'NB'
     # "100NB", "100 NB", "15DN", "25 DN"
     m = re.search(r'(\d+(?:\.\d+)?)\s*(?:NB|DN)\b', desc, re.IGNORECASE)
     if m:
-        return _nb_to_nps(int(float(m.group(1))), NB_TO_NPS), 'NB'
+        return f"{int(float(m.group(1)))} NB", 'NB'
     # "NPS 2", "NPS 1.5", "NPS: 16" — NPS prefix with optional colon
     m = re.search(r'\bNPS\s*:?\s*(\d+(?:\.\d+)?)\b', desc, re.IGNORECASE)
     if m:
@@ -936,9 +1018,14 @@ def _extract_rating(desc: str) -> str | None:
     m = re.search(r'\bAPI[-\s]?(\d{4,5})\b', desc, re.IGNORECASE)
     if m and m.group(1) in _VALID_RATINGS:
         return f"API {m.group(1)}"
-    # "CL150", "CLASS 300", "#600", "150#", "300LB", "150 LBS"
+    # "#600", "#150 " — hash-prefix format (e.g. "DN25 #150", "DN450#150")
+    # Must check BEFORE "NNN#" to avoid matching NB size number before the hash
+    m = re.search(r'#\s*(150|300|600|900|1500|2500|3000|5000)\b', desc, re.IGNORECASE)
+    if m:
+        return f"{m.group(1)}#"
+    # "CL150", "CLASS 300", "150#", "300LB", "150 LBS"
     # Note: trailing \b after # fails at end-of-string since # is non-word; use # as standalone delimiter
-    m = re.search(r'(?:CL|CLASS|#)\s*[-.\s]*(\d+)|(\d+)\s*#|(\d+)\s*LBS?\b', desc, re.IGNORECASE)
+    m = re.search(r'(?:CL|CLASS)\s*[-.\s]*(\d+)|(\d+)\s*#|(\d+)\s*LBS?\b', desc, re.IGNORECASE)
     if m:
         val = m.group(1) or m.group(2) or m.group(3)
         if val in _VALID_RATINGS:
@@ -956,16 +1043,39 @@ def _extract_rating(desc: str) -> str | None:
     if m:
         return f"{m.group(2)}#"  # group(2) is always the higher value in this pattern
     # Standalone rating class with no suffix (e.g. "DN80-150" not handled above)
-    m = re.search(r'(?:[-\s])(150|300|600|900|1500|2500|3000)(?=\s|$|[,;#])', desc)
+    # Negative lookahead: don't match if followed by NB/DN (that's a size, not a rating)
+    m = re.search(r'(?:[-\s])(150|300|600|900|1500|2500|3000)(?=\s|$|[,;#])(?!\s*(?:NB|DN)\b)', desc)
     if m:
         return f"{m.group(1)}#"
     return None
 
 
 def _extract_moc(desc: str) -> str | None:
+    # 1. Generic "{base_moc} WITH {SS304|SS316|MS|STEEL} INSERT" pattern — check FIRST
+    #    e.g. "EPDM RUBBER WITH SS304 INSERT", "GRAPHITE WITH SS316 INSERT"
+    #    Must come before keyword scan so "EPDM" doesn't match before the full composite
+    m = re.search(
+        r'(.+?)\s+WITH\s+(SS304L?|SS316L?|UNS\s*\w+|MS|STEEL|MILD\s*STEEL)\s+INSERT',
+        desc, re.IGNORECASE,
+    )
+    if m:
+        base_text = m.group(1).strip()
+        insert_raw = m.group(2).strip()
+        insert = _normalize_insert(insert_raw)
+        # Find the base MOC from the base_text portion
+        base_moc = None
+        for moc_name, keywords in _MOC_KEYWORDS:
+            if any(kw.upper() in base_text.upper() for kw in keywords):
+                base_moc = moc_name
+                break
+        if base_moc:
+            return f"{base_moc} WITH {insert} INSERT"
+
+    # 2. Try phrase/keyword matching (most specific entries are listed first)
     for moc_name, keywords in _MOC_KEYWORDS:
         if any(kw.upper() in desc for kw in keywords):
             return moc_name
+
     return None
 
 
@@ -999,7 +1109,11 @@ def _extract_thickness(desc: str) -> float | None:
 
 def _extract_standard(desc: str) -> str | None:
     if 'B16.47' in desc:
-        return 'ASME B16.47 ( SERIES B )' if 'SERIES B' in desc else 'ASME B16.47'
+        if 'SERIES B' in desc:
+            return 'ASME B16.47 ( SERIES B )'
+        if 'SERIES A' in desc:
+            return 'ASME B16.47 ( SERIES A )'
+        return 'ASME B16.47'
     if 'B16.20' in desc or re.search(r'B16/A\b', desc, re.IGNORECASE):
         return 'ASME B16.20'
     if 'B16.21' in desc:

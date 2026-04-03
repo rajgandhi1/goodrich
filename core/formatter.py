@@ -53,7 +53,7 @@ def format_description(item: dict) -> str:
     if not (size and rating and moc):
         return ''
 
-    size_str = size if '"' in size else f'{size}"'
+    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
     rating_str = _fmt_rating(rating)
 
     parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK ,{moc}']
@@ -106,7 +106,7 @@ def _fmt_kamm(item: dict) -> str:
 
     if not (size and rating and moc):
         return ''
-    size_str = size if '"' in size else f'{size}"'
+    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
     rating_str = _fmt_rating(rating)
     parts = [f'SIZE: {size_str} X {rating_str} X {_fmt_num(thk)}MM THK,{moc}']
     if standard:
@@ -132,7 +132,7 @@ def _fmt_isk(item: dict) -> str:
     rating = item.get('rating')
     if not (size and rating):
         return ''
-    size_str = size if '"' in size else f'{size}"'
+    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
     rating_str = _fmt_rating(rating)
     suffix = 'ISK STYLE-N (TYPE F - RF) TO SUIT ASME B16.5 (TYPE-RTJ)' if item.get('gasket_type') == 'ISK_RTJ' else 'INSULATING GASKET KIT'
     return f'SIZE: {size_str} X {rating_str}, {suffix}'
