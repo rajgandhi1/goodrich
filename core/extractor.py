@@ -514,7 +514,7 @@ _MOC_KEYWORDS = [
                                       'ARAMIDE FIBER WITH NBR', 'ARA']),
     ('ARAMID FIBER', ['ARAMID FIBRE', 'ARAMID FIBER', 'ARAMIDE FIBER', 'ARAMIDE FIBRE', 'ARAMID']),
     ('CERAMIC FIBER', ['CERAMIC FIBER', 'CERAMIC FIBRE', 'CERAFELT', 'CERAMIC WOOL',
-                       'CERAMIC PAPER', 'CERAFIBRE', 'CER']),
+                       'CERAMIC PAPER', 'CERAFIBRE']),
     ('CORK', ['CORK']),
     ('LEATHER', ['LEATHER']),
     # --- PTFE family ---
