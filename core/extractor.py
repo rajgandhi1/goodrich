@@ -791,7 +791,7 @@ def _regex_extract(description: str) -> dict:
             'standard': 'ASME B16.5',
             'special': _extract_special(desc),
             **_base_sw_none, **_base_rtj_none,
-            'confidence': 'HIGH' if (size and _extract_rating(desc)) else 'LOW',
+            'confidence': 'MEDIUM' if (size and _extract_rating(desc)) else 'LOW',
         }
 
     # --- Priority 2: KAMM (kammprofile) ---
