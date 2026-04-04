@@ -56,16 +56,16 @@ with col2:
     customer = st.text_input('Customer name', placeholder='e.g. VA Tech Wabag')
     project_ref = st.text_input('Project / PO reference', placeholder='e.g. HPCL Vizag Refinery')
 
-groq_key = st.sidebar.text_input('Groq API Key (optional — enables AI extraction)', type='password')
-if groq_key:
+openai_key = st.sidebar.text_input('OpenAI API Key (optional — enables AI extraction)', type='password')
+if openai_key:
     import os
     import core.extractor as _ext
-    if os.environ.get('GROQ_API_KEY') != groq_key:
-        os.environ['GROQ_API_KEY'] = groq_key
-        _ext._groq_client = None
-    st.sidebar.success('Groq API key set')
+    if os.environ.get('OPENAI_API_KEY') != openai_key:
+        os.environ['OPENAI_API_KEY'] = openai_key
+        _ext._openai_client = None
+    st.sidebar.success('OpenAI API key set')
 else:
-    st.sidebar.info('No Groq key — using rule-based extraction')
+    st.sidebar.info('No OpenAI key — using rule-based extraction')
 
 if st.button('Process Enquiry', type='primary', width="stretch"):
     raw_items = []

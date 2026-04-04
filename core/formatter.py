@@ -62,7 +62,8 @@ def format_description(item: dict) -> str:
     if face:
         parts.append(f',{face}')
     if standard:
-        parts.append(f',{standard}')
+        # SPIRAL_WOUND appends standard with no comma; SOFT_CUT uses comma
+        parts.append(standard if gtype == 'SPIRAL_WOUND' else f',{standard}')
 
     return ' '.join(parts)
 
@@ -134,8 +135,13 @@ def _fmt_isk(item: dict) -> str:
         return ''
     size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
     rating_str = _fmt_rating(rating)
-    suffix = 'ISK STYLE-N (TYPE F - RF) TO SUIT ASME B16.5 (TYPE-RTJ)' if item.get('gasket_type') == 'ISK_RTJ' else 'INSULATING GASKET KIT'
-    return f'SIZE: {size_str} X {rating_str}, {suffix}'
+    special = item.get('special') or ''
+    if item.get('gasket_type') == 'ISK_RTJ':
+        spec = f'({special}) ' if special else ''
+        return f'SIZE: {size_str} X {rating_str}, ISK STYLE-N (TYPE F - RF) {spec}TO SUIT ASME B16.5 (TYPE-RTJ)'
+    else:
+        spec = f', {special}' if special else ' KIT'
+        return f'SIZE: {size_str} X {rating_str}, INSULATING GASKET{spec}'
 
 
 def _fmt_rating(rating: str) -> str:

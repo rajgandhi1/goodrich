@@ -202,7 +202,10 @@ def _cell_str(row: tuple, idx: int | None) -> str | None:
     if idx is None or idx >= len(row):
         return None
     val = row[idx]
-    return str(val).strip() if val is not None else None
+    if val is None:
+        return None
+    # Normalize Shift+Enter newlines within a cell into a single space
+    return re.sub(r'[\r\n]+', ' ', str(val)).strip()
 
 
 def _cell_float(row: tuple, idx: int | None) -> float | None:

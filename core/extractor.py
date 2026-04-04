@@ -1,7 +1,7 @@
 from __future__ import annotations
 """
 Extracts structured gasket fields from raw description strings.
-Primary: LLM (Groq API). Fallback: regex-based extraction.
+Primary: LLM (OpenAI API). Fallback: regex-based extraction.
 """
 import os
 import re
@@ -11,20 +11,20 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_groq_client = None
+_openai_client = None
 
 
-def _get_groq_client():
-    global _groq_client
-    if _groq_client is not None:
-        return _groq_client
-    api_key = os.environ.get('GROQ_API_KEY') or _get_streamlit_secret('GROQ_API_KEY')
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    api_key = os.environ.get('OPENAI_API_KEY') or _get_streamlit_secret('OPENAI_API_KEY')
     if not api_key:
         return None
     try:
-        from groq import Groq
-        _groq_client = Groq(api_key=api_key, timeout=10.0)
-        return _groq_client
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=api_key, timeout=60.0)
+        return _openai_client
     except Exception:
         return None
 
@@ -85,7 +85,7 @@ Rules:
 - face_type: null for spiral wound and RTJ; RF/FF/null for soft cut
 - thickness_mm: null for RTJ (rings have no thickness field); extract number for others; null if not stated
 - Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut NPS≤24"; ASME B16.47 for soft cut NPS≥26" (large bore); ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound. If customer specifies "SERIES A" or "SERIES B" in the description, include it: "ASME B16.47 ( SERIES A )" or "ASME B16.47 ( SERIES B )"
-- special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc.
+- special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc. For ISK/ISK_RTJ: also capture the full material spec details in special (e.g. "GRE (G10), W/316SS CORE, GRE (G10) SLEEVES AND WASHER" or "SET:G10 GASKET CORE 4 MM THK WITH PRIMARY SEAL PTFE SPRING ENERGISED RING, G10 WASHER 3 MM THK & SLEEVES, ZINC PLATED CS WASHER 3 MM THK") — pass these through verbatim from the customer description.
 - SOFT_CUT brand-name materials: trade names like "KROLLER & ZILLER", "KLINGER", "DONIT", "GARLOCK" followed by a grade code (e.g. "G-S-T-P/S") are SOFT_CUT gaskets — set moc to the full brand + grade string (e.g. "KROLLER & ZILLER (G-S-T-P/S)"). "WITH SPACER" means a spacer ring is included but does NOT change the gasket_type — it remains SOFT_CUT; capture "WITH SPACER" in the special field.
 - confidence: HIGH if all key fields clear, LOW if ambiguous"""
 
@@ -96,6 +96,11 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     Deduplicates by description. Regex-first: only sends ambiguous items to LLM,
     in batches to minimise API calls.
     """
+    # Normalize embedded newlines (e.g. from Shift+Enter in Excel or CSV) to spaces
+    for item in items:
+        if item.get('description'):
+            item['description'] = re.sub(r'[\r\n]+', ' ', item['description']).strip()
+
     unique_descs_list = list({item['description'] for item in items})
     total = len(unique_descs_list)
     cache = {}
@@ -120,7 +125,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     _NON_DEFAULT_TYPES = {'SPIRAL_WOUND', 'RTJ', 'KAMM', 'DJI', 'ISK', 'ISK_RTJ'}
 
     if needs_llm:
-        client = _get_groq_client()
+        client = _get_openai_client()
         for batch_start in range(0, len(needs_llm), _BATCH_SIZE):
             batch = needs_llm[batch_start:batch_start + _BATCH_SIZE]
             llm_results = _llm_extract_batch(client, batch) if client else [None] * len(batch)
@@ -155,6 +160,10 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
                     if regex_result.get('size_type') == 'NB' and regex_result.get('size'):
                         llm_result['size'] = regex_result['size']
                         llm_result['size_type'] = 'NB'
+                    # Always trust regex for NPS sizes — LLM may wrongly return NB for "NPS 10"/"NPS 12"
+                    if regex_result.get('size_type') == 'NPS' and regex_result.get('size'):
+                        llm_result['size'] = regex_result['size']
+                        llm_result['size_type'] = 'NPS'
                     cache[desc] = llm_result
                 else:
                     cache[desc] = regex_result
@@ -174,7 +183,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
 
 
 def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
-    """Send a batch of descriptions to Groq in one API call. Returns list of dicts (or None on failure)."""
+    """Send a batch of descriptions to OpenAI in one API call. Returns list of dicts (or None on failure)."""
     if not client:
         return [None] * len(descriptions)
 
@@ -194,7 +203,7 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
     for attempt in range(3):
         try:
             resp = client.chat.completions.create(
-                model='llama-3.1-8b-instant',
+                model='gpt-4o-mini',
                 messages=[
                     {'role': 'system', 'content': _BATCH_SYSTEM_PROMPT},
                     {'role': 'user', 'content': user_msg},
@@ -212,7 +221,7 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
         except Exception as e:
             msg = str(e)
             if '429' in msg or 'rate_limit' in msg.lower():
-                wait = _parse_retry_wait(msg)
+                wait = 5.0 * (attempt + 1)
                 logger.info(f'Rate limited — waiting {wait:.1f}s (attempt {attempt + 1}/3)')
                 time.sleep(wait)
             else:
@@ -220,14 +229,6 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
                 return [None] * len(descriptions)
     logger.warning('LLM batch extraction failed after 3 attempts')
     return [None] * len(descriptions)
-
-
-def _parse_retry_wait(error_msg: str) -> float:
-    """Extract the suggested wait time from a Groq 429 error message."""
-    m = re.search(r'try again in ([\d.]+)s', error_msg)
-    if m:
-        return float(m.group(1)) + 0.5  # small buffer
-    return 12.0  # safe default
 
 
 def _get_streamlit_secret(key: str) -> str | None:
@@ -926,18 +927,20 @@ def _regex_extract(description: str) -> dict:
     # --- Priority 7: NPS/NB soft cut ---
     size, size_type = _extract_size(desc)
     moc = _extract_moc(desc)
+    rating = _extract_rating(desc)
+    face = _extract_face(desc)
     return {
         'size': size, 'size_type': size_type,
         'od_mm': None, 'id_mm': None,
-        'rating': _extract_rating(desc),
+        'rating': rating,
         'gasket_type': 'SOFT_CUT',
         'moc': moc,
-        'face_type': _extract_face(desc),
+        'face_type': face,
         'thickness_mm': _extract_thickness(desc),
         'standard': _extract_standard(desc),
         'special': _extract_special(desc),
         **_base_sw_none, **_base_rtj_none,
-        'confidence': 'MEDIUM' if (size and moc) else 'LOW',
+        'confidence': 'HIGH' if (size and rating and moc and face) else ('MEDIUM' if (size and moc) else 'LOW'),
     }
 
 

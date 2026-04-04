@@ -266,7 +266,7 @@ _SW_RING_ALIASES = {
 # Filler material codes/aliases for spiral wound and KAMM gaskets
 # Source: Customer Enq - Quote Data - Material .csv (Filler Material section)
 _SW_FILLER_ALIASES = {
-    'FG': 'GRAPHITE', 'FLEXIBLE GRAPHITE': 'GRAPHITE', 'GRAPHITE': 'GRAPHITE',
+    'FG': 'FLEXIBLE GRAPHITE', 'FLEXIBLE GRAPHITE': 'FLEXIBLE GRAPHITE', 'GRAPHITE': 'GRAPHITE',
     'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
     'PTFE': 'PTFE', 'TEFLON': 'PTFE', 'VIRGIN PTFE': 'PTFE',
     'CNAF': 'CNAF', 'NON ASBESTOS': 'CNAF', 'NAF': 'CNAF',
@@ -530,9 +530,10 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
     # API pressure class rating (API 5000, API 10000, etc.) → API 6A standard
     rating = item.get('rating') or ''
-    if rating.startswith('API ') and item.get('standard') != 'API 6A':
+    if rating.startswith('API ') or item.get('standard') == 'API 6A':
         item['standard'] = 'API 6A'
-    elif not item.get('standard'):
+    else:
+        # RTJ rings are always B16.20 — B16.47 does not apply (no large-bore exception)
         item['standard'] = 'ASME B16.20'
     item['face_type'] = None
     item['thickness_mm'] = None
