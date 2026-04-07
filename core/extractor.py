@@ -70,7 +70,7 @@ Each extraction must follow this schema:
 {_FIELD_SCHEMA}
 
 Rules:
-- size: If NPS/inch given (e.g. "6\\"", "1.5\\"") use as-is. If NB or DN given (metric nominal bore), output as "X NB" e.g. "25 NB", "100 NB", "450 NB" — do NOT convert to inches. DN = NB (identical). For OD×ID dimensions use "OD NNNmm x ID NNNmm". Set size_type accordingly: NPS for inch sizes, NB for NB/DN sizes, OD_ID for OD/ID dimensions.
+- size: If NPS/inch given (e.g. "6\\"", "1.5\\"") use as-is. If NB or DN given (metric nominal bore), output as "X NB" e.g. "25 NB", "100 NB", "450 NB" — do NOT convert to inches. DN = NB (identical). For OD×ID dimensions use "OD NNNmm x ID NNNmm". Set size_type accordingly: NPS for inch sizes, NB for NB/DN sizes, OD_ID for OD/ID dimensions. If the description starts with or contains the word "INCH" as a unit indicator and a bare number appears elsewhere (especially at the end after a comma, e.g. "INCH GASKET, PTFE, FULL FACE ASME B16.21, 1.5 MM THK, ASME CLASS 150,1"), treat that bare trailing number as the NPS size in inches (output "1\\"" for 1). Never convert an NPS inch size to NB/DN format.
 - rating: use format "150#", "300#", "PN 10", "PN 16". Valid ASME classes: 150, 300, 600, 900, 1500, 2500, 3000.
 - gasket_type: SPIRAL_WOUND if description mentions "spiral wound", "spiral seal", "spiral winding", "SPW", "SPWD", "SPRL-WND", "WND", "SW gasket", "SPIRL WOUND" (typo), or combination of winding material + filler + ring. "WND" alone means winding (e.g. "ALLOY 20 WND PTFE FILL ALLOY 20 I/R CS O/R" = SPIRAL_WOUND with ALLOY 20 winding, PTFE filler, ALLOY 20 inner ring, CS outer ring)
 - gasket_type: RTJ if description mentions "ring joint", "RTJ", "R.T.J", "ring type joint", "ring type gasket", "octagonal ring", "oval ring", "JOINT TORE" (French), "JOINT TORIQUE" (French), RTJ ring number (R-nn), or API 6A ring numbers (RX-nn, BX-nn)
@@ -93,8 +93,9 @@ Rules:
 def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     """
     Extract structured fields for all items.
-    Deduplicates by description. Regex-first: only sends ambiguous items to LLM,
-    in batches to minimise API calls.
+    LLM is primary — every description goes to gpt-4o-mini.
+    Regex is a silent fallback only when LLM is unavailable or fails.
+    Deduplicates identical descriptions before batching.
     """
     # Normalize embedded newlines (e.g. from Shift+Enter in Excel or CSV) to spaces
     for item in items:
@@ -106,70 +107,15 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     cache = {}
     done = 0
 
-    # Pass 1: regex extraction for all
-    needs_llm = []
-    for desc in unique_descs_list:
-        result = _regex_extract(desc)
-        if result['confidence'] == 'HIGH':
-            cache[desc] = result
+    client = _get_openai_client()
+    for batch_start in range(0, len(unique_descs_list), _BATCH_SIZE):
+        batch = unique_descs_list[batch_start:batch_start + _BATCH_SIZE]
+        llm_results = _llm_extract_batch(client, batch) if client else [None] * len(batch)
+        for desc, llm_result in zip(batch, llm_results):
+            cache[desc] = llm_result if llm_result else _regex_extract(desc)
             done += 1
             if progress_cb:
                 progress_cb(done, total)
-        else:
-            needs_llm.append(desc)
-
-    # Pass 2: batch LLM for ambiguous items
-    # Keep regex results indexed so we can guard against LLM type downgrades
-    regex_cache = {desc: _regex_extract(desc) for desc in needs_llm}
-
-    _NON_DEFAULT_TYPES = {'SPIRAL_WOUND', 'RTJ', 'KAMM', 'DJI', 'ISK', 'ISK_RTJ'}
-
-    if needs_llm:
-        client = _get_openai_client()
-        for batch_start in range(0, len(needs_llm), _BATCH_SIZE):
-            batch = needs_llm[batch_start:batch_start + _BATCH_SIZE]
-            llm_results = _llm_extract_batch(client, batch) if client else [None] * len(batch)
-            for desc, llm_result in zip(batch, llm_results):
-                regex_result = regex_cache[desc]
-                if llm_result:
-                    regex_type = regex_result.get('gasket_type', 'SOFT_CUT')
-                    # Always trust regex for non-default types — prevents DJI→SPW, SPW→RTJ
-                    # lateral misclassifications by LLM
-                    if regex_type in _NON_DEFAULT_TYPES:
-                        llm_result['gasket_type'] = regex_type
-                    # Back-fill regex-extracted SW/RTJ components that LLM missed
-                    _sw_fields = ('sw_winding_material', 'sw_filler', 'sw_inner_ring', 'sw_outer_ring')
-                    for field in _sw_fields:
-                        if regex_result.get(field) and not llm_result.get(field):
-                            llm_result[field] = regex_result[field]
-                    if regex_result.get('ring_no') and not llm_result.get('ring_no'):
-                        llm_result['ring_no'] = regex_result['ring_no']
-                    # Back-fill OD/ID dimensions for KAMM/DJI when LLM missed them
-                    for dim_field in ('od_mm', 'id_mm'):
-                        if regex_result.get(dim_field) and not llm_result.get(dim_field):
-                            llm_result[dim_field] = regex_result[dim_field]
-                    if regex_result.get('size_type') == 'OD_ID' and llm_result.get('size_type') != 'OD_ID':
-                        llm_result['size_type'] = 'OD_ID'
-                        if regex_result.get('size') and not llm_result.get('od_mm'):
-                            llm_result['size'] = regex_result['size']
-                    # Back-fill size and rating when LLM returns null but regex found them
-                    for field in ('size', 'size_type', 'rating'):
-                        if regex_result.get(field) and not llm_result.get(field):
-                            llm_result[field] = regex_result[field]
-                    # Always trust regex for NB/DN sizes — LLM may convert to NPS inches
-                    if regex_result.get('size_type') == 'NB' and regex_result.get('size'):
-                        llm_result['size'] = regex_result['size']
-                        llm_result['size_type'] = 'NB'
-                    # Always trust regex for NPS sizes — LLM may wrongly return NB for "NPS 10"/"NPS 12"
-                    if regex_result.get('size_type') == 'NPS' and regex_result.get('size'):
-                        llm_result['size'] = regex_result['size']
-                        llm_result['size_type'] = 'NPS'
-                    cache[desc] = llm_result
-                else:
-                    cache[desc] = regex_result
-                done += 1
-                if progress_cb:
-                    progress_cb(done, total)
 
     results = []
     for item in items:
