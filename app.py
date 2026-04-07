@@ -63,7 +63,22 @@ if openai_key:
     if os.environ.get('OPENAI_API_KEY') != openai_key:
         os.environ['OPENAI_API_KEY'] = openai_key
         _ext._openai_client = None
-    st.sidebar.success('OpenAI API key set')
+        # Validate the new key immediately
+        try:
+            from openai import OpenAI
+            _test_client = OpenAI(api_key=openai_key, timeout=10.0)
+            _test_client.models.list()
+            st.sidebar.success('OpenAI API key valid')
+        except Exception as _e:
+            err_msg = str(_e)
+            if 'auth' in err_msg.lower() or '401' in err_msg or 'invalid' in err_msg.lower():
+                st.sidebar.error('Invalid API key — check and re-enter')
+            else:
+                st.sidebar.warning(f'Key set but could not verify: {err_msg}')
+            os.environ['OPENAI_API_KEY'] = ''
+            _ext._openai_client = None
+    else:
+        st.sidebar.success('OpenAI API key valid')
 else:
     st.sidebar.info('No OpenAI key — using rule-based extraction')
 
