@@ -45,8 +45,12 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
             prev.endswith(',')
             or re.search(r'\b(?:OUTER\s*RING|INNER\s*RING|OUTER|RING|MATERIAL)\s*$', prev, re.IGNORECASE)
         )
+        # Previous line ends with a standards-body acronym — next line is its number (e.g. "ANSI\n B16.47")
+        prev_ends_std_prefix = bool(
+            re.search(r'\b(?:ANSI|ASME|API|ISO|EN|DIN|BS|ASTM|NACE|IBR|AWS)\s*$', prev, re.IGNORECASE)
+        )
         curr_is_field_continuation = bool(re.match(r'^[A-Z][A-Z\s]+:\s*\S', line))
-        if not starts_with_number and (prev_ends_mid or curr_is_field_continuation):
+        if not starts_with_number and (prev_ends_mid or prev_ends_std_prefix or curr_is_field_continuation):
             merged[-1] = prev + ' ' + line
         else:
             merged.append(line)
