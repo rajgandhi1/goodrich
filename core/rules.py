@@ -334,6 +334,28 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
     return moc
 
 
+_B1647_FLAG = (
+    'Large bore (NPS ≥ 26") — ASME B16.47 Series A (ex-API 605, larger OD) and '
+    'Series B (ex-MSS SP-44, smaller OD) have DIFFERENT gasket dimensions — '
+    'confirm which series applies with customer'
+)
+
+
+def _set_b1647_standard(item: dict, flags: list, applied_defaults: list) -> None:
+    """Normalize B16.47 standard and flag if series A/B not specified."""
+    std = (item.get('standard') or '').upper()
+    if 'SERIES A' in std or 'SERIES-A' in std:
+        item['standard'] = 'ASME B16.47 ( SERIES A )'
+        return
+    if 'SERIES B' in std or 'SERIES-B' in std:
+        item['standard'] = 'ASME B16.47 ( SERIES B )'
+        return
+    item['standard'] = 'ASME B16.47'
+    if _B1647_FLAG not in flags:
+        flags.append(_B1647_FLAG)
+    applied_defaults.append('standard set to ASME B16.47 — Series A or B unknown, confirm with customer')
+
+
 def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     """Apply spiral wound-specific defaults and validation (mutates item in place)."""
     winding_mat = item.get('sw_winding_material')
@@ -384,10 +406,10 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # Standard based on size
     if not item.get('standard'):
         if size_val is not None and size_val >= 26:
-            item['standard'] = 'ASME B16.47 ( SERIES B )'
+            _set_b1647_standard(item, flags, applied_defaults)
         else:
             item['standard'] = 'ASME B16.20'
-        applied_defaults.append('standard defaulted to ' + item['standard'])
+            applied_defaults.append('standard defaulted to ASME B16.20')
 
 
 # ---------------------------------------------------------------------------
@@ -531,13 +553,21 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
             flags.append('Ring number not in lookup table — enter manually (check ASME B16.20)')
             item['ring_no'] = None
 
-    # API pressure class rating (API 5000, API 10000, etc.) → API 6A standard
+    # Set standard based on ring prefix, rating, or bore size
+    rn_upper = (item.get('ring_no') or '').upper()
     rating = item.get('rating') or ''
     if rating.startswith('API ') or item.get('standard') == 'API 6A':
         item['standard'] = 'API 6A'
+    elif rn_upper.startswith('RX-'):
+        item['standard'] = 'NACE MR-01-75 / ISO 15156, API 6B'
+    elif rn_upper.startswith('BX-'):
+        item['standard'] = 'API 6A'
     else:
-        # RTJ rings are always B16.20 — B16.47 does not apply (no large-bore exception)
-        item['standard'] = 'ASME B16.20'
+        size_val = _size_nps_value_from_item(item)
+        if size_val is not None and size_val >= 26:
+            _set_b1647_standard(item, flags, applied_defaults)
+        else:
+            item['standard'] = 'ASME B16.20'
     item['face_type'] = None
     item['thickness_mm'] = None
 
@@ -577,10 +607,10 @@ def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
     if item.get('size_type') != 'OD_ID' and not item.get('standard'):
         size_val = _size_nps_value(item.get('size_norm'))
         if size_val is not None and size_val >= 26:
-            item['standard'] = 'ASME B16.47 (SERIES - B)'
+            _set_b1647_standard(item, flags, applied_defaults)
         else:
             item['standard'] = 'ASME B16.20'
-        applied_defaults.append('standard defaulted to ' + item['standard'])
+            applied_defaults.append('standard defaulted to ASME B16.20')
 
     item['face_type'] = None
 
@@ -590,13 +620,13 @@ def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
 # ---------------------------------------------------------------------------
 
 def _apply_dji_rules(item: dict, flags: list, applied_defaults: list) -> None:
-    if not item.get('moc'):
-        flags.append('DJI: jacket material not identified')
     if not item.get('od_mm') or not item.get('id_mm'):
         flags.append('DJI: OD and ID dimensions required')
+    if not item.get('thickness_mm'):
+        flags.append('DJI: thickness not specified — confirm with customer')
     item['face_type'] = None
     item['standard'] = None
-    item['rating'] = None  # DJI has no class
+    item['rating'] = None  # DJI has no pressure class
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +686,12 @@ def apply_rules(item: dict) -> dict:
 
     gasket_type = item.get('gasket_type', 'SOFT_CUT')
 
+    # If "non-metallic" is mentioned in the original description, force SOFT_CUT
+    raw_desc = (item.get('description') or '').upper()
+    if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT',):
+        gasket_type = 'SOFT_CUT'
+        item['gasket_type'] = 'SOFT_CUT'
+
     if gasket_type == 'SPIRAL_WOUND':
         _apply_sw_rules(item, flags, applied_defaults)
         item['dimensions'] = None
@@ -670,6 +706,12 @@ def apply_rules(item: dict) -> dict:
         item['dimensions'] = None
     elif gasket_type in ('ISK', 'ISK_RTJ'):
         _apply_isk_rules(item, flags, applied_defaults)
+        item['dimensions'] = None
+    elif gasket_type not in ('SOFT_CUT',):
+        # Unrecognised gasket type — pass through but flag for manual review
+        flags.append(
+            f'Unrecognised gasket type "{gasket_type}" — verify and convert to GGPL format manually'
+        )
         item['dimensions'] = None
     else:
         # --- Normalize MOC (soft cut) ---
@@ -715,12 +757,7 @@ def apply_rules(item: dict) -> dict:
                 # NPS ≥ 26" → ASME B16.47 (large bore); below 26" → ASME B16.21
                 nps_val = _size_nps_value_from_item(item)
                 if nps_val is not None and nps_val >= 26:
-                    item['standard'] = 'ASME B16.47'
-                    applied_defaults.append('standard defaulted to ASME B16.47 (large bore NPS ≥ 26")')
-                    flags.append(
-                        'Large bore (NPS ≥ 26") — ASME B16.47 has Series A (API 605) and Series B (MSS SP-44): '
-                        'confirm which series with customer — dimensions differ'
-                    )
+                    _set_b1647_standard(item, flags, applied_defaults)
                 else:
                     item['standard'] = 'ASME B16.21'
                     applied_defaults.append('standard defaulted to ASME B16.21')
@@ -742,9 +779,14 @@ def apply_rules(item: dict) -> dict:
             else:
                 nps_val = _size_nps_value_from_item(item)
                 if nps_val is not None and nps_val >= 26:
-                    item['standard'] = 'ASME B16.47'
+                    _set_b1647_standard(item, flags, applied_defaults)
                 else:
                     item['standard'] = 'ASME B16.21'
+
+    # --- Normalize B16.47: flag if series not specified (handles LLM-extracted standards) ---
+    std = item.get('standard') or ''
+    if 'B16.47' in std and 'SERIES' not in std.upper():
+        _set_b1647_standard(item, flags, applied_defaults)
 
     # --- Default: UoM ---
     if item.get('uom') == 'M':

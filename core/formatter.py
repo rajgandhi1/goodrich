@@ -53,7 +53,7 @@ def format_description(item: dict) -> str:
     if not (size and rating and moc):
         return ''
 
-    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
+    size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
 
     parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK ,{moc}']
@@ -62,27 +62,58 @@ def format_description(item: dict) -> str:
     if face:
         parts.append(f',{face}')
     if standard:
-        # SPIRAL_WOUND appends standard with no comma; SOFT_CUT uses comma
-        parts.append(standard if gtype == 'SPIRAL_WOUND' else f',{standard}')
+        parts.append(f',{standard}')
 
     return ' '.join(parts)
 
 
+_RTJ_COATINGS = ('GALVANISED', 'ZINC PLATED', 'PHOSPHATE COATED', 'NICKEL PLATED', 'CADMIUM PLATED')
+
+
+def _split_rtj_moc(moc: str) -> tuple[str, str | None]:
+    """Split 'SOFTIRON GALVANISED' → ('SOFTIRON', 'GALVANISED'). Returns (moc, coating)."""
+    upper = moc.upper()
+    for coating in _RTJ_COATINGS:
+        if upper.endswith(coating):
+            base = moc[:len(moc) - len(coating)].strip()
+            return base, coating
+    return moc, None
+
+
 def _fmt_rtj(item: dict) -> str:
-    """SIZE : R-23 ,RTJ , OCT ,SOFTIRON ,90 BHN HARDNESS ,ASME B16.20"""
     ring_no = item.get('ring_no')
     moc = item.get('moc')
     groove = item.get('rtj_groove_type') or 'OCT'
     hardness_spec = item.get('rtj_hardness_spec')
     bhn = item.get('rtj_hardness_bhn')
     standard = item.get('standard') or 'ASME B16.20'
-    if not (ring_no and moc):
+
+    if not moc:
         return ''
-    parts = [f'SIZE : {ring_no} ,RTJ , {groove} ,{moc}']
-    if hardness_spec:
-        parts.append(f',{hardness_spec}')
-    elif bhn:
-        parts.append(f',{int(bhn)} BHN HARDNESS')
+
+    moc_base, coating = _split_rtj_moc(moc)
+    hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)} BHN HARDNESS' if bhn else None)
+
+    # Large bore RTJ: no ring number — use SIZE: X" X RATING# format
+    if not ring_no:
+        size = item.get('size')
+        rating = item.get('rating')
+        if not (size and rating):
+            return ''
+        size_str = size if ('"' in size or 'NB' in size) else f'{size}"'
+        parts = [f'SIZE : {size_str} X {_fmt_rating(rating)} ,RTJ ,{groove} ,{moc_base}']
+        if coating:
+            parts.append(f',{coating}')
+        if hardness_str:
+            parts.append(f',{hardness_str}')
+        parts.append(f',{standard}')
+        return ' '.join(parts)
+
+    parts = [f'SIZE : {ring_no} ,RTJ ,{groove} ,{moc_base}']
+    if coating:
+        parts.append(f',{coating}')
+    if hardness_str:
+        parts.append(f',{hardness_str}')
     parts.append(f',{standard}')
     return ' '.join(parts)
 
@@ -107,7 +138,7 @@ def _fmt_kamm(item: dict) -> str:
 
     if not (size and rating and moc):
         return ''
-    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
+    size_str = _fmt_size(size, 'KAMM')
     rating_str = _fmt_rating(rating)
     parts = [f'SIZE: {size_str} X {rating_str} X {_fmt_num(thk)}MM THK,{moc}']
     if standard:
@@ -120,8 +151,8 @@ def _fmt_dji(item: dict) -> str:
     od = item.get('od_mm')
     id_ = item.get('id_mm')
     thk = item.get('thickness_mm')
-    moc = item.get('moc') or ''
-    if not (od and id_):
+    moc = item.get('moc')
+    if not (od and id_ and moc):
         return ''
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
     return f'SIZE: {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}, DOUBLE JACKET GASKET WITH {moc} + GRAPHITE FILLED'
@@ -133,15 +164,28 @@ def _fmt_isk(item: dict) -> str:
     rating = item.get('rating')
     if not (size and rating):
         return ''
-    size_str = size if ('"' in size or 'NB' in size or 'MM' in size) else f'{size}"'
+    gtype = item.get('gasket_type', 'ISK')
+    size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
     special = item.get('special') or ''
-    if item.get('gasket_type') == 'ISK_RTJ':
+    if gtype == 'ISK_RTJ':
         spec = f'({special}) ' if special else ''
         return f'SIZE: {size_str} X {rating_str}, ISK STYLE-N (TYPE F - RF) {spec}TO SUIT ASME B16.5 (TYPE-RTJ)'
     else:
         spec = f', {special}' if special else ' KIT'
         return f'SIZE: {size_str} X {rating_str}, INSULATING GASKET{spec}'
+
+
+def _fmt_size(size: str, gtype: str) -> str:
+    """Format size string. NB sizes use DN prefix for spiral wound (EN convention)."""
+    import re as _re
+    if '"' in size or 'MM' in size:
+        return size
+    # NB size: "100 NB" → "DN100" for SW, keep as-is for soft cut
+    m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', size.strip(), _re.IGNORECASE)
+    if m:
+        return f'DN{int(float(m.group(1)))}' if gtype == 'SPIRAL_WOUND' else size
+    return f'{size}"'
 
 
 def _fmt_rating(rating: str) -> str:
