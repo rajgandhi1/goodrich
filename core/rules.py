@@ -514,9 +514,30 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     if not outer_ring:
         flags.append('Missing critical field: outer ring (mandatory for spiral wound gaskets — e.g. CS, SS304)')
 
-    # Inner ring is optional but should be confirmed
+    # Inner ring mandatory rules (ASME B16.20)
+    is_pn_sw = str(item.get('rating') or '').upper().startswith('PN')
+    cls_m = re.search(r'(\d+)', str(item.get('rating') or ''))
+    pressure_cls = int(cls_m.group(1)) if cls_m else 0
+    inner_mandatory = False
+    inner_reason = ''
+    if 'PTFE' in (filler or '').upper():
+        inner_mandatory = True
+        inner_reason = 'PTFE-filled SPW always requires inner ring (ASME B16.20)'
+    elif pressure_cls == 2500 and size_val is not None and size_val >= 4:
+        inner_mandatory = True
+        inner_reason = 'Inner ring mandatory: 2500# NPS ≥ 4" (ASME B16.20)'
+    elif pressure_cls == 1500 and size_val is not None and size_val >= 12:
+        inner_mandatory = True
+        inner_reason = 'Inner ring mandatory: 1500# NPS ≥ 12" (ASME B16.20)'
+    elif pressure_cls == 900 and size_val is not None and size_val >= 24:
+        inner_mandatory = True
+        inner_reason = 'Inner ring mandatory: 900# NPS ≥ 24" (ASME B16.20)'
+
     if not inner_ring:
-        flags.append('Inner ring not specified — confirm if inner ring is required')
+        if inner_mandatory:
+            flags.append(f'Missing critical field: inner ring — {inner_reason}')
+        else:
+            flags.append('Inner ring not specified — confirm if required for this service')
 
     # Handle "SS" without grade — ambiguous, cannot build valid MOC
     grade_flag_fired = False
@@ -540,9 +561,12 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # No face type for spiral wound
     item['face_type'] = None
 
-    # Standard based on size
+    # Standard: EN 1514-2 for PN-rated, ASME B16.20 otherwise
     if not item.get('standard'):
-        if size_val is not None and size_val >= 26:
+        if is_pn_sw:
+            item['standard'] = 'EN 1514-2'
+            applied_defaults.append('standard defaulted to EN 1514-2 (SPW on PN-rated flanges)')
+        elif size_val is not None and size_val >= 26:
             _set_b1647_standard(item, flags, applied_defaults)
         else:
             item['standard'] = 'ASME B16.20'
@@ -567,15 +591,22 @@ _RTJ_HARDNESS_DEFAULTS = {
     'SS347': 160, 'SS347H': 160,
     # SS400-series ferritic/martensitic (harder)
     'SS410': 170, 'SS410S': 150,
-    # Nickel alloys
+    # Nickel alloys (ASME B16.20 / API 6A max BHN values)
     'MONEL 400': 130, 'MONEL 800': 150,
-    'INCONEL 625': 160,
-    'HASTELLOY C276': 200,
+    'INCONEL 600': 160,                          # Alloy 600 (UNS N06600)
+    'INCONEL 625': 160,                          # Alloy 625 (UNS N06625)
+    'INCONEL 718': 160,
+    'HASTELLOY C276': 200,                       # UNS N10276
+    'HASTELLOY C22': 200,
     'ALLOY 20': 160,
-    'INCOLOY 825': 160,
-    'INCOLOY 800': 160,
-    '6MO': 200,  # UNS S31254 (6% Mo super austenitic)
+    'INCOLOY 825': 160,                          # Alloy 825 (UNS N08825)
+    'INCOLOY 800': 160,                          # Alloy 800 (UNS N08800)
+    '6MO': 200,                                  # UNS S31254 (6% Mo super austenitic)
+    # Chrome-moly
+    'F5': 130,                                   # 4–6% Cr, 0.5% Mo (ASME B16.20 Table 1)
+    '4-6% CR 0.5% MO': 130,
     # UNS designations
+    'UNS N06600': 160,  # Inconel 600
     'UNS N08825': 160,  # Incoloy 825
     'UNS N08800': 160,  # Incoloy 800
     'UNS S31600': 160,  # SS316
@@ -584,13 +615,16 @@ _RTJ_HARDNESS_DEFAULTS = {
     'UNS N06625': 160,  # Inconel 625
     'UNS S31254': 200,  # 6Mo
     # Titanium
-    'TITANIUM GR.2': 200, 'TITANIUM GR.12': 200,
+    'TITANIUM GR.2': 215, 'TITANIUM GR.12': 215,
+    # Duplex / super duplex — 22 HRC max = ~250 BHN (ASME B16.20 Annex A)
+    'UNS S31803': 250, 'UNS S32205': 250,        # Duplex 2205
+    'UNS S32750': 250, 'UNS S32760': 250,        # Super Duplex
     # Non-ferrous
     'CU-NI 70/30': 100, 'BRASS': 80, 'BRONZE': 80, 'ALUMINIUM': 35,
-    # Duplex/super duplex — BHN not defaulted (hardness spec set per applicable spec)
-    # UNS S31803 / S32205 (Duplex 2205) max 22 HRC (~250 BHN) — flag for manual entry
-    # UNS S32750 (Super Duplex) — same
 }
+
+# Max BHN per material — used to validate customer-supplied hardness
+_RTJ_MAX_BHN = _RTJ_HARDNESS_DEFAULTS.copy()
 
 _RTJ_MOC_ALIASES = {
     # Soft iron
@@ -618,12 +652,17 @@ _RTJ_MOC_ALIASES = {
     # Nickel alloys
     'MONEL': 'MONEL 400', 'MONEL 400': 'MONEL 400', 'MONEL400': 'MONEL 400', 'ALLOY 400': 'MONEL 400',
     'MONEL 800': 'MONEL 800', 'MONEL800': 'MONEL 800',
+    'INCONEL 600': 'INCONEL 600', 'INCONEL600': 'INCONEL 600', 'INC 600': 'INCONEL 600', 'ALLOY 600': 'INCONEL 600',
+    'UNS N06600': 'INCONEL 600', 'N06600': 'INCONEL 600',
+    'INCONEL 718': 'INCONEL 718', 'INCONEL718': 'INCONEL 718',
     'INCONEL': 'INCONEL 625', 'INCONEL 625': 'INCONEL 625', 'INCONEL625': 'INCONEL 625',
     'INC 625': 'INCONEL 625', 'INC625': 'INCONEL 625',
     'INCOLOY 825': 'INCOLOY 825', 'INCOLOY825': 'INCOLOY 825', 'INCOLY 825': 'INCOLOY 825',
     'INCOLOY': 'INCOLOY 825',   # bare "Incoloy" is most commonly 825 in RTJ context
     'INCOLOY 800': 'INCOLOY 800', 'INCOLOY800': 'INCOLOY 800', 'INCOLY 800': 'INCOLOY 800',
     'HASTELLOY C276': 'HASTELLOY C276', 'HAST ALLOY C276': 'HASTELLOY C276', 'C276': 'HASTELLOY C276',
+    'HASTELLOY C22': 'HASTELLOY C22', 'C22': 'HASTELLOY C22',
+    'F5': 'F5', '4-6% CR 0.5% MO': 'F5', '4-6CR 0.5MO': 'F5', 'CHROME MOLY': 'F5', 'CR-MO': 'F5',
     'ALLOY 20': 'ALLOY 20', 'ALLOY20': 'ALLOY 20', 'CARPENTER 20': 'ALLOY 20',
     '6MO': '6MO', '6 MO': '6MO',
     # UNS numbers
@@ -660,7 +699,7 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         item['rtj_groove_type'] = 'OCT'
         applied_defaults.append('groove type defaulted to OCT')
 
-    # BHN hardness — default from MOC
+    # BHN hardness — default from MOC, then validate against material maximum
     if not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and norm_moc:
         bhn = _RTJ_HARDNESS_DEFAULTS.get(norm_moc)
         if bhn:
@@ -669,6 +708,15 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
             applied_defaults.append(f'BHN hardness defaulted to {bhn} for {norm_moc}')
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
         item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
+
+    # Validate supplied BHN does not exceed material maximum (ASME B16.20)
+    if norm_moc and item.get('rtj_hardness_bhn'):
+        max_bhn = _RTJ_MAX_BHN.get(norm_moc)
+        if max_bhn and float(item['rtj_hardness_bhn']) > max_bhn:
+            flags.append(
+                f'RTJ BHN {int(item["rtj_hardness_bhn"])} exceeds max allowed {max_bhn} BHN '
+                f'for {norm_moc} (ASME B16.20) — verify with customer'
+            )
 
     # Normalize ring_no: "BX 156" / "R 24" / "RX53" / "R14" → "BX-156" / "R-24" / "RX-53" / "R-14"
     if item.get('ring_no'):
@@ -742,8 +790,12 @@ def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
     # No standard for custom OD/ID KAMM; only for NPS-rated KAMM
     if item.get('size_type') != 'OD_ID' and not item.get('standard'):
+        is_pn_kamm = str(item.get('rating') or '').upper().startswith('PN')
         size_val = _size_nps_value(item.get('size_norm'))
-        if size_val is not None and size_val >= 26:
+        if is_pn_kamm:
+            item['standard'] = 'EN 1514-6'
+            applied_defaults.append('standard defaulted to EN 1514-6 (KAMM on PN-rated flanges)')
+        elif size_val is not None and size_val >= 26:
             _set_b1647_standard(item, flags, applied_defaults)
         else:
             item['standard'] = 'ASME B16.20'
@@ -762,7 +814,11 @@ def _apply_dji_rules(item: dict, flags: list, applied_defaults: list) -> None:
     if not item.get('thickness_mm'):
         flags.append('DJI: thickness not specified — confirm with customer')
     item['face_type'] = None
-    item['standard'] = None
+    # EN 1514-4 for PN-rated flanges; no standard otherwise (DJI is OD/ID based)
+    is_pn_dji = str(item.get('rating') or '').upper().startswith('PN')
+    item['standard'] = 'EN 1514-4' if is_pn_dji else None
+    if is_pn_dji:
+        applied_defaults.append('standard set to EN 1514-4 (DJI on PN-rated flanges)')
     item['rating'] = None  # DJI has no pressure class
 
 
