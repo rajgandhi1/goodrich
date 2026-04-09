@@ -194,10 +194,147 @@ _MOC_ALIASES = {
     'NATURAL RUBBER WITH MS INSERT': 'NATURAL RUBBER WITH MS INSERT',
     # --- Viton ---
     'VITON GASKET': 'VITON GASKET',
+    # --- PTFE variants & brand names ---
+    'PTFE ENVELOPE': 'NON ASBESTOS PTFE ENVELOPED',
+    'PTFE ENVELOP': 'NON ASBESTOS PTFE ENVELOPED',
+    'PTFE ENVELOPE, FILLED W/COMP. N.ASB': 'NON ASBESTOS PTFE ENVELOPED',
+    'PTFE ENVELOP WITH NON ABS': 'NON ASBESTOS PTFE ENVELOPED',
+    'PTFE GORE TEX SERIES 300/EQUIVALENT': 'EXPANDED PTFE',
+    'PTFE GORE TEX SERIES 300': 'EXPANDED PTFE',
+    'GORE TEX': 'EXPANDED PTFE',
+    'PTFE (TEADIT 24SH)': 'PTFE',
+    'EXPENDED PTFE (MAX 76 SHORE A HARDNESS)': 'EXPANDED PTFE',
+    'EXPANDED PTFE (MAX 76 SHORE A HARDNESS)': 'EXPANDED PTFE',
+    'PTFE WITH UNS32760 INSERT': 'PTFE WITH UNS32760 INSERT',
+    'PTFE WITH UNS32760 INSERT GASKET': 'PTFE WITH UNS32760 INSERT',
+    # --- EPDM variants ---
+    'EPDM, HARDNESS 70- +/- 5 SHORE A': 'EPDM',
+    'EPDM HARDNESS 70 SHORE A': 'EPDM',
+    'EPDM WITH STEEL INSERT KROLL ZILLER/EQUIVALENT': 'EPDM WITH STEEL INSERT',
+    'EPDM RUBBER WITH STEEL INSERT FLAT RING WITH INTEGRATED O-RING': 'EPDM WITH STEEL INSERT',
+    'EPDM RUBBER GASKET WITH W/2 PLY CLOTH INSERT': 'EPDM WITH CLOTH INSERT',
+    'EPDM WITH CLOTH INSERT': 'EPDM WITH CLOTH INSERT',
+    'EPDM/HNBR': 'EPDM/HNBR',
+    # --- Rubber types WITH INSERT (normalizing base name) ---
+    'NITRILE RUBBER WITH SS304 INSERT': 'NITRILE BUTADIENE RUBBER WITH SS304 INSERT',
+    'NITRILE RUBBER WITH SS316 INSERT': 'NITRILE BUTADIENE RUBBER WITH SS316 INSERT',
+    'NITRILE RUBBER WITH MS INSERT': 'NITRILE BUTADIENE RUBBER WITH MS INSERT',
+    'NITRILE RUBBER WITH STEEL INSERT': 'NITRILE BUTADIENE RUBBER WITH STEEL INSERT',
+    'FLUOROCARBON RUBBER WITH SS304 INSERT': 'VITON WITH SS304 INSERT',
+    'FLUOROCARBON RUBBER WITH SS316 INSERT': 'VITON WITH SS316 INSERT',
+    'FLUOROCARBON RUBBER WITH MS INSERT': 'VITON WITH MS INSERT',
+    'FLUOROCARBON RUBBER WITH STEEL INSERT': 'VITON WITH STEEL INSERT',
+    'POLYCHLOROPRENE RUBBER WITH SS304 INSERT': 'NEOPRENE WITH SS304 INSERT',
+    'POLYCHLOROPRENE RUBBER WITH SS316 INSERT': 'NEOPRENE WITH SS316 INSERT',
+    'POLYCHLOROPRENE RUBBER WITH MS INSERT': 'NEOPRENE WITH MS INSERT',
+    'POLYCHLOROPRENE RUBBER WITH STEEL INSERT': 'NEOPRENE WITH STEEL INSERT',
+    'CHLOROPRENE RUBBER WITH SS304 INSERT': 'NEOPRENE WITH SS304 INSERT',
+    'CHLOROPRENE RUBBER WITH SS316 INSERT': 'NEOPRENE WITH SS316 INSERT',
+    'CHLOROPRENE RUBBER WITH MS INSERT': 'NEOPRENE WITH MS INSERT',
+    'CHLOROPRENE RUBBER WITH STEEL INSERT': 'NEOPRENE WITH STEEL INSERT',
+    'CHLOROSULFONATED RUBBER WITH SS304 INSERT': 'CHLOROSULFONATED POLYETHYLENE RUBBER WITH SS304 INSERT',
+    'CHLOROSULFONATED RUBBER WITH SS316 INSERT': 'CHLOROSULFONATED POLYETHYLENE RUBBER WITH SS316 INSERT',
+    'CHLOROSULFONATED RUBBER WITH MS INSERT': 'CHLOROSULFONATED POLYETHYLENE RUBBER WITH MS INSERT',
+    'CHLOROSULFONATED RUBBER WITH STEEL INSERT': 'CHLOROSULFONATED POLYETHYLENE RUBBER WITH STEEL INSERT',
+    # --- Graphite variants ---
+    'FABRICATED FLEXIBLE/EXPANDED GRAPHITE GASKET': 'EXPANDED GRAPHITE',
+    'FLEXIBLE/EXPANDED GRAPHITE GASKET': 'EXPANDED GRAPHITE',
+    'LEXIBLE/EXPANDED GRAPHITE GASKET': 'EXPANDED GRAPHITE',
+    'PURE GRAPHITE WITH PERFORATED SS316 PLATE INSIDE': 'FLEXIBLE GRAPHITE WITH SS316 INSERT',
+    # --- Rubber with hardness specs ---
+    'NEOPRENE, SHORE A60-70': 'NEOPRENE',
+    'NEOPRENE, SHORE A 60-70': 'NEOPRENE',
+    'REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70': 'NEOPRENE',
+    'REINFORCED CHLOROPRENE RUBBER SHORE A HARDNESS OF 70': 'NEOPRENE',
+    # --- Non-asbestos variants ---
+    'ARAMID FIBRE WITH NBRBINDER': 'ARAMID FIBER WITH NBR BINDER',
+    'NON-ASB SYNT FIBER WITH NITRILE BUTADIENE,RUBBER BINDER': 'CNAF',
+    'NON-ASBESTOS SYNT FIBER WITH NITRILE BUTADIENE,RUBBER BINDER': 'CNAF',
+    'NON ASBESTOS SYNT FIBER WITH NITRILE BUTADIENE RUBBER BINDER': 'CNAF',
+    'CNAF NON GRAPHITE GASKET': 'CNAF',
+    'NON ASBESTOS BS7531 GRX': 'NON ASBESTOS BS7531',
+    'NON ASBESTOS TYPE BS 7531 GR. X': 'NON ASBESTOS BS7531',
+    'NON ASBESTOS SHEET WITH OIL RESIST': 'NON ASBESTOS',
+    'NON ASBESTOS OR CNAF': 'CNAF',
+    'ASBESTOS-FREE': 'NON ASBESTOS',
+    # --- Asbestos/CAF variants ---
+    'COMPRESSED ASBESTOS(IS 2712 GR. W/2)': 'CAF',
+    'COMPRESSED ASBESTOS (IS 2712 GR. W/2)': 'CAF',
+    'COMPRESSED ASBESTOS(IS 2712 Gr. W/2)': 'CAF',
+    # --- Thermiculite ---
+    'FLEXITALLIC TYPE THERMICULITE 715 OR EQUIVALENT GASKET': 'THERMICULITE 715',
+    # --- Brand names ---
+    'KLINGERSIL C4500': 'KLINGERSIL C4500',
+    'KROLLER & ZILLER (G-S-T-P/S) WITH SPACER': 'KROLLER & ZILLER (G-S-T-P/S)',
+    'KROLL ZILLER/EQUIVALENT': 'KROLLER & ZILLER (G-S-T-P/S)',
+    'WIRE REINFORCED NEOPRENE RUBBER': 'WIRE REINFORCED NEOPRENE RUBBER',
 }
 
 # Generic "RUBBER" is ambiguous — must ask customer
 _AMBIGUOUS_MOC = {'RUBBER'}
+
+# ---------------------------------------------------------------------------
+# Thickness normalisation — inch fractions and decimal inches → mm
+# ---------------------------------------------------------------------------
+
+# Fractional inch strings → mm  (e.g. "1/8" → 3.2)
+_FRAC_INCH_TO_MM: dict[str, float] = {
+    '1/64': 0.40,  '1/32': 0.80,  '3/64': 1.20,  '1/16': 1.60,
+    '5/64': 2.00,  '3/32': 2.40,  '1/8':  3.20,  '5/32': 4.00,
+    '11/64': 4.50, '3/16': 4.80,  '9/32': 7.20,  '1/4':  6.40,
+    '5/16': 8.00,
+}
+
+# Decimal inch values → mm  (exact matches only — avoids false conversion of valid mm values)
+_DECIMAL_INCH_TO_MM: dict[float, float] = {
+    0.0039: 0.10,  0.0100: 0.25,  0.0157: 0.40,  0.0197: 0.50,
+    0.0312: 0.80,  0.0468: 1.20,  0.0625: 1.60,  0.0781: 2.00,
+    0.0937: 2.40,  0.1250: 3.20,  0.1574: 4.00,  0.1750: 4.50,
+    0.1875: 4.80,  0.2500: 6.40,  0.2834: 7.20,  0.3150: 8.00,
+    # rounded variants that appear in supplier data
+    0.020:  0.50,  0.031:  0.80,  0.039:  1.00,  0.060:  1.50,
+    0.079:  2.00,  0.098:  2.50,  0.118:  3.00,  0.125:  3.20,
+    0.157:  4.00,  0.177:  4.50,  0.188:  4.80,  0.197:  5.00,
+    0.236:  6.00,  0.250:  6.40,  0.276:  7.00,  0.315:  8.00,
+}
+
+
+def _parse_thickness_to_mm(raw: str) -> float | None:
+    """Parse a thickness string that may be in mm or inches, return mm float or None."""
+    s = raw.strip().rstrip('"\'').strip()
+    # Strip unit suffix but remember if inch unit was explicit
+    inch_explicit = bool(re.search(r'["\'"]|\bIN(CH(ES?)?)?\b', s, re.IGNORECASE))
+    cleaned = re.sub(r'\s*(?:MM|THK|THICK|INCH(ES?)?|IN|"|\')\s*', '', s, flags=re.IGNORECASE).strip()
+
+    # Try fractional form first: "1/8", "3/16", "1 1/8" (whole + fraction)
+    frac_m = re.fullmatch(r'(\d+)\s+(\d+)/(\d+)', cleaned)
+    if frac_m:
+        whole, num, den = int(frac_m.group(1)), int(frac_m.group(2)), int(frac_m.group(3))
+        inch_val = whole + num / den
+        return round(inch_val * 25.4, 2)
+    frac_m = re.fullmatch(r'(\d+)/(\d+)', cleaned)
+    if frac_m:
+        key = f'{frac_m.group(1)}/{frac_m.group(2)}'
+        if key in _FRAC_INCH_TO_MM:
+            return _FRAC_INCH_TO_MM[key]
+        return round(int(frac_m.group(1)) / int(frac_m.group(2)) * 25.4, 2)
+
+    # Plain number
+    try:
+        val = float(cleaned)
+    except ValueError:
+        return None
+
+    if inch_explicit:
+        return round(val * 25.4, 2)
+
+    # No explicit unit — check if value matches a known decimal-inch entry
+    rounded = round(val, 4)
+    if rounded in _DECIMAL_INCH_TO_MM:
+        return _DECIMAL_INCH_TO_MM[rounded]
+
+    return val  # assume mm
+
 
 # ---------------------------------------------------------------------------
 # Spiral wound helpers
@@ -642,18 +779,20 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
 def _sanitize_llm_nulls(item: dict) -> dict:
     """Convert LLM-returned string 'null' / 'none' / '' to actual None.
-    Also strips unit suffixes from numeric fields (e.g. '4.5MM' → 4.5).
+    Parses thickness strings including fractions and inch values; strips unit
+    suffixes from other numeric fields.
     """
     _NULL_STRINGS = {'null', 'none', 'n/a', 'na', ''}
-    _NUMERIC_FIELDS = ('thickness_mm', 'od_mm', 'id_mm', 'rtj_hardness_bhn')
-    for key, val in item.items():
+    _OTHER_NUMERIC = ('od_mm', 'id_mm', 'rtj_hardness_bhn')
+    for key, val in list(item.items()):
         if not isinstance(val, str):
             continue
         stripped = val.strip()
         if stripped.lower() in _NULL_STRINGS:
             item[key] = None
-        elif key in _NUMERIC_FIELDS:
-            # Strip units and try to parse as float: "4.5MM" → 4.5, "3 THK" → 3
+        elif key == 'thickness_mm':
+            item[key] = _parse_thickness_to_mm(stripped)
+        elif key in _OTHER_NUMERIC:
             cleaned = re.sub(r'\s*(?:MM|THK|INCH|IN|M)\s*$', '', stripped, flags=re.IGNORECASE).strip()
             try:
                 item[key] = float(cleaned)
