@@ -3,6 +3,7 @@ Gasket Quote Processor — Streamlit MVP
 Soft cut & spiral wound gaskets.
 """
 import streamlit as st
+import streamlit.components.v1 as _components
 import pandas as pd
 
 from core.parser import parse_email_text, parse_excel_file
@@ -259,22 +260,34 @@ details { border-radius: 8px !important; }
     flex-shrink: 0;
 }
 
-/* Reposition st.chat_input to dock below the panel */
-.stChatInput, [data-testid="stChatInput"] {
+/* Collapse Streamlit's sticky footer (the white overlay culprit) */
+[data-testid="stBottom"] {
     position: fixed !important;
-    bottom: 90px !important;
+    bottom: 88px !important;
     right: 24px !important;
     width: 340px !important;
+    left: auto !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 10000 !important;
+    display: none !important;
+}
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stBottom"] {
+    display: block !important;
+}
+
+/* Reposition st.chat_input to dock below the panel — hidden by default */
+.stChatInput, [data-testid="stChatInput"] {
+    position: static !important;
+    width: 100% !important;
     left: auto !important;
     z-index: 10000 !important;
     background: #fff !important;
     border-radius: 0 0 16px 16px !important;
     border: 1px solid #dde3f0 !important;
     border-top: 1px solid #e0e6f0 !important;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.14) !important;
-    display: none !important;
-}
-.stChatInput.gqci-open, [data-testid="stChatInput"].gqci-open {
+    box-shadow: none !important;
     display: block !important;
 }
 /* Black text, white bg inside the input box */
@@ -520,7 +533,7 @@ def _editor_fragment(items, display_indices):
 
     edited_df = st.data_editor(
         df,
-        use_container_width=True,
+        width="stretch",
         height=min(80 + 35 * len(display_items), 620),
         hide_index=True,
         column_config={
@@ -708,7 +721,7 @@ def _process_and_append(raw_items):
             status_text.text(f'Processing {i}/{n} items...')
             preview_ph.dataframe(
                 _build_preview_df(processed),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -740,7 +753,7 @@ with tab_email:
         label_visibility='visible',
     )
     st.caption(_wl_hint)
-    if st.button('⚡  Process & Add to List', type='primary', use_container_width=True, key='process_email_btn'):
+    if st.button('⚡  Process & Add to List', type='primary', width="stretch", key='process_email_btn'):
         if email_text.strip():
             raw_items = parse_email_text(email_text)
             if _process_and_append(raw_items):
@@ -755,7 +768,7 @@ with tab_excel:
         help='Supports multi-sheet enquiry files',
     )
     st.caption(_wl_hint)
-    if st.button('⚡  Process & Add to List', type='primary', use_container_width=True, key='process_excel_btn'):
+    if st.button('⚡  Process & Add to List', type='primary', width="stretch", key='process_excel_btn'):
         if uploaded_file:
             raw_items = parse_excel_file(uploaded_file.read())
             if _process_and_append(raw_items):
@@ -1002,16 +1015,16 @@ if st.session_state.working_items:
         st.caption('When you are happy with the working list, click below to do a final review before committing to history.')
         gen_col, _ = st.columns([3, 7])
         with gen_col:
-            if st.button('📋  Generate Enquiry', type='primary', use_container_width=True, key='gen_enquiry_btn'):
+            if st.button('📋  Generate Enquiry', type='primary', width="stretch", key='gen_enquiry_btn'):
                 st.session_state._show_confirm = True
                 st.rerun()
     else:
         st.markdown(f'**Final Verification** — {len(items)} items · review before saving to history.')
-        st.dataframe(_build_preview_df(items), use_container_width=True, hide_index=True)
+        st.dataframe(_build_preview_df(items), width="stretch", hide_index=True)
 
         conf_c1, conf_c2, _ = st.columns([2, 1.5, 6])
         with conf_c1:
-            if st.button('✅  Confirm & Save to History', type='primary', key='confirm_save_btn', use_container_width=True):
+            if st.button('✅  Confirm & Save to History', type='primary', key='confirm_save_btn', width="stretch"):
                 # Build and store Excel
                 excel_bytes = build_excel(items, customer=customer, project_ref=project_ref)
                 filename = f"quote_{project_ref or customer or 'output'}.xlsx".replace(' ', '_')
@@ -1041,7 +1054,7 @@ if st.session_state.working_items:
                 st.session_state._show_confirm = False
                 st.rerun()
         with conf_c2:
-            if st.button('Cancel', key='cancel_confirm_btn', type='secondary', use_container_width=True):
+            if st.button('Cancel', key='cancel_confirm_btn', type='secondary', width="stretch"):
                 st.session_state._show_confirm = False
                 st.rerun()
 
@@ -1071,10 +1084,10 @@ if st.session_state.get('_last_excel'):
             file_name=filename,
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             type='primary',
-            use_container_width=True,
+            width="stretch",
         )
     with new_col:
-        if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn', use_container_width=True):
+        if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn', width="stretch"):
             st.session_state.pop('_last_excel', None)
             st.session_state.pop('_last_filename', None)
             st.rerun()
@@ -1087,7 +1100,7 @@ def _build_chat_html():
     msgs = st.session_state.chat_messages[-15:]
     if not msgs:
         return (
-            '<div style="color:#aaa;font-size:0.83rem;text-align:center;padding:2.5rem 1rem;">'
+            '<div style="color:#aaa;font-size:0.83rem;text-align:center;padding:2.5rem 1rem">'
             'Ask me anything about gaskets!</div>'
         )
     out = []
@@ -1116,48 +1129,46 @@ def _build_chat_html():
 
 _api_ok = bool(_os.environ.get('OPENAI_API_KEY'))
 _panel_cls = 'gqcp-open' if st.session_state.chat_open else ''
-_fab_lbl = '✕' if st.session_state.chat_open else '💬'
 
 st.markdown(f"""
-<button id="gq-fab" onclick="toggleGqChat()" title="Gasket Assistant">{_fab_lbl}</button>
+<button id="gq-fab" title="Gasket Assistant">
+  {'&#10005;' if _panel_cls else '&#128172;'}
+</button>
 
 <div id="gq-chat-panel" class="{_panel_cls}">
   <div id="gq-chat-hdr">
-    <span>⚙️ Gasket Assistant</span>
-    <button onclick="toggleGqChat()"
-      style="background:none;border:none;color:#fff;cursor:pointer;font-size:1rem;padding:0;line-height:1">✕</button>
+    <span>&#9881;&#65039; Gasket Assistant</span>
+    <button id="gq-chat-close"
+      style="background:none;border:none;color:#fff;cursor:pointer;
+             font-size:1rem;padding:0;line-height:1;margin-left:auto">&#10005;</button>
   </div>
-  <div id="gq-chat-body">
-    {_build_chat_html()}
-  </div>
+  <div id="gq-chat-body">{_build_chat_html()}</div>
   {'<div id="gq-chat-nokey">Enter your OpenAI API key in the sidebar to enable the assistant.</div>'
    if not _api_ok else ''}
 </div>
-
-<script>
-(function() {{
-  function syncChatInput(open) {{
-    document.querySelectorAll('.stChatInput, [data-testid="stChatInput"]').forEach(function(el) {{
-      if (open) el.classList.add('gqci-open');
-      else      el.classList.remove('gqci-open');
-    }});
-  }}
-  window.toggleGqChat = function() {{
-    var panel = document.getElementById('gq-chat-panel');
-    var fab   = document.getElementById('gq-fab');
-    var open  = panel.classList.toggle('gqcp-open');
-    fab.innerHTML = open ? '✕' : '💬';
-    syncChatInput(open);
-  }};
-  // Sync on load: if panel already has open class (set by Python), also show the input
-  var panel = document.getElementById('gq-chat-panel');
-  if (panel && panel.classList.contains('gqcp-open')) syncChatInput(true);
-  // Scroll messages to bottom
-  var body = document.getElementById('gq-chat-body');
-  if (body) body.scrollTop = body.scrollHeight;
-}})();
-</script>
 """, unsafe_allow_html=True)
+
+# Attach click handlers via iframe (Streamlit CSP blocks inline onclick attrs)
+_components.html("""
+<script>
+(function attach() {
+  var fab = parent.document.getElementById('gq-fab');
+  var panel = parent.document.getElementById('gq-chat-panel');
+  var closeBtn = parent.document.getElementById('gq-chat-close');
+  if (!fab || !panel) { setTimeout(attach, 100); return; }
+  fab.onclick = function() {
+    var open = panel.classList.toggle('gqcp-open');
+    fab.innerHTML = open ? '&#10005;' : '&#128172;';
+  };
+  if (closeBtn) {
+    closeBtn.onclick = function() {
+      panel.classList.remove('gqcp-open');
+      fab.innerHTML = '&#128172;';
+    };
+  }
+})();
+</script>
+""", height=0)
 
 if _api_ok:
     _q = st.chat_input('Ask about gaskets…', key='float_chat')
@@ -1171,7 +1182,7 @@ if _api_ok:
                 'You are a concise technical expert on industrial gaskets for Goodrich Gasket Pvt. Ltd. '
                 'Specialise in: soft cut (CNAF, PTFE, Neoprene, Graphite, Klingersil), spiral wound, RTJ, '
                 'Kammprofile, DJI, ISK. Topics: material selection, pressure ratings (ASME 150#-2500#, PN6-PN400), '
-                'standards (ASME B16.21/B16.20/B16.47, EN 1514-1), dimensions, and application suitability. '
+                'standards (ASME B16.21/B16.20/B16.47, EN 1514-1), dimensions, application suitability. '
                 'Keep replies short and technical. Politely decline non-gasket topics.'
             )
             _hx = [{'role': 'system', 'content': _sys}]
