@@ -82,6 +82,18 @@ if openai_key:
 else:
     st.sidebar.info('No OpenAI key — using rule-based extraction')
 
+def _build_preview_df(items):
+    """Lightweight preview DataFrame shown while processing."""
+    STATUS_ICON = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}
+    return pd.DataFrame([{
+        '#':                    item.get('line_no', ''),
+        'S':                    STATUS_ICON.get(item.get('status', ''), ''),
+        'Customer Description': (item.get('raw_description') or '')[:80],
+        'GGPL Description':     item.get('ggpl_description', ''),
+        'Notes':                '; '.join((item.get('flags') or [])[:2]),
+    } for item in items])
+
+
 if st.button('Process Enquiry', type='primary', width="stretch"):
     raw_items = []
 
@@ -98,27 +110,40 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
 
         status_text = st.empty()
         progress_bar = st.progress(0)
+        preview_ph   = st.empty()   # progressive results table
 
-        status_text.text(f'Extracting {unique_count} unique descriptions...')
+        status_text.text(f'Extracting {unique_count} unique descriptions in parallel...')
         progress_bar.progress(5)
 
         def _on_progress(done, total):
-            status_text.text(f'Extracting... {done}/{total} descriptions')
+            pct = int(done / total * 100)
+            status_text.text(f'Extracting... {done}/{total} descriptions ({pct}%)')
             progress_bar.progress(5 + int(done / total * 70))
 
         extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
         progress_bar.progress(75)
 
-        status_text.text('Applying rules and formatting...')
+        # Rules + format — show preview table growing in real time
+        n = len(extracted_items)
+        step = max(1, n // 20)   # ~20 preview refreshes regardless of list size
         processed = []
+
         for i, extracted in enumerate(extracted_items, 1):
             item = apply_rules(extracted)
             item['ggpl_description'] = format_description(item)
             processed.append(item)
-            progress_bar.progress(75 + int(i / len(extracted_items) * 25))
+            progress_bar.progress(75 + int(i / n * 24))
+            if i % step == 0 or i == n:
+                status_text.text(f'Processed {i}/{n} items...')
+                preview_ph.dataframe(
+                    _build_preview_df(processed),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         progress_bar.empty()
         status_text.empty()
+        preview_ph.empty()        # clear preview — full editor replaces it below
         st.session_state.results = processed
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)

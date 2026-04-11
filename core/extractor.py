@@ -8,6 +8,8 @@ import re
 import json
 import time
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ _FIELD_SCHEMA = """{
   "confidence": "HIGH | MEDIUM | LOW"
 }"""
 
-_BATCH_SIZE = 8  # descriptions per LLM call
+_BATCH_SIZE = 20  # descriptions per LLM call
 
 _BATCH_SYSTEM_PROMPT = f"""You are a gasket specification extraction assistant for an oil & gas company.
 Extract gasket specs from customer descriptions and return ONLY valid JSON.
@@ -98,29 +100,42 @@ Rules:
 def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     """
     Extract structured fields for all items.
-    LLM is primary — every description goes to gpt-4o-mini.
-    Regex is a silent fallback only when LLM is unavailable or fails.
+    All LLM batches are fired in parallel via ThreadPoolExecutor.
+    progress_cb(done, total) is called from the main thread after each batch lands.
     Deduplicates identical descriptions before batching.
     """
-    # Normalize embedded newlines (e.g. from Shift+Enter in Excel or CSV) to spaces
     for item in items:
         if item.get('description'):
             item['description'] = re.sub(r'[\r\n]+', ' ', item['description']).strip()
 
     unique_descs_list = list({item['description'] for item in items})
     total = len(unique_descs_list)
-    cache = {}
-    done = 0
+    cache: dict = {}
+    lock = threading.Lock()
+    done = [0]  # mutable int for closure
 
+    batches = [
+        unique_descs_list[i:i + _BATCH_SIZE]
+        for i in range(0, total, _BATCH_SIZE)
+    ]
     client = _get_openai_client()
-    for batch_start in range(0, len(unique_descs_list), _BATCH_SIZE):
-        batch = unique_descs_list[batch_start:batch_start + _BATCH_SIZE]
-        llm_results = _llm_extract_batch(client, batch) if client else [None] * len(batch)
-        for desc, llm_result in zip(batch, llm_results):
-            cache[desc] = llm_result if llm_result else _null_extract()
-            done += 1
+
+    def _run_batch(batch: list[str]):
+        return batch, (_llm_extract_batch(client, batch) if client else [None] * len(batch))
+
+    # Cap workers at 8 to avoid hammering the API rate limit
+    num_workers = min(len(batches), 8)
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        futures = [pool.submit(_run_batch, b) for b in batches]
+        for future in as_completed(futures):
+            batch, llm_results = future.result()
+            with lock:
+                for desc, result in zip(batch, llm_results):
+                    cache[desc] = result if result else _null_extract()
+                done[0] += len(batch)
+            # progress_cb called here — in the main Streamlit thread (as_completed loop)
             if progress_cb:
-                progress_cb(done, total)
+                progress_cb(done[0], total)
 
     results = []
     for item in items:
