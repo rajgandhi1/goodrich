@@ -141,7 +141,7 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
                 status_text.text(f'Processed {i}/{n} items...')
                 preview_ph.dataframe(
                     _build_preview_df(processed),
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                 )
 
@@ -212,7 +212,7 @@ def _editor_fragment(items, display_indices):
 
     edited_df = st.data_editor(
         df,
-        use_container_width=True,
+        width='stretch',
         height=min(80 + 35 * len(display_items), 620),
         hide_index=True,
         column_config={
