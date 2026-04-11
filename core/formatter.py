@@ -58,6 +58,9 @@ def format_description(item: dict) -> str:
         parts.append(face)
     if standard:
         parts.append(standard)
+    # Spiral wound only: append special notes (e.g. FLEXIBLE INHIBITED GRAPHITE FILLER)
+    if gtype == 'SPIRAL_WOUND' and special:
+        parts.append(special)
 
     return ', '.join(parts)
 
@@ -196,15 +199,25 @@ def _fmt_isk(item: dict) -> str:
 
 
 def _fmt_size(size: str, gtype: str) -> str:
-    """Format size string. NB/DN sizes → 'DN N' for all types (EN convention)."""
+    """Format size string for GGPL descriptions.
+    - NB/DN metric sizes → 'DN N'
+    - NPS inch sizes (with or without NPS/INCH/IN label) → 'N"'
+    """
     import re as _re
-    if '"' in size or 'MM' in size:
-        return size
+    s = size.strip()
+    # Already has inch symbol — strip any stray 'NPS' label and return
+    if '"' in s:
+        return _re.sub(r'\bNPS\b\s*', '', s, flags=_re.IGNORECASE).strip()
+    # Metric OD/ID strings — pass through unchanged
+    if 'MM' in s.upper():
+        return s
     # NB size: "100 NB" / "20 NB" → "DN 100" / "DN 20"
-    m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', size.strip(), _re.IGNORECASE)
+    m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', s, _re.IGNORECASE)
     if m:
         return f'DN {int(float(m.group(1)))}'
-    return f'{size}"'
+    # Strip NPS / INCH / IN label and append inch symbol
+    bare = _re.sub(r'\bNPS\b|\bINCH(ES)?\b|\bIN\b', '', s, flags=_re.IGNORECASE).strip()
+    return f'{bare}"'
 
 
 def _fmt_rating(rating: str) -> str:

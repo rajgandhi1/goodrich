@@ -268,6 +268,11 @@ _MOC_ALIASES = {
     'KROLLER & ZILLER (G-S-T-P/S) WITH SPACER': 'KROLLER & ZILLER (G-S-T-P/S)',
     'KROLL ZILLER/EQUIVALENT': 'KROLLER & ZILLER (G-S-T-P/S)',
     'WIRE REINFORCED NEOPRENE RUBBER': 'WIRE REINFORCED NEOPRENE RUBBER',
+    # --- Rubber reinforced variants ---
+    'RUBBER-STGASKET RUBBER REINFORCED': 'EPDM WITH STEEL INSERT',
+    'RUBBER STGASKET RUBBER REINFORCED': 'EPDM WITH STEEL INSERT',
+    'RUBBER REINFORCED': 'EPDM WITH STEEL INSERT',
+    'RUBBER-ST GASKET RUBBER REINFORCED': 'EPDM WITH STEEL INSERT',
 }
 
 # Generic "RUBBER" is ambiguous — must ask customer
@@ -397,6 +402,11 @@ _SW_RING_ALIASES = {
     'LTCS': 'LTCS', 'LOW TEMP CARBON STEEL': 'LTCS', 'LOW TEMPERATURE CARBON STEEL': 'LTCS',
     # --- Soft iron (also used as winding/ring in some contexts) ---
     'SOFT IRON': 'SOFT IRON', 'SI': 'SOFT IRON', 'S.I.': 'SOFT IRON',
+    # --- Zinc plated / galvanised carbon steel ring ---
+    'ZINC PLATED CARBON STEEL': 'ZINC PLATED CARBON STEEL',
+    'ZINC-PLATED CARBON STEEL': 'ZINC PLATED CARBON STEEL',
+    'ZINC PLATED CS': 'ZINC PLATED CARBON STEEL',
+    'ZINC PLATED MS': 'ZINC PLATED CARBON STEEL',
     # --- Duplex / super duplex (common aliases) ---
     'DUPLEX': 'UNS S31803', '2205': 'UNS S32205',
     'SUPER DUPLEX': 'UNS S32750', 'SDSS': 'UNS S32750', '2507': 'UNS S32750',
@@ -408,6 +418,11 @@ _SW_RING_ALIASES = {
 _SW_FILLER_ALIASES = {
     'FG': 'FLEXIBLE GRAPHITE', 'FLEXIBLE GRAPHITE': 'FLEXIBLE GRAPHITE', 'GRAPHITE': 'GRAPHITE',
     'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
+    # Flexible inhibited graphite (corrosion-inhibited grade — noted explicitly in GGPL descriptions)
+    'FLEXIBLE INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEX INHIB GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEXITALLIC INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
     'PTFE': 'PTFE', 'TEFLON': 'PTFE', 'VIRGIN PTFE': 'PTFE',
     'CNAF': 'CNAF', 'NON ASBESTOS': 'CNAF', 'NAF': 'CNAF',
     'CAF': 'CAF', 'ASBESTOS': 'CAF',
@@ -463,7 +478,14 @@ def _size_nps_value_from_item(item: dict) -> float | None:
 
 
 def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_ring: str | None) -> str:
-    moc = f'{winding_mat} SPIRAL WOUND GASKET WITH {filler} FILLER'
+    # If filler has a parenthetical qualifier (e.g. "GRAPHITE (98% PURE GRAPHITE)"),
+    # place the FILLER keyword before the parenthetical for correct GGPL format.
+    paren_m = re.match(r'^(.*?)\s*(\(.*\))\s*$', filler.strip())
+    if paren_m:
+        filler_str = f'{paren_m.group(1).strip()} FILLER {paren_m.group(2).strip()}'
+    else:
+        filler_str = f'{filler} FILLER'
+    moc = f'{winding_mat} SPIRAL WOUND GASKET WITH {filler_str}'
     if inner_ring and outer_ring:
         moc += f' + {inner_ring} INNER RING & {outer_ring} OUTER RING'
     elif outer_ring:
@@ -472,9 +494,9 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
 
 
 _B1647_FLAG = (
-    'Large bore (NPS ≥ 26") — ASME B16.47 Series A (ex-API 605, larger OD) and '
-    'Series B (ex-MSS SP-44, smaller OD) have DIFFERENT gasket dimensions — '
-    'confirm which series applies with customer'
+    'Missing critical field: B16.47 Series A or B not specified — '
+    'Series A (ex-API 605, larger OD) and Series B (ex-MSS SP-44, smaller OD) '
+    'have DIFFERENT gasket dimensions — customer must confirm'
 )
 
 
@@ -489,8 +511,7 @@ def _set_b1647_standard(item: dict, flags: list, applied_defaults: list) -> None
         return
     item['standard'] = 'ASME B16.47'
     if _B1647_FLAG not in flags:
-        flags.append(_B1647_FLAG)
-    applied_defaults.append('standard set to ASME B16.47 — Series A or B unknown, confirm with customer')
+        flags.append(_B1647_FLAG)  # Contains "missing critical" → triggers STATUS_MISSING
 
 
 def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
@@ -546,6 +567,11 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
         grade_flag_fired = True
         winding_mat = None
         item['sw_winding_material'] = None
+
+    # FLEXIBLE INHIBITED GRAPHITE: GGPL convention is to also append the filler
+    # as a note at the end of the description — store in special for formatter to pick up.
+    if filler == 'FLEXIBLE INHIBITED GRAPHITE' and not item.get('special'):
+        item['special'] = 'FLEXIBLE INHIBITED GRAPHITE FILLER'
 
     # Build MOC string if not already set
     if not item.get('moc') and winding_mat:
@@ -704,6 +730,20 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         item['rtj_groove_type'] = 'OCT'
         applied_defaults.append('groove type defaulted to OCT')
 
+    # Convert HRBW (Rockwell B) to BHN if the description contains HRB/HRBW values
+    # (customer spec sheets sometimes use HRB instead of BHN)
+    _HRBW_TO_BHN = {68: 120, 83: 160}
+    raw_desc = (item.get('raw_description') or '').upper()
+    if not item.get('rtj_hardness_bhn'):
+        hrb_m = re.search(r'(\d+)\s*HRB(?:W)?\b', raw_desc)
+        if hrb_m:
+            hrb_val = int(hrb_m.group(1))
+            bhn_converted = _HRBW_TO_BHN.get(hrb_val)
+            if bhn_converted:
+                item['rtj_hardness_bhn'] = bhn_converted
+                item['rtj_hardness_spec'] = f'{bhn_converted}BHN HARDNESS'
+                applied_defaults.append(f'converted {hrb_val} HRBW → {bhn_converted} BHN')
+
     # BHN hardness — default from MOC, then validate against material maximum
     if not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and norm_moc:
         bhn = _RTJ_HARDNESS_DEFAULTS.get(norm_moc)
@@ -711,8 +751,15 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
             item['rtj_hardness_bhn'] = bhn
             item['rtj_hardness_spec'] = f"{bhn}BHN HARDNESS"
             applied_defaults.append(f'BHN hardness defaulted to {bhn} for {norm_moc}')
+        else:
+            # BHN is mandatory on all RTJ gaskets (ASME B16.20)
+            flags.append(
+                f'RTJ BHN hardness not known for "{norm_moc}" — confirm BHN value with customer (ASME B16.20)'
+            )
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
         item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])}BHN HARDNESS"
+    elif not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and not norm_moc:
+        flags.append('RTJ BHN hardness not specified — confirm with customer (ASME B16.20)')
 
     # Validate supplied BHN does not exceed material maximum (ASME B16.20)
     if norm_moc and item.get('rtj_hardness_bhn'):
