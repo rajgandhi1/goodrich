@@ -18,6 +18,40 @@ logger = logging.getLogger(__name__)
 # Retained for backwards-compat with app.py which resets this on key change
 _openai_client = None
 
+# ---------------------------------------------------------------------------
+# Regex-based gasket type detector — overrides LLM to prevent misclassification
+# ---------------------------------------------------------------------------
+
+_SW_RE = re.compile(
+    r'\bSPIRAL[\s\-]?WOUND\b|\bSPRL[\s\-]?WND\b|\bSPWD?\b|'
+    r'\bS\.?W\.\s*GASKET|\bWND\b',
+    re.IGNORECASE,
+)
+_RTJ_RE = re.compile(
+    r'\bRTJ\b|\bR\.T\.J\b|\bRING[\s\-]TYPE\s+JOINT\b|'
+    r'\bOCTAGONAL\s+RTJ\b|\bOCTAGONAL\s+RING\b|\bOVAL\s+RING\b|'
+    r'\bJOINT\s+TOR[EI]\b|\bJOINT\s+TORIQUE\b',
+    re.IGNORECASE,
+)
+_KAMM_RE = re.compile(r'\bKAMM(?:PROFILE)?\b|\bCAM[\s\-]?PROFILE\b', re.IGNORECASE)
+_DJI_RE = re.compile(r'\bDOUBLE[\s\-]JACKET(?:ED)?\b', re.IGNORECASE)
+_ISK_RE = re.compile(r'\bINSULATING\s+GASKET\b|\bISK\b|\bINSULATION\s+KIT\b', re.IGNORECASE)
+
+
+def _regex_detect_type(desc: str) -> str | None:
+    """Return gasket_type if clearly detectable from keywords, else None."""
+    if _SW_RE.search(desc):
+        return 'SPIRAL_WOUND'
+    if _RTJ_RE.search(desc):
+        return 'RTJ'
+    if _KAMM_RE.search(desc):
+        return 'KAMM'
+    if _DJI_RE.search(desc):
+        return 'DJI'
+    if _ISK_RE.search(desc):
+        return 'ISK'
+    return None
+
 _CACHE_TTL = 30 * 24 * 3600  # 30 days — gasket specs are stable
 
 
@@ -184,6 +218,17 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
         for batch, results in batch_results:
             for desc, result in zip(batch, results):
                 extracted = result if result else _null_extract()
+                # Override gasket_type if regex detects a non-SOFT_CUT type with certainty.
+                # This prevents LLM from misclassifying e.g. SPIRAL_WOUND as SOFT_CUT when
+                # batched alongside many soft-cut items.
+                forced_type = _regex_detect_type(desc)
+                if forced_type and forced_type != 'SOFT_CUT':
+                    if extracted.get('gasket_type') != forced_type:
+                        logger.info(
+                            f'Regex overriding LLM type '
+                            f'{extracted.get("gasket_type")} → {forced_type}: {desc[:60]}'
+                        )
+                    extracted['gasket_type'] = forced_type
                 cache[desc] = extracted
                 # Store in Redis — skip null stubs (LLM was unavailable)
                 if r and result:

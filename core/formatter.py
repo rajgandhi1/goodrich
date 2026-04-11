@@ -40,13 +40,10 @@ def format_description(item: dict) -> str:
         id_ = item.get('id_mm')
         if not (od and id_ and moc):
             return ''
-        parts = [f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM']
+        size_part = f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM'
         if thickness:
-            parts.append(f'X {_fmt_num(thickness)}MM THK')
-        parts.append(f',{moc}')
-        if special:
-            parts.append(f',{special}')
-        return ' '.join(parts)
+            size_part += f' X {_fmt_num(thickness)}MM THK'
+        return ', '.join([size_part, moc])
 
     size = item.get('size')
     rating = item.get('rating')
@@ -56,15 +53,13 @@ def format_description(item: dict) -> str:
     size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
 
-    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK ,{moc}']
-    if special:
-        parts.append(f',{special}')
+    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK', moc]
     if face:
-        parts.append(f',{face}')
+        parts.append(face)
     if standard:
-        parts.append(f',{standard}')
+        parts.append(standard)
 
-    return ' '.join(parts)
+    return ', '.join(parts)
 
 
 _RTJ_COATINGS = ('GALVANISED', 'ZINC PLATED', 'PHOSPHATE COATED', 'NICKEL PLATED', 'CADMIUM PLATED')
@@ -92,7 +87,7 @@ def _fmt_rtj(item: dict) -> str:
         return ''
 
     moc_base, coating = _split_rtj_moc(moc)
-    hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)} BHN HARDNESS' if bhn else None)
+    hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)}BHN HARDNESS' if bhn else None)
 
     # Large bore RTJ: no ring number — use SIZE: X" X RATING# format
     if not ring_no:
@@ -101,21 +96,21 @@ def _fmt_rtj(item: dict) -> str:
         if not (size and rating):
             return ''
         size_str = size if ('"' in size or 'NB' in size) else f'{size}"'
-        parts = [f'SIZE : {size_str} X {_fmt_rating(rating)} ,RTJ ,{groove} ,{moc_base}']
+        parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc_base]
         if coating:
-            parts.append(f',{coating}')
+            parts.append(coating)
         if hardness_str:
-            parts.append(f',{hardness_str}')
-        parts.append(f',{standard}')
-        return ' '.join(parts)
+            parts.append(hardness_str)
+        parts.append(standard)
+        return ', '.join(parts)
 
-    parts = [f'SIZE : {ring_no} ,RTJ ,{groove} ,{moc_base}']
+    parts = [f'SIZE : {ring_no}', 'RTJ', groove, moc_base]
     if coating:
-        parts.append(f',{coating}')
+        parts.append(coating)
     if hardness_str:
-        parts.append(f',{hardness_str}')
-    parts.append(f',{standard}')
-    return ' '.join(parts)
+        parts.append(hardness_str)
+    parts.append(standard)
+    return ', '.join(parts)
 
 
 def _fmt_kamm(item: dict) -> str:

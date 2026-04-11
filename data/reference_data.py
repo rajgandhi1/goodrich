@@ -24,8 +24,10 @@ def normalize_size(raw: str) -> str | None:
         return None
     import re as _re
     s = str(raw).strip().upper()
-    # Mixed fractions like "1 1/2", "1-1/2" — must check BEFORE removing spaces
-    mf = _re.match(r'^(\d+)\s*[-\s]\s*(\d+)/(\d+)\s*$', s)
+    # Mixed fractions like "1 1/2", "1-1/2", "1 1/2\"" — check BEFORE removing spaces
+    # Strip trailing inch/quote chars first so the fraction regex still matches
+    s_noquote = _re.sub(r'["\'″]+$', '', s).strip()
+    mf = _re.match(r'^(\d+)\s*[-\s]\s*(\d+)/(\d+)\s*$', s_noquote)
     if mf:
         whole, num, den = int(mf.group(1)), int(mf.group(2)), int(mf.group(3))
         s = str(whole + num / den)
@@ -217,12 +219,16 @@ RTJ_RING_TABLE: dict[tuple[str, str], str] = {
     ('20"', '150'): 'R-72',
     ('20"', '300'): 'R-73', ('20"', '600'): 'R-73',
     ('20"', '900'): 'R-74', ('20"', '1500'): 'R-75',
+    # NPS 22" — B16.47 Series A only (no B16.5 ring defined)
+    ('22"', '150'): 'R-80',
+    ('22"', '300'): 'R-81', ('22"', '600'): 'R-81',
     # NPS 24"
     ('24"', '150'): 'R-76',
     ('24"', '300'): 'R-77', ('24"', '600'): 'R-77',
     ('24"', '900'): 'R-78', ('24"', '1500'): 'R-79',
 
-    # ASME B16.47 Series B (NPS 26" and above)
+    # ASME B16.47 Series A (NPS 26" and above)
+    # NOTE: for 16" 900# B16.47A ring is R-68 (vs R-66 for B16.5); distinguish by standard if needed.
     ('26"', '300'): 'R-93', ('26"', '600'): 'R-93', ('26"', '900'): 'R-100',
     ('28"', '300'): 'R-94', ('28"', '600'): 'R-94', ('28"', '900'): 'R-101',
     ('30"', '300'): 'R-95', ('30"', '600'): 'R-95', ('30"', '900'): 'R-102',

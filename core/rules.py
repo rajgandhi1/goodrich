@@ -580,6 +580,7 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
 _RTJ_HARDNESS_DEFAULTS = {
     'SOFTIRON': 90,
     'SOFTIRON GALVANISED': 90,
+    'SOFTIRON ELECTROPLATED': 90,
     'LOW CARBON STEEL': 120,
     'LTCS': 120,
     # SS300-series austenitic
@@ -633,6 +634,10 @@ _RTJ_MOC_ALIASES = {
     'SOFT IRON GALVANIZED': 'SOFTIRON GALVANISED',
     'GALVANISED SOFT IRON': 'SOFTIRON GALVANISED',
     'GALVANIZED SOFT IRON': 'SOFTIRON GALVANISED',
+    'SOFT IRON ELECTROPLATED': 'SOFTIRON ELECTROPLATED',
+    'SOFTIRON ELECTROPLATED': 'SOFTIRON ELECTROPLATED',
+    'SOFT IRON ZINC PLATED': 'SOFTIRON GALVANISED',
+    'SOFT IRON CN+ZN PLATED': 'SOFTIRON GALVANISED',
     # Carbon/low-alloy steel
     'LOW CARBON STEEL': 'LOW CARBON STEEL', 'LCS': 'LOW CARBON STEEL',
     'CARBON STEEL': 'LOW CARBON STEEL',
@@ -704,10 +709,10 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         bhn = _RTJ_HARDNESS_DEFAULTS.get(norm_moc)
         if bhn:
             item['rtj_hardness_bhn'] = bhn
-            item['rtj_hardness_spec'] = f"{bhn} BHN HARDNESS"
+            item['rtj_hardness_spec'] = f"{bhn}BHN HARDNESS"
             applied_defaults.append(f'BHN hardness defaulted to {bhn} for {norm_moc}')
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
-        item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
+        item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])}BHN HARDNESS"
 
     # Validate supplied BHN does not exceed material maximum (ASME B16.20)
     if norm_moc and item.get('rtj_hardness_bhn'):
