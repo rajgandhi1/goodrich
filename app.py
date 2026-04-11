@@ -194,112 +194,189 @@ details { border-radius: 8px !important; }
 /* ── Floating chat widget ───────────────────────────────────── */
 #gq-fab {
     position: fixed !important;
-    bottom: 24px !important;
-    right: 24px !important;
-    width: 56px !important;
-    height: 56px !important;
+    bottom: 28px !important;
+    right: 28px !important;
+    width: 58px !important;
+    height: 58px !important;
     border-radius: 50% !important;
     background: linear-gradient(135deg, #2e4470, #1a2740) !important;
     color: #fff !important;
-    font-size: 1.4rem !important;
+    font-size: 1.5rem !important;
     border: none !important;
     cursor: pointer !important;
-    box-shadow: 0 4px 18px rgba(46,68,112,0.5) !important;
+    box-shadow: 0 4px 20px rgba(46,68,112,0.55) !important;
     z-index: 10001 !important;
-    transition: transform 0.15s !important;
+    transition: transform 0.18s, box-shadow 0.18s !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
 }
-#gq-fab:hover { transform: scale(1.08) !important; }
+#gq-fab:hover {
+    transform: scale(1.1) !important;
+    box-shadow: 0 6px 26px rgba(46,68,112,0.7) !important;
+}
 
+/* Full panel — input placeholder is built into the bottom of the panel */
 #gq-chat-panel {
     position: fixed !important;
-    bottom: 152px !important;
-    right: 24px !important;
-    width: 340px !important;
-    max-height: 420px !important;
+    bottom: 88px !important;
+    right: 28px !important;
+    width: 460px !important;
+    height: 520px !important;
     background: #fff !important;
-    border-radius: 16px 16px 0 0 !important;
+    border-radius: 16px !important;
     border: 1px solid #dde3f0 !important;
-    border-bottom: none !important;
     z-index: 10000 !important;
     display: none !important;
     flex-direction: column !important;
     overflow: hidden !important;
-    box-shadow: 0 -4px 24px rgba(0,0,0,0.14) !important;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.18) !important;
 }
 #gq-chat-panel.gqcp-open { display: flex !important; }
 
 #gq-chat-hdr {
     background: linear-gradient(135deg, #2e4470, #1a2740);
     color: #fff;
-    padding: 0.7rem 1rem;
+    padding: 0.85rem 1.1rem;
     font-weight: 600;
-    font-size: 0.88rem;
+    font-size: 0.95rem;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 0.6rem;
     flex-shrink: 0;
 }
+#gq-chat-hdr .gq-online-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 5px #4ade80;
+    flex-shrink: 0;
+}
+.gq-chat-hdr-close {
+    margin-left: auto;
+    background: rgba(255,255,255,0.15) !important;
+    border: none !important;
+    color: #fff !important;
+    cursor: pointer !important;
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 50% !important;
+    font-size: 1rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    transition: background 0.15s !important;
+}
+.gq-chat-hdr-close:hover { background: rgba(255,255,255,0.28) !important; }
+
 #gq-chat-body {
     flex: 1;
-    overflow-y: auto;
-    padding: 0.75rem;
+    overflow-y: scroll;
+    overscroll-behavior: contain;
+    padding: 1rem 1rem 0.5rem;
     display: flex;
     flex-direction: column;
-    background: #f7f9fe;
+    gap: 0.55rem;
+    background: #f4f7fd;
     scroll-behavior: smooth;
+    min-height: 0;
 }
+#gq-chat-body::-webkit-scrollbar { width: 5px; }
+#gq-chat-body::-webkit-scrollbar-track { background: transparent; }
+#gq-chat-body::-webkit-scrollbar-thumb { background: #c8d3e8; border-radius: 4px; }
+
 #gq-chat-nokey {
-    padding: 0.45rem 0.75rem;
+    padding: 0.55rem 1rem;
     background: #fffbe6;
     border-top: 1px solid #fde68a;
-    font-size: 0.78rem;
+    font-size: 0.83rem;
     color: #92620a;
     flex-shrink: 0;
 }
 
-/* Collapse Streamlit's sticky footer (the white overlay culprit) */
+/* Typing / loading indicator */
+@keyframes gq-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+    40%            { transform: translateY(-5px); opacity: 1; }
+}
+.gq-typing { display: flex; gap: 5px; align-items: center; padding: 10px 14px; }
+.gq-typing span {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #8fa3c8;
+    animation: gq-bounce 1.1s infinite;
+}
+.gq-typing span:nth-child(2) { animation-delay: 0.18s; }
+.gq-typing span:nth-child(3) { animation-delay: 0.36s; }
+
+/* Input footer — visual placeholder at the bottom of the panel */
+#gq-chat-footer {
+    flex-shrink: 0;
+    height: 64px;
+    background: #fff;
+    border-top: 1px solid #e4eaf5;
+}
+
+/* stBottom — transparent floating layer over the panel footer */
 [data-testid="stBottom"] {
     position: fixed !important;
     bottom: 88px !important;
-    right: 24px !important;
-    width: 340px !important;
+    right: 28px !important;
+    width: 460px !important;
+    height: 64px !important;
     left: auto !important;
-    background: transparent !important;
     padding: 0 !important;
     margin: 0 !important;
-    z-index: 10000 !important;
+    z-index: 10002 !important;
     display: none !important;
+    overflow: visible !important;
+}
+/* Kill every white/shadowed box inside stBottom */
+[data-testid="stBottom"],
+[data-testid="stBottom"]::before,
+[data-testid="stBottom"]::after,
+[data-testid="stBottom"] * {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
 }
 body:has(#gq-chat-panel.gqcp-open) [data-testid="stBottom"] {
-    display: block !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
-
-/* Reposition st.chat_input to dock below the panel — hidden by default */
-.stChatInput, [data-testid="stChatInput"] {
-    position: static !important;
+/* Flatten every wrapper layer so they don't break vertical centering */
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stBottom"] > *,
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stBottom"] > * > * {
+    display: flex !important;
+    align-items: center !important;
     width: 100% !important;
-    left: auto !important;
-    z-index: 10000 !important;
-    background: #fff !important;
-    border-radius: 0 0 16px 16px !important;
-    border: 1px solid #dde3f0 !important;
-    border-top: 1px solid #e0e6f0 !important;
-    box-shadow: none !important;
-    display: block !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex: 1 !important;
 }
-/* Black text, white bg inside the input box */
-.stChatInput input, [data-testid="stChatInput"] input,
-.stChatInput textarea, [data-testid="stChatInput"] textarea {
+/* The actual input element — 90% width */
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stChatInput"],
+body:has(#gq-chat-panel.gqcp-open) .stChatInput {
+    width: 90% !important;
+    flex: none !important;
+}
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stChatInputContainer"] {
+    background: #f0f4fa !important;
+    border-radius: 24px !important;
+    border: 1.5px solid #cdd6ea !important;
+    padding: 2px 8px !important;
+    width: 100% !important;
+    flex: 1 !important;
+}
+body:has(#gq-chat-panel.gqcp-open) [data-testid="stChatInput"] textarea {
     color: #111 !important;
-    background: #fff !important;
-    caret-color: #111 !important;
-}
-.stChatInput [data-testid="stChatInputContainer"],
-[data-testid="stChatInput"] [data-testid="stChatInputContainer"] {
-    background: #fff !important;
+    background: transparent !important;
+    caret-color: #2e4470 !important;
+    font-size: 0.93rem !important;
+    line-height: 1.5 !important;
+    padding: 8px 4px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -331,6 +408,8 @@ if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False
+if 'chat_loading' not in st.session_state:
+    st.session_state.chat_loading = False
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
@@ -1097,11 +1176,15 @@ if st.session_state.get('_last_excel'):
 # Floating chat widget — bottom-right popup
 # ---------------------------------------------------------------------------
 def _build_chat_html():
-    msgs = st.session_state.chat_messages[-15:]
-    if not msgs:
+    msgs = st.session_state.chat_messages[-20:]
+    loading = st.session_state.get('chat_loading', False)
+    if not msgs and not loading:
         return (
-            '<div style="color:#aaa;font-size:0.83rem;text-align:center;padding:2.5rem 1rem">'
-            'Ask me anything about gaskets!</div>'
+            '<div style="color:#9aabca;font-size:0.88rem;text-align:center;'
+            'padding:3rem 1.5rem;line-height:1.6">'
+            '<div style="font-size:1.8rem;margin-bottom:0.6rem">⚙️</div>'
+            'Ask me anything about gaskets — materials, ratings, standards, dimensions.'
+            '</div>'
         )
     out = []
     for m in msgs:
@@ -1110,20 +1193,34 @@ def _build_chat_html():
                .replace('\n', '<br>'))
         if m['role'] == 'user':
             out.append(
-                f'<div style="background:#2e4470;color:#fff;border-radius:14px 14px 2px 14px;'
-                f'padding:0.55rem 0.8rem;font-size:0.82rem;margin-bottom:0.45rem;'
-                f'max-width:84%;margin-left:auto;word-break:break-word">{txt}</div>'
+                '<div style="background:#2e4470;color:#fff;'
+                'border-radius:16px 16px 4px 16px;'
+                'padding:0.65rem 0.95rem;font-size:0.91rem;line-height:1.5;'
+                'max-width:82%;margin-left:auto;word-break:break-word;'
+                f'box-shadow:0 2px 8px rgba(46,68,112,0.25)">{txt}</div>'
             )
         else:
             if m.get('error'):
-                bg, tc, bdr = '#fdecea', '#b91c1c', 'border:1px solid #fca5a5;'
+                style = ('background:#fdecea;color:#b91c1c;'
+                         'border:1px solid #fca5a5;')
             else:
-                bg, tc, bdr = '#fff', '#111827', 'border:1px solid #e8ecf8;'
+                style = ('background:#fff;color:#1a2740;'
+                         'border:1px solid #e4eaf5;')
             out.append(
-                f'<div style="background:{bg};color:{tc};{bdr}border-radius:14px 14px 14px 2px;'
-                f'padding:0.55rem 0.8rem;font-size:0.82rem;margin-bottom:0.45rem;'
-                f'max-width:88%;word-break:break-word">{txt}</div>'
+                f'<div style="{style}border-radius:16px 16px 16px 4px;'
+                f'padding:0.65rem 0.95rem;font-size:0.91rem;line-height:1.5;'
+                f'max-width:88%;word-break:break-word;'
+                f'box-shadow:0 1px 4px rgba(0,0,0,0.06)">{txt}</div>'
             )
+    if loading:
+        out.append(
+            '<div style="background:#fff;border:1px solid #e4eaf5;'
+            'border-radius:16px 16px 16px 4px;max-width:88%;'
+            'box-shadow:0 1px 4px rgba(0,0,0,0.06)">'
+            '<div class="gq-typing">'
+            '<span></span><span></span><span></span>'
+            '</div></div>'
+        )
     return ''.join(out)
 
 
@@ -1137,14 +1234,14 @@ st.markdown(f"""
 
 <div id="gq-chat-panel" class="{_panel_cls}">
   <div id="gq-chat-hdr">
-    <span>&#9881;&#65039; Gasket Assistant</span>
-    <button id="gq-chat-close"
-      style="background:none;border:none;color:#fff;cursor:pointer;
-             font-size:1rem;padding:0;line-height:1;margin-left:auto">&#10005;</button>
+    <span class="gq-online-dot"></span>
+    <span>Gasket Assistant</span>
+    <button id="gq-chat-close" class="gq-chat-hdr-close">&#10005;</button>
   </div>
   <div id="gq-chat-body">{_build_chat_html()}</div>
-  {'<div id="gq-chat-nokey">Enter your OpenAI API key in the sidebar to enable the assistant.</div>'
-   if not _api_ok else ''}
+  <div id="gq-chat-footer">
+    {'<div id="gq-chat-nokey">&#128274; Enter your OpenAI API key in the sidebar.</div>' if not _api_ok else ''}
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1155,10 +1252,12 @@ _components.html("""
   var fab = parent.document.getElementById('gq-fab');
   var panel = parent.document.getElementById('gq-chat-panel');
   var closeBtn = parent.document.getElementById('gq-chat-close');
+  var body = parent.document.getElementById('gq-chat-body');
   if (!fab || !panel) { setTimeout(attach, 100); return; }
   fab.onclick = function() {
     var open = panel.classList.toggle('gqcp-open');
     fab.innerHTML = open ? '&#10005;' : '&#128172;';
+    if (open && body) body.scrollTop = body.scrollHeight;
   };
   if (closeBtn) {
     closeBtn.onclick = function() {
@@ -1166,6 +1265,7 @@ _components.html("""
       fab.innerHTML = '&#128172;';
     };
   }
+  if (body) body.scrollTop = body.scrollHeight;
 })();
 </script>
 """, height=0)
@@ -1175,26 +1275,32 @@ if _api_ok:
     if _q:
         st.session_state.chat_open = True
         st.session_state.chat_messages.append({'role': 'user', 'content': _q})
-        try:
-            from openai import OpenAI as _OAI
-            _cl = _OAI(api_key=_os.environ['OPENAI_API_KEY'])
-            _sys = (
-                'You are a concise technical expert on industrial gaskets for Goodrich Gasket Pvt. Ltd. '
-                'Specialise in: soft cut (CNAF, PTFE, Neoprene, Graphite, Klingersil), spiral wound, RTJ, '
-                'Kammprofile, DJI, ISK. Topics: material selection, pressure ratings (ASME 150#-2500#, PN6-PN400), '
-                'standards (ASME B16.21/B16.20/B16.47, EN 1514-1), dimensions, application suitability. '
-                'Keep replies short and technical. Politely decline non-gasket topics.'
-            )
-            _hx = [{'role': 'system', 'content': _sys}]
-            _hx += [{'role': m['role'], 'content': m['content']} for m in st.session_state.chat_messages]
-            _r = _cl.chat.completions.create(
-                model='gpt-4o-mini', messages=_hx, temperature=0.2, max_tokens=350,
-            )
-            st.session_state.chat_messages.append(
-                {'role': 'assistant', 'content': _r.choices[0].message.content.strip()}
-            )
-        except Exception as _e:
-            st.session_state.chat_messages.append(
-                {'role': 'assistant', 'content': f'Error: {_e}', 'error': True}
-            )
+        st.session_state.chat_loading = True
         st.rerun()
+
+if st.session_state.get('chat_loading'):
+    try:
+        from openai import OpenAI as _OAI
+        _cl = _OAI(api_key=_os.environ['OPENAI_API_KEY'])
+        _sys = (
+            'You are a concise technical expert on industrial gaskets for Goodrich Gasket Pvt. Ltd. '
+            'Specialise in: soft cut (CNAF, PTFE, Neoprene, Graphite, Klingersil), spiral wound, RTJ, '
+            'Kammprofile, DJI, ISK. Topics: material selection, pressure ratings (ASME 150#-2500#, PN6-PN400), '
+            'standards (ASME B16.21/B16.20/B16.47, EN 1514-1), dimensions, application suitability. '
+            'Keep replies short and technical. Politely decline non-gasket topics.'
+        )
+        _hx = [{'role': 'system', 'content': _sys}]
+        _hx += [{'role': m['role'], 'content': m['content']} for m in st.session_state.chat_messages]
+        _r = _cl.chat.completions.create(
+            model='gpt-4o-mini', messages=_hx, temperature=0.2, max_tokens=350,
+        )
+        st.session_state.chat_messages.append(
+            {'role': 'assistant', 'content': _r.choices[0].message.content.strip()}
+        )
+    except Exception as _e:
+        st.session_state.chat_messages.append(
+            {'role': 'assistant', 'content': f'Error: {_e}', 'error': True}
+        )
+    finally:
+        st.session_state.chat_loading = False
+    st.rerun()
