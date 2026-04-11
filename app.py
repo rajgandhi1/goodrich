@@ -10,7 +10,184 @@ from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING
 from core.formatter import format_description
 from core.exporter import build_excel
 
-st.set_page_config(page_title='Gasket Quote Processor', layout='wide')
+st.set_page_config(
+    page_title='Gasket Quote Processor',
+    page_icon='⚙️',
+    layout='wide',
+    initial_sidebar_state='expanded',
+)
+
+# ---------------------------------------------------------------------------
+# Custom CSS
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+/* ── Global resets ─────────────────────────────────────────── */
+[data-testid="stAppViewContainer"] { background: #f4f6f9; }
+[data-testid="stSidebar"] { background: #1a2740 !important; }
+[data-testid="stSidebar"] * { color: #e8ecf1 !important; }
+[data-testid="stSidebar"] .stButton > button {
+    background: #2e4470 !important;
+    color: #e8ecf1 !important;
+    border: 1px solid #3d5a8a !important;
+    border-radius: 6px !important;
+    width: 100%;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+    background: #3d5a8a !important;
+}
+[data-testid="stSidebar"] hr { border-color: #2e4470 !important; }
+
+/* ── App header ─────────────────────────────────────────────── */
+.gq-header {
+    background: linear-gradient(135deg, #1a2740 0%, #2e4470 100%);
+    color: #fff;
+    padding: 1.4rem 2rem 1.2rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.gq-header-icon { font-size: 2.6rem; line-height: 1; }
+.gq-header-title { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px; margin: 0; }
+.gq-header-sub   { font-size: 0.85rem; opacity: 0.75; margin: 3px 0 0; }
+
+/* ── Step cards ─────────────────────────────────────────────── */
+.gq-step {
+    background: #fff;
+    border-radius: 10px;
+    padding: 1.4rem 1.6rem 1.2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+    margin-bottom: 1.2rem;
+    border-left: 4px solid #2e4470;
+}
+.gq-step-label {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 1rem;
+}
+.gq-step-badge {
+    background: #2e4470;
+    color: #fff;
+    border-radius: 50%;
+    width: 28px; height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+.gq-step-title { font-size: 1.05rem; font-weight: 600; color: #1a2740; margin: 0; }
+
+/* ── Status metric cards ────────────────────────────────────── */
+.gq-metrics { display: flex; gap: 0.8rem; margin: 0.8rem 0 1rem; }
+.gq-metric {
+    flex: 1;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+.gq-metric .val { font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+.gq-metric .lbl { font-size: 0.73rem; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.gq-total   { background: #eef2fa; color: #2e4470; }
+.gq-total .lbl { color: #5a7aab; }
+.gq-ready   { background: #e6f4ec; color: #1a7a3c; }
+.gq-ready .lbl { color: #3a9a5c; }
+.gq-check   { background: #fff8e6; color: #9a6800; }
+.gq-check .lbl { color: #c08000; }
+.gq-missing { background: #fdecea; color: #b91c1c; }
+.gq-missing .lbl { color: #d94040; }
+
+/* ── Sidebar history entries ────────────────────────────────── */
+.gq-hist-meta { font-size: 0.78rem; opacity: 0.7; margin: 2px 0 6px; }
+.gq-hist-pills { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.gq-pill {
+    font-size: 0.7rem;
+    padding: 1px 7px;
+    border-radius: 20px;
+    font-weight: 600;
+}
+.gq-pill-ready   { background: #1a7a3c; color: #fff; }
+.gq-pill-check   { background: #9a6800; color: #fff; }
+.gq-pill-missing { background: #b91c1c; color: #fff; }
+
+/* ── Sidebar section title ──────────────────────────────────── */
+.gq-sidebar-title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.55;
+    margin: 0.5rem 0 0.4rem;
+}
+
+/* ── Status indicator in sidebar ───────────────────────────── */
+.gq-ai-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+.gq-ai-on  { background: #1a4a2e; }
+.gq-ai-off { background: #2e3a52; }
+.gq-ai-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.gq-ai-dot-on  { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+.gq-ai-dot-off { background: #7a8eaa; }
+
+/* ── Process button ─────────────────────────────────────────── */
+[data-testid="stButton"] > button[kind="primary"] {
+    background: linear-gradient(135deg, #2e4470, #1a2740) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.3px !important;
+    padding: 0.6rem 2rem !important;
+    box-shadow: 0 3px 10px rgba(46,68,112,0.35) !important;
+    transition: transform 0.1s, box-shadow 0.1s !important;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 5px 14px rgba(46,68,112,0.45) !important;
+}
+
+/* ── Download button ────────────────────────────────────────── */
+[data-testid="stDownloadButton"] > button[kind="primary"] {
+    background: linear-gradient(135deg, #1a7a3c, #155c2e) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    box-shadow: 0 3px 10px rgba(26,122,60,0.35) !important;
+}
+
+/* ── Data editor container ──────────────────────────────────── */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+
+/* ── Warning / info callouts ────────────────────────────────── */
+[data-testid="stAlert"] { border-radius: 8px !important; }
+
+/* ── Expander ────────────────────────────────────────────────── */
+details { border-radius: 8px !important; }
+
+/* ── Filter radio ───────────────────────────────────────────── */
+[data-testid="stRadio"] > div { gap: 0.5rem !important; }
+
+/* ── Progress bar ───────────────────────────────────────────── */
+[data-testid="stProgressBar"] > div > div { background: #2e4470 !important; border-radius: 8px !important; }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,7 +211,7 @@ if 'run_history' not in st.session_state:
 if '_history_loaded' not in st.session_state:
     st.session_state._history_loaded = False
 
-# Load history from Redis once per session (first page load only)
+# Load history from Redis once per session
 if not st.session_state._history_loaded:
     import json as _json
     from core.extractor import _get_redis as _get_redis_client
@@ -48,39 +225,12 @@ if not st.session_state._history_loaded:
             pass
     st.session_state._history_loaded = True
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-st.title('Gasket Quote Processor')
-st.caption('Soft cut & spiral wound gaskets — ASME & EN/PN standards')
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Step 1 — Input
-# ---------------------------------------------------------------------------
-st.subheader('Step 1 — Paste email or upload Excel')
-
-col1, col2 = st.columns([1, 1], gap='large')
-
-with col1:
-    email_text = st.text_area(
-        'Paste email body here',
-        height=220,
-        placeholder='Paste the customer email text containing gasket requirements...',
-    )
-
-with col2:
-    uploaded_file = st.file_uploader('Or upload Excel file', type=['xlsx', 'xls'])
-    customer = st.text_input('Customer name', placeholder='e.g. VA Tech Wabag')
-    project_ref = st.text_input('Project / PO reference', placeholder='e.g. HPCL Vizag Refinery')
-
 import os as _os
 import datetime as _dt
 import json as _json
 
 
 def _save_history_to_redis():
-    """Persist run_history list to Redis. Silent no-op if Redis unavailable."""
     from core.extractor import _get_redis as _get_redis_client
     _r = _get_redis_client()
     if _r:
@@ -90,27 +240,55 @@ def _save_history_to_redis():
             pass
 
 
-# Sidebar — status indicator + run history
+# ---------------------------------------------------------------------------
+# Sidebar
+# ---------------------------------------------------------------------------
 with st.sidebar:
+    st.markdown('<div class="gq-sidebar-title">System Status</div>', unsafe_allow_html=True)
     if _os.environ.get('OPENAI_API_KEY'):
-        st.success('AI extraction enabled', icon='🤖')
+        st.markdown(
+            '<div class="gq-ai-status gq-ai-on">'
+            '<div class="gq-ai-dot gq-ai-dot-on"></div>'
+            'AI extraction active'
+            '</div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.info('No API key configured — rule-based only', icon='ℹ️')
+        st.markdown(
+            '<div class="gq-ai-status gq-ai-off">'
+            '<div class="gq-ai-dot gq-ai-dot-off"></div>'
+            'Rule-based mode only'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        api_key_input = st.text_input(
+            'OpenAI API Key', type='password', placeholder='sk-...', label_visibility='collapsed',
+            help='Paste your key to enable AI extraction',
+        )
+        if api_key_input:
+            _os.environ['OPENAI_API_KEY'] = api_key_input
+            st.rerun()
 
-    st.divider()
-    st.subheader('Run History')
+    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
+    st.markdown('<div class="gq-sidebar-title">Run History</div>', unsafe_allow_html=True)
 
     history = st.session_state.run_history
     if not history:
-        st.caption('No runs yet this session.')
+        st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No runs yet this session.</p>',
+                    unsafe_allow_html=True)
     else:
         for idx, run in enumerate(reversed(history)):
             run_idx = len(history) - 1 - idx
             label = run['customer'] or run['project_ref'] or f'Run {run_idx + 1}'
-            with st.expander(f'**{label}** — {run["timestamp"]}', expanded=False):
-                st.caption(
-                    f"{run['n_items']} items · "
-                    f"✅ {run['n_ready']}  🟡 {run['n_check']}  🔴 {run['n_missing']}"
+            with st.expander(f'**{label}**', expanded=False):
+                st.markdown(
+                    f'<div class="gq-hist-meta">{run["timestamp"]}</div>'
+                    f'<div class="gq-hist-pills">'
+                    f'<span class="gq-pill gq-pill-ready">✅ {run["n_ready"]}</span>'
+                    f'<span class="gq-pill gq-pill-check">🟡 {run["n_check"]}</span>'
+                    f'<span class="gq-pill gq-pill-missing">🔴 {run["n_missing"]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
                 )
                 btn_col, del_col = st.columns(2)
                 if btn_col.button('Restore', key=f'restore_{run_idx}'):
@@ -120,7 +298,6 @@ with st.sidebar:
                     st.session_state.filter_mode = 'All'
                     st.rerun()
                 if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
-                    # Evict every description in this run from Redis cache
                     from core.extractor import _get_redis, _cache_key
                     r = _get_redis()
                     if r:
@@ -138,8 +315,56 @@ with st.sidebar:
                     _save_history_to_redis()
                     st.rerun()
 
+
+# ---------------------------------------------------------------------------
+# App header
+# ---------------------------------------------------------------------------
+st.markdown("""
+<div class="gq-header">
+  <div class="gq-header-icon">⚙️</div>
+  <div>
+    <p class="gq-header-title">Gasket Quote Processor</p>
+    <p class="gq-header-sub">Goodrich Gasket Pvt. Ltd — Soft cut &amp; spiral wound · ASME &amp; EN/PN standards</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Step 1 — Input
+# ---------------------------------------------------------------------------
+st.markdown("""
+<div class="gq-step">
+  <div class="gq-step-label">
+    <span class="gq-step-badge">1</span>
+    <p class="gq-step-title">Paste email or upload Excel</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+col1, col2 = st.columns([1, 1], gap='large')
+
+with col1:
+    email_text = st.text_area(
+        'Paste email body',
+        height=200,
+        placeholder='Paste the customer email text containing gasket requirements...',
+        label_visibility='visible',
+    )
+
+with col2:
+    uploaded_file = st.file_uploader(
+        'Upload Excel file',
+        type=['xlsx', 'xls'],
+        help='Supports multi-sheet enquiry files',
+    )
+    st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
+    customer = st.text_input('Customer name', placeholder='e.g. VA Tech Wabag')
+    project_ref = st.text_input('Project / PO reference', placeholder='e.g. HPCL Vizag Refinery')
+
+st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
+
+
 def _build_preview_df(items):
-    """Lightweight preview DataFrame shown while processing."""
     STATUS_ICON = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}
     return pd.DataFrame([{
         '#':                    item.get('line_no', ''),
@@ -150,7 +375,7 @@ def _build_preview_df(items):
     } for item in items])
 
 
-if st.button('Process Enquiry', type='primary', width="stretch"):
+if st.button('⚡  Process Enquiry', type='primary', use_container_width=True):
     raw_items = []
 
     if uploaded_file:
@@ -164,11 +389,13 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
         from core.extractor import extract_batch
         unique_count = len({item['description'] for item in raw_items})
 
-        status_text = st.empty()
-        progress_bar = st.progress(0)
-        preview_ph   = st.empty()   # progressive results table
+        proc_container = st.container()
+        with proc_container:
+            status_text = st.empty()
+            progress_bar = st.progress(0)
+            preview_ph   = st.empty()
 
-        status_text.text(f'Extracting {unique_count} unique descriptions in parallel...')
+        status_text.text(f'Extracting {unique_count} unique descriptions...')
         progress_bar.progress(5)
 
         def _on_progress(done, total):
@@ -179,9 +406,8 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
         extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
         progress_bar.progress(75)
 
-        # Rules + format — show preview table growing in real time
         n = len(extracted_items)
-        step = max(1, n // 20)   # ~20 preview refreshes regardless of list size
+        step = max(1, n // 20)
         processed = []
 
         for i, extracted in enumerate(extracted_items, 1):
@@ -190,31 +416,30 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
             processed.append(item)
             progress_bar.progress(75 + int(i / n * 24))
             if i % step == 0 or i == n:
-                status_text.text(f'Processed {i}/{n} items...')
+                status_text.text(f'Processing {i}/{n} items...')
                 preview_ph.dataframe(
                     _build_preview_df(processed),
-                    width='stretch',
+                    use_container_width=True,
                     hide_index=True,
                 )
 
         progress_bar.empty()
         status_text.empty()
-        preview_ph.empty()        # clear preview — full editor replaces it below
+        preview_ph.empty()
         st.session_state.results = processed
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)
         st.session_state.filter_mode = 'All'
 
-        # Save to run history (keep last 15)
         st.session_state.run_history.append({
-            'timestamp': _dt.datetime.now().strftime('%d %b %H:%M'),
-            'customer':  customer or '',
+            'timestamp':   _dt.datetime.now().strftime('%d %b %H:%M'),
+            'customer':    customer or '',
             'project_ref': project_ref or '',
-            'n_items':   len(processed),
-            'n_ready':   sum(1 for i in processed if i['status'] == STATUS_READY),
-            'n_check':   sum(1 for i in processed if i['status'] == STATUS_CHECK),
-            'n_missing': sum(1 for i in processed if i['status'] == STATUS_MISSING),
-            'items':     processed,
+            'n_items':     len(processed),
+            'n_ready':     sum(1 for i in processed if i['status'] == STATUS_READY),
+            'n_check':     sum(1 for i in processed if i['status'] == STATUS_CHECK),
+            'n_missing':   sum(1 for i in processed if i['status'] == STATUS_MISSING),
+            'items':       processed,
         })
         if len(st.session_state.run_history) > 15:
             st.session_state.run_history = st.session_state.run_history[-15:]
@@ -222,15 +447,15 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
 
 
 # ---------------------------------------------------------------------------
-# Helper — build display rows from item list
+# Helper — build display rows
 # ---------------------------------------------------------------------------
 def _build_rows(items):
     rows = []
     for item in items:
         status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}.get(item['status'], '')
-        flags = item.get('flags', [])
+        flags    = item.get('flags', [])
         defaults = item.get('applied_defaults', [])
-        parts = list(flags) + [f'[default] {d}' for d in defaults]
+        parts    = list(flags) + [f'[default] {d}' for d in defaults]
         rows.append({
             '#':                    item.get('line_no', ''),
             'Customer Description': item.get('raw_description', ''),
@@ -260,8 +485,6 @@ def _build_rows(items):
 
 # ---------------------------------------------------------------------------
 # Fragment — data editor + Update/Delete
-# Reruns only itself on checkbox changes, keeping the rest of the page stable.
-# display_indices: list of indices into the full `items` list to show.
 # ---------------------------------------------------------------------------
 @st.fragment
 def _editor_fragment(items, display_indices):
@@ -272,19 +495,18 @@ def _editor_fragment(items, display_indices):
     else:
         df = pd.DataFrame(_build_rows(display_items))
 
-    # Inject Select and Delete columns at the front (_bulk_df never stores these)
     df = df.drop(columns=[c for c in ('Select', 'Delete') if c in df.columns])
     df.insert(0, 'Delete', False)
     df.insert(0, 'Select', [i in st.session_state._selected_rows for i in range(len(df))])
 
     edited_df = st.data_editor(
         df,
-        width='stretch',
+        use_container_width=True,
         height=min(80 + 35 * len(display_items), 620),
         hide_index=True,
         column_config={
             'Select':               st.column_config.CheckboxColumn('Select', width='small'),
-            'Delete':               st.column_config.CheckboxColumn('🗑', width='small', help='Tick to delete this row on Update'),
+            'Delete':               st.column_config.CheckboxColumn('🗑', width='small', help='Tick to delete on Update'),
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
             'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
@@ -293,29 +515,27 @@ def _editor_fragment(items, display_indices):
             'MOC':                  st.column_config.TextColumn('MOC', width='large'),
             'Face':                 st.column_config.SelectboxColumn('Face', options=FACE_OPTIONS, width='small'),
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
-            'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring designation e.g. R-23'),
+            'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
-            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='RTJ hardness (e.g. 90 BHN HARDNESS or 22 HRC MAX)'),
-            'SW Winding':           st.column_config.TextColumn('SW Winding', width='small', help='SPW/KAMM winding material e.g. SS304, SS316L'),
-            'SW Filler':            st.column_config.TextColumn('SW Filler', width='small', help='SPW filler e.g. GRAPHITE, PTFE'),
-            'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small', help='Outer centering ring e.g. CS, SS304'),
-            'SW Inner Ring':        st.column_config.TextColumn('SW Inner Ring', width='small', help='Inner ring material e.g. SS304'),
+            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='e.g. 90 BHN HARDNESS'),
+            'SW Winding':           st.column_config.TextColumn('SW Winding', width='small'),
+            'SW Filler':            st.column_config.TextColumn('SW Filler', width='small'),
+            'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small'),
+            'SW Inner Ring':        st.column_config.TextColumn('SW Inner Ring', width='small'),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0),
             'UoM':                  st.column_config.SelectboxColumn('UoM', options=UOM_OPTIONS, width='small'),
             'Special':              st.column_config.TextColumn('Special', width='medium'),
             'GGPL Description':     st.column_config.TextColumn('GGPL Description', width='large', disabled=True),
             'Status':               st.column_config.TextColumn('Status', width='small', disabled=True),
             'AI':                   st.column_config.TextColumn('AI', width='small', disabled=True,
-                                        help='Extraction confidence: HIGH / MEDIUM / LOW (blank = regex fallback)'),
+                                        help='Confidence: HIGH / MEDIUM / LOW'),
             'Notes / Flags':        st.column_config.TextColumn('Notes / Flags', width='large', disabled=True),
         },
     )
 
-    # Sync checkbox state back for Bulk Edit to read
     st.session_state._selected_rows = {i for i, row in edited_df.iterrows() if row['Select']}
 
-    if st.button('Update', type='secondary', key='update_btn'):
-        # Work on a copy of the full results list so non-visible rows are preserved
+    if st.button('↻  Update Descriptions', type='secondary', key='update_btn'):
         updated_full = list(items)
         to_delete = set()
 
@@ -360,7 +580,6 @@ def _editor_fragment(items, display_indices):
             item['ggpl_description'] = format_description(item)
             updated_full[orig_idx] = item
 
-        # Remove deleted rows and renumber
         final = [item for idx, item in enumerate(updated_full) if idx not in to_delete]
         for j, item in enumerate(final, 1):
             item['line_no'] = j
@@ -376,21 +595,44 @@ def _editor_fragment(items, display_indices):
 # ---------------------------------------------------------------------------
 if st.session_state.results:
     items = st.session_state.results
-    st.divider()
-    st.subheader('Step 2 — Review & Edit')
 
-    # Metrics
     n_ready   = sum(1 for i in items if i['status'] == STATUS_READY)
     n_check   = sum(1 for i in items if i['status'] == STATUS_CHECK)
     n_missing = sum(1 for i in items if i['status'] == STATUS_MISSING)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric('Total items', len(items))
-    c2.metric('Ready ✅', n_ready)
-    c3.metric('Check defaults 🟡', n_check)
-    c4.metric('Action needed 🔴', n_missing)
+
+    st.markdown("""
+    <div class="gq-step">
+      <div class="gq-step-label">
+        <span class="gq-step-badge">2</span>
+        <p class="gq-step-title">Review &amp; Edit</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Colored metric cards
+    st.markdown(f"""
+    <div class="gq-metrics">
+      <div class="gq-metric gq-total">
+        <div class="val">{len(items)}</div>
+        <div class="lbl">Total Items</div>
+      </div>
+      <div class="gq-metric gq-ready">
+        <div class="val">{n_ready}</div>
+        <div class="lbl">✅ Ready</div>
+      </div>
+      <div class="gq-metric gq-check">
+        <div class="val">{n_check}</div>
+        <div class="lbl">🟡 Check Defaults</div>
+      </div>
+      <div class="gq-metric gq-missing">
+        <div class="val">{n_missing}</div>
+        <div class="lbl">🔴 Action Needed</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Filter
-    filter_col, spacer = st.columns([3, 7])
+    filter_col, spacer = st.columns([4, 6])
     with filter_col:
         filter_mode = st.radio(
             'Show',
@@ -400,13 +642,11 @@ if st.session_state.results:
             label_visibility='collapsed',
         )
 
-    # Invalidate bulk-df cache and selections when filter changes
     if st.session_state.get('_last_filter_mode') != filter_mode:
         st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
         st.session_state['_last_filter_mode'] = filter_mode
 
-    # Compute which rows to display
     if filter_mode == 'Issues (🟡 + 🔴)':
         display_indices = [i for i, item in enumerate(items)
                            if item['status'] in (STATUS_CHECK, STATUS_MISSING)]
@@ -419,13 +659,12 @@ if st.session_state.results:
     if not display_indices:
         st.success('No items match this filter.')
     else:
-        # Select All / Deselect All (scoped to visible rows)
-        sa1, sa2, sa3, _ = st.columns([1, 1.3, 1.3, 7])
+        sa1, sa2, sa3, _ = st.columns([1, 1.3, 1.2, 7])
         if sa1.button('Select All', key='sel_all_btn'):
             st.session_state._selected_rows = set(range(len(display_indices)))
         if sa2.button('Deselect All', key='desel_all_btn'):
             st.session_state._selected_rows = set()
-        if sa3.button('+ Add Row', key='add_row_btn'):
+        if sa3.button('＋ Add Row', key='add_row_btn'):
             new_item = apply_rules({
                 'line_no': len(items) + 1,
                 'raw_description': '',
@@ -437,7 +676,6 @@ if st.session_state.results:
             st.session_state._selected_rows = set()
             st.rerun(scope='app')
 
-        # Bulk Edit
         n_sel = len(st.session_state._selected_rows)
         n_visible = len(display_indices)
         target_label = f'all {n_visible} visible rows' if n_sel == 0 else f'{n_sel} selected row(s)'
@@ -463,7 +701,6 @@ if st.session_state.results:
             if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
                 df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
                           else pd.DataFrame(_build_rows([items[i] for i in display_indices]))
-                # _bulk_df never stores Select/Delete — fragment always injects them fresh
                 df_bulk = df_bulk.drop(columns=[c for c in ('Select', 'Delete') if c in df_bulk.columns])
                 selected = st.session_state._selected_rows
                 target = list(selected) if selected else list(range(len(df_bulk)))
@@ -481,15 +718,14 @@ if st.session_state.results:
                     if bulk_outer.strip():             df_bulk.at[idx, 'SW Outer Ring'] = bulk_outer.strip().upper()
                     if bulk_inner.strip():             df_bulk.at[idx, 'SW Inner Ring'] = bulk_inner.strip().upper()
                 st.session_state['_bulk_df'] = df_bulk
-                st.success(f'Applied to {len(target)} row(s). Click **Update** below to regenerate descriptions.')
+                st.success(f'Applied to {len(target)} row(s). Click **↻ Update Descriptions** to regenerate.')
 
-        # ---- The only thing that reruns on checkbox clicks ----
         _editor_fragment(items, display_indices)
 
-    # Missing info summary + RFI draft
+    # Missing items summary + RFI
     missing_items = [i for i in items if i['status'] == STATUS_MISSING]
     if missing_items:
-        st.warning('**Items needing clarification** (edit the table above to fill these in):')
+        st.warning('**Items needing clarification** — edit the table above to fill these in:')
         seen_flags = {}
         for item in missing_items:
             for flag in item.get('flags', []):
@@ -515,17 +751,36 @@ if st.session_state.results:
     # -------------------------------------------------------------------------
     # Step 3 — Export
     # -------------------------------------------------------------------------
-    st.divider()
-    st.subheader('Step 3 — Export')
+    st.markdown("""
+    <div class="gq-step" style="border-left-color:#1a7a3c">
+      <div class="gq-step-label">
+        <span class="gq-step-badge" style="background:#1a7a3c">3</span>
+        <p class="gq-step-title">Export Quote</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     excel_bytes = build_excel(items, customer=customer, project_ref=project_ref)
     filename = f"quote_{project_ref or customer or 'output'}.xlsx".replace(' ', '_')
 
-    st.download_button(
-        label='Download Quote Excel',
-        data=excel_bytes,
-        file_name=filename,
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        type='primary',
-        width="stretch",
-    )
+    dl_col, info_col = st.columns([2, 3])
+    with dl_col:
+        st.download_button(
+            label='⬇  Download Quote Excel',
+            data=excel_bytes,
+            file_name=filename,
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            type='primary',
+            use_container_width=True,
+        )
+    with info_col:
+        st.markdown(
+            f'<p style="color:#555;font-size:0.85rem;margin:0.6rem 0 0">'
+            f'<strong>{filename}</strong><br>'
+            f'{len(items)} items · '
+            f'<span style="color:#1a7a3c">{n_ready} ready</span> · '
+            f'<span style="color:#9a6800">{n_check} defaults</span> · '
+            f'<span style="color:#b91c1c">{n_missing} missing</span>'
+            f'</p>',
+            unsafe_allow_html=True,
+        )
