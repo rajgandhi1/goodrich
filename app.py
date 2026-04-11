@@ -29,6 +29,24 @@ if '_selected_rows' not in st.session_state:
     st.session_state._selected_rows = set()
 if 'filter_mode' not in st.session_state:
     st.session_state.filter_mode = 'All'
+if 'run_history' not in st.session_state:
+    st.session_state.run_history = []
+if '_history_loaded' not in st.session_state:
+    st.session_state._history_loaded = False
+
+# Load history from Redis once per session (first page load only)
+if not st.session_state._history_loaded:
+    import json as _json
+    from core.extractor import _get_redis as _get_redis_client
+    _r = _get_redis_client()
+    if _r:
+        try:
+            _raw = _r.get('gq:run_history')
+            if _raw:
+                st.session_state.run_history = _json.loads(_raw)
+        except Exception:
+            pass
+    st.session_state._history_loaded = True
 
 # ---------------------------------------------------------------------------
 # Header
@@ -56,35 +74,69 @@ with col2:
     customer = st.text_input('Customer name', placeholder='e.g. VA Tech Wabag')
     project_ref = st.text_input('Project / PO reference', placeholder='e.g. HPCL Vizag Refinery')
 
-openai_key = st.sidebar.text_input('OpenAI API Key (optional — enables AI extraction)', type='password')
-if openai_key:
-    import os
-    import core.extractor as _ext
-    if os.environ.get('OPENAI_API_KEY') != openai_key:
-        os.environ['OPENAI_API_KEY'] = openai_key
-        _ext._openai_client = None
-        # Validate the new key immediately
+import os as _os
+import datetime as _dt
+import json as _json
+
+
+def _save_history_to_redis():
+    """Persist run_history list to Redis. Silent no-op if Redis unavailable."""
+    from core.extractor import _get_redis as _get_redis_client
+    _r = _get_redis_client()
+    if _r:
         try:
-            from openai import OpenAI
-            _test_client = OpenAI(api_key=openai_key, timeout=10.0)
-            _test_client.chat.completions.create(
-                model='gpt-4o-mini',
-                messages=[{'role': 'user', 'content': 'hi'}],
-                max_tokens=1,
-            )
-            st.sidebar.success('OpenAI API key valid')
-        except Exception as _e:
-            err_msg = str(_e)
-            if 'auth' in err_msg.lower() or '401' in err_msg or 'invalid' in err_msg.lower():
-                st.sidebar.error('Invalid API key — check and re-enter')
-            else:
-                st.sidebar.warning(f'Key set but could not verify: {err_msg}')
-            os.environ['OPENAI_API_KEY'] = ''
-            _ext._openai_client = None
+            _r.set('gq:run_history', _json.dumps(st.session_state.run_history))
+        except Exception:
+            pass
+
+
+# Sidebar — status indicator + run history
+with st.sidebar:
+    if _os.environ.get('OPENAI_API_KEY'):
+        st.success('AI extraction enabled', icon='🤖')
     else:
-        st.sidebar.success('OpenAI API key valid')
-else:
-    st.sidebar.info('No OpenAI key — using rule-based extraction')
+        st.info('No API key configured — rule-based only', icon='ℹ️')
+
+    st.divider()
+    st.subheader('Run History')
+
+    history = st.session_state.run_history
+    if not history:
+        st.caption('No runs yet this session.')
+    else:
+        for idx, run in enumerate(reversed(history)):
+            run_idx = len(history) - 1 - idx
+            label = run['customer'] or run['project_ref'] or f'Run {run_idx + 1}'
+            with st.expander(f'**{label}** — {run["timestamp"]}', expanded=False):
+                st.caption(
+                    f"{run['n_items']} items · "
+                    f"✅ {run['n_ready']}  🟡 {run['n_check']}  🔴 {run['n_missing']}"
+                )
+                btn_col, del_col = st.columns(2)
+                if btn_col.button('Restore', key=f'restore_{run_idx}'):
+                    st.session_state.results = run['items']
+                    st.session_state._selected_rows = set()
+                    st.session_state.pop('_bulk_df', None)
+                    st.session_state.filter_mode = 'All'
+                    st.rerun()
+                if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
+                    # Evict every description in this run from Redis cache
+                    from core.extractor import _get_redis, _cache_key
+                    r = _get_redis()
+                    if r:
+                        descs = {
+                            item.get('raw_description', '')
+                            for item in run['items']
+                            if item.get('raw_description')
+                        }
+                        for desc in descs:
+                            try:
+                                r.delete(_cache_key(desc))
+                            except Exception:
+                                pass
+                    st.session_state.run_history.pop(run_idx)
+                    _save_history_to_redis()
+                    st.rerun()
 
 def _build_preview_df(items):
     """Lightweight preview DataFrame shown while processing."""
@@ -152,6 +204,21 @@ if st.button('Process Enquiry', type='primary', width="stretch"):
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)
         st.session_state.filter_mode = 'All'
+
+        # Save to run history (keep last 15)
+        st.session_state.run_history.append({
+            'timestamp': _dt.datetime.now().strftime('%d %b %H:%M'),
+            'customer':  customer or '',
+            'project_ref': project_ref or '',
+            'n_items':   len(processed),
+            'n_ready':   sum(1 for i in processed if i['status'] == STATUS_READY),
+            'n_check':   sum(1 for i in processed if i['status'] == STATUS_CHECK),
+            'n_missing': sum(1 for i in processed if i['status'] == STATUS_MISSING),
+            'items':     processed,
+        })
+        if len(st.session_state.run_history) > 15:
+            st.session_state.run_history = st.session_state.run_history[-15:]
+        _save_history_to_redis()
 
 
 # ---------------------------------------------------------------------------
