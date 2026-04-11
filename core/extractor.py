@@ -7,6 +7,7 @@ import os
 import re
 import json
 import time
+import hashlib
 import asyncio
 import logging
 import threading
@@ -16,6 +17,25 @@ logger = logging.getLogger(__name__)
 
 # Retained for backwards-compat with app.py which resets this on key change
 _openai_client = None
+
+_CACHE_TTL = 30 * 24 * 3600  # 30 days — gasket specs are stable
+
+
+def _get_redis():
+    """Return a Redis client if REDIS_URL is set, else None."""
+    url = os.environ.get('REDIS_URL')
+    if not url:
+        return None
+    try:
+        import redis
+        return redis.from_url(url, decode_responses=True, socket_connect_timeout=2)
+    except Exception:
+        return None
+
+
+def _cache_key(desc: str) -> str:
+    digest = hashlib.sha256(desc.upper().strip().encode()).hexdigest()[:20]
+    return f'gq:{digest}'
 
 _FIELD_SCHEMA = """{
   "size": "e.g. 2\\" or OD 584MM or null",
@@ -76,9 +96,10 @@ Rules:
 def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     """
     Extract structured fields for all items.
-    All LLM batches run concurrently via AsyncOpenAI + asyncio.gather in a background thread.
-    progress_cb(done, total) is called from the main thread while polling the progress queue.
-    Deduplicates identical descriptions before batching.
+    1. Checks Redis cache first — cached descriptions skip the LLM entirely.
+    2. Remaining descriptions are batched and sent to AsyncOpenAI concurrently.
+    3. New LLM results are stored back to Redis (TTL 30 days).
+    progress_cb(done, total) is called from the main thread.
     """
     for item in items:
         if item.get('description'):
@@ -88,18 +109,38 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     total = len(unique_descs_list)
     cache: dict = {}
 
-    batches = [
-        unique_descs_list[i:i + _BATCH_SIZE]
-        for i in range(0, total, _BATCH_SIZE)
-    ]
+    # --- Redis cache lookup ---
+    r = _get_redis()
+    uncached: list[str] = []
+    if r:
+        for desc in unique_descs_list:
+            try:
+                hit = r.get(_cache_key(desc))
+                if hit:
+                    cache[desc] = json.loads(hit)
+                else:
+                    uncached.append(desc)
+            except Exception:
+                uncached.append(desc)
+        if len(cache) > 0:
+            logger.info(f'Redis cache: {len(cache)}/{total} hits, {len(uncached)} need LLM')
+    else:
+        uncached = unique_descs_list
 
+    # Signal progress for cache hits immediately
+    if progress_cb and len(cache) > 0:
+        progress_cb(len(cache), total)
+
+    # --- LLM extraction for uncached descriptions ---
     api_key = os.environ.get('OPENAI_API_KEY') or _get_streamlit_secret('OPENAI_API_KEY')
 
-    if not api_key:
-        # No client — return null stubs immediately
-        for desc in unique_descs_list:
+    if not uncached:
+        pass  # all served from cache
+    elif not api_key:
+        for desc in uncached:
             cache[desc] = _null_extract()
     else:
+        batches = [uncached[i:i + _BATCH_SIZE] for i in range(0, len(uncached), _BATCH_SIZE)]
         progress_q: _stdlib_queue.SimpleQueue = _stdlib_queue.SimpleQueue()
         batch_results: list = []
 
@@ -111,8 +152,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
         async def _run_all(key: str):
             from openai import AsyncOpenAI
             async_client = AsyncOpenAI(api_key=key, timeout=60.0)
-            tasks = [_do_batch_async(async_client, b) for b in batches]
-            return await asyncio.gather(*tasks)
+            return await asyncio.gather(*[_do_batch_async(async_client, b) for b in batches])
 
         def _bg():
             batch_results.extend(asyncio.run(_run_all(api_key)))
@@ -120,8 +160,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
         t = threading.Thread(target=_bg, daemon=True)
         t.start()
 
-        # Poll progress queue while background thread runs
-        done = 0
+        done = len(cache)  # start from cache hits already reported
         while t.is_alive():
             try:
                 n = progress_q.get(block=False)
@@ -132,7 +171,6 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
                 time.sleep(0.05)
         t.join()
 
-        # Drain any remaining progress signals
         while True:
             try:
                 n = progress_q.get(block=False)
@@ -144,7 +182,14 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
 
         for batch, results in batch_results:
             for desc, result in zip(batch, results):
-                cache[desc] = result if result else _null_extract()
+                extracted = result if result else _null_extract()
+                cache[desc] = extracted
+                # Store in Redis — skip null stubs (LLM was unavailable)
+                if r and result:
+                    try:
+                        r.setex(_cache_key(desc), _CACHE_TTL, json.dumps(extracted))
+                    except Exception:
+                        pass
 
     output = []
     for item in items:
