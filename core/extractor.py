@@ -77,19 +77,20 @@ Schema per item:
 {_FIELD_SCHEMA}
 
 Rules:
-- size: NPS/inch → as-is (e.g. "6\\""). NB/DN → "X NB" (e.g. "100 NB") — do NOT convert to inches; DN=NB. OD×ID → "OD NNNmm x ID NNNmm". size_type: NPS/NB/OD_ID. Bare trailing number after "INCH" keyword = NPS size in inches.
+- size: NPS/inch → as-is (e.g. "6\\""). NB/DN → "X NB" (e.g. "100 NB") — do NOT convert to inches; DN=NB. OD×ID → "OD NNNmm x ID NNNmm". size_type: NPS/NB/OD_ID. Bare trailing number after "INCH" keyword = NPS size in inches. "OD - 35, ID - 12" or "OD-35 ID-12" or "OD: 35" format → od_mm=35, id_mm=12, size_type=OD_ID.
 - rating: "150#"/"300#"/"PN 10"/"PN 16". Valid ASME classes: 150/300/600/900/1500/2500/3000.
+- thickness_mm: null for RTJ; extract number or null for others. Patterns: "3MM THK", "THK-1.5", "THK 3", "3T" or "T-3" prefix/suffix (e.g. "3T X 1285 OD" or "(Without Rib)3T" → thickness_mm=3), "Ø67 x Ø27 x 3MM" (last dim = thickness).
 - Normalize winding materials (sw_winding_material): 304SS/SS 304/AISI 304→SS304; 316SS/316-SS→SS316; 316L→SS316L; SUPER DUPLEX/SDSS→SDSS (UNS S32750); INCOLOY/INCOLOY 825→INCOLOY 825; INCONEL/INCONEL 625→INCONEL 625; "STAINLESS STEEL" alone (no grade)→null.
 - Normalize ring materials: CARBON STEEL/MS/C.S./CS→CS; I/R=inner ring, O/R=outer ring (e.g. "ALLOY 20 I/R"=sw_inner_ring=ALLOY 20, "CS O/R"=sw_outer_ring=CS); LTCS→pass through as LTCS. INCOLOY 825/INCONEL 625 rings→keep as-is.
 - Normalize RTJ MOC: SOFT IRON/SOFTIRON→SOFTIRON; SOFT IRON GALVANISED→SOFTIRON GALVANISED; LOW CARBON STEEL/LCS/CARBON STEEL/CN+ZN PLATED CS→LOW CARBON STEEL; 316 S/STAINLESS STEEL 316→SS316; UNS S32205/UNS S32750→keep as-is. Ring nos: RX53→RX-53, BX 156→BX-156 (space=hyphen). BHN: soft iron=90, LCS=120, SS316=160, INCOLOY 825/INCONEL 625=160.
+- Normalize SOFT_CUT moc: EPTFE/E-PTFE/EXPANDED PTFE→"EXPANDED PTFE"; SUPERLITE GF 300/SUPERLITE→"SUPERLITE GF 300"; GYLON→"GYLON".
 - SPIRAL_WOUND: sw_winding_material/sw_filler/sw_inner_ring/sw_outer_ring; moc=null. RTJ: moc/rtj_groove_type/rtj_hardness_bhn/ring_no; sw_*=null; standard=ASME B16.20. SOFT_CUT: moc; sw_*/rtj_*=null.
 - face_type: RF/FF for SOFT_CUT/ISK/ISK_RTJ; null for SPIRAL_WOUND/RTJ/KAMM/DJI.
-- thickness_mm: null for RTJ; extract number or null for others.
 - standard: API 6A/API Specs→"API 6A"; B16/A→"ASME B16.20"; ASME B16.21 (soft cut ≤24"); ASME B16.47 (soft cut ≥26"); ASME B16.20 (SW/RTJ ≤24"); ASME B16.47 (SW ≥26"). ISK/ISK_RTJ: extract customer-stated standard verbatim incl. SERIES A/B (e.g. "ASME B16.47 ( SERIES A )").
-- special: FOOD GRADE/NACE/LETHAL/EIL APPROVED/NACE MR 0175/API 6A/SERIES B. ISK/ISK_RTJ: prefix "SET:" + component details verbatim. DJI: set "AS PER DRAWING" when drawing referenced.
+- special: FOOD GRADE/NACE/LETHAL/EIL APPROVED/NACE MR 0175/API 6A/SERIES B. ISK/ISK_RTJ: prefix "SET:" + component details verbatim. DJI: set "AS PER DRAWING" when drawing referenced or when "(WITHOUT RIB)"/"(WITH RIB)"/"(WITHOUT RIB)" appears (drawing-controlled dimensions).
 - isk_style: STYLE-CS (G10 laminate+metallic core); STYLE-N (ISK_RTJ). Null if not explicitly stated.
 - dji_filler: GRAPHITE/ASBESTOS FREE/ARMCO IRON/other. Null = rules engine defaults GRAPHITE.
-- Brand name SOFT_CUT (KROLLER & ZILLER/KLINGER/DONIT/GARLOCK + grade code) → moc=full brand+grade. "WITH SPACER"=SOFT_CUT, capture in special.
+- Brand name SOFT_CUT (KROLLER & ZILLER/KLINGER/DONIT/GARLOCK/SUPERLITE + grade code) → moc=full brand+grade. "WITH SPACER"=SOFT_CUT, capture in special.
 - confidence: HIGH if all key fields clear; LOW if ambiguous."""
 
 

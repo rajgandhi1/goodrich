@@ -156,7 +156,7 @@ def _fmt_dji(item: dict) -> str:
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
     filler = (item.get('dji_filler') or 'GRAPHITE').strip().upper()
     special = (item.get('special') or '').upper()
-    dims = f'SIZE: {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
+    dims = f'SIZE : {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
 
     if 'AS PER DRAWING' in special or 'DRAWING' in special:
         # Industrial / heat-exchanger pattern: DOUBLE JACKETED, {moc} WITH {filler} FILLER (AS PER DRAWING)
@@ -201,14 +201,14 @@ def _fmt_isk(item: dict) -> str:
 
 
 def _fmt_size(size: str, gtype: str) -> str:
-    """Format size string. NB sizes use DN prefix for spiral wound (EN convention)."""
+    """Format size string. NB/DN sizes → 'DN N' for all types (EN convention)."""
     import re as _re
     if '"' in size or 'MM' in size:
         return size
-    # NB size: "100 NB" → "DN100" for SW, keep as-is for soft cut
+    # NB size: "100 NB" / "20 NB" → "DN 100" / "DN 20"
     m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', size.strip(), _re.IGNORECASE)
     if m:
-        return f'DN{int(float(m.group(1)))}' if gtype == 'SPIRAL_WOUND' else size
+        return f'DN {int(float(m.group(1)))}'
     return f'{size}"'
 
 
