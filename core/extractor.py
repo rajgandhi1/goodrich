@@ -7,28 +7,15 @@ import os
 import re
 import json
 import time
+import asyncio
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue as _stdlib_queue
 
 logger = logging.getLogger(__name__)
 
+# Retained for backwards-compat with app.py which resets this on key change
 _openai_client = None
-
-
-def _get_openai_client():
-    global _openai_client
-    if _openai_client is not None:
-        return _openai_client
-    api_key = os.environ.get('OPENAI_API_KEY') or _get_streamlit_secret('OPENAI_API_KEY')
-    if not api_key:
-        return None
-    try:
-        from openai import OpenAI
-        _openai_client = OpenAI(api_key=api_key, timeout=60.0)
-        return _openai_client
-    except Exception:
-        return None
 
 _FIELD_SCHEMA = """{
   "size": "e.g. 2\\" or OD 584MM or null",
@@ -56,52 +43,41 @@ _FIELD_SCHEMA = """{
 
 _BATCH_SIZE = 20  # descriptions per LLM call
 
-_BATCH_SYSTEM_PROMPT = f"""You are a gasket specification extraction assistant for an oil & gas company.
-Extract gasket specs from customer descriptions and return ONLY valid JSON.
+_BATCH_SYSTEM_PROMPT = f"""You are a gasket spec extraction assistant. Extract fields from customer descriptions and return ONLY valid JSON with key "results" (array, same order as input).
 
-Handle gasket types:
-1. SOFT_CUT: flat ring (RF/FF), materials like CNAF, PTFE, NEOPRENE, EPDM, NATURAL RUBBER, GRAPHITE, EXPANDED GRAPHITE, VITON, NON ASBESTOS, SBR, NBR, NITRILE RUBBER, SILICONE RUBBER, BUTYL RUBBER, ARAMID FIBER, CERAMIC FIBER, THERMICULITE, CORK, LEATHER. "EXPANDED GRAPHITE WITH SS304/SS316 REINFORCEMENT/RENFORCEMENT" is SOFT_CUT — SS304/SS316 here is a metallic insert/tanged reinforcement, NOT a spiral wound winding; set moc="EXPANDED GRAPHITE WITH SS304 REINFORCEMENT" (or SS316 as applicable). Similarly "X WITH SS304/SS316/MS/STEEL INSERT" combinations (e.g. EPDM WITH SS304 INSERT, PTFE WITH SS316 INSERT) are SOFT_CUT with a metallic insert. "VITON GASKET" = SOFT_CUT with moc="VITON GASKET".
-2. SPIRAL_WOUND: metallic wound gasket, typically with graphite/PTFE filler and centering/inner rings
-3. RTJ: Ring Type Joint — octagonal or oval metallic ring, e.g. Soft Iron, SS316, Low Carbon Steel
-4. KAMM: Kammprofile (also called CAMPROFILE, CAM PROFILE, KAMMPROFILE) gasket — serrated metal core with graphite facing; similar ring/filler structure to SW
-5. DJI: Double Jacket (Jacketed) gasket — metallic jacket (COPPER, SS316L, SOFT IRON, ARMCO IRON etc.) with filler (usually GRAPHITE); dimensions always given as OD × ID × THK
-6. ISK: Insulating Gasket Kit — GRE (G10) or similar, for RF/FF flanges
-7. ISK_RTJ: Insulating Gasket Kit for RTJ flanges
+Gasket types:
+1. SOFT_CUT: flat ring (RF/FF) — CNAF, PTFE, NEOPRENE, EPDM, RUBBER, GRAPHITE, EXPANDED GRAPHITE, VITON, NON ASBESTOS, NBR, SBR, SILICONE, BUTYL, ARAMID, CERAMIC, THERMICULITE, CORK, LEATHER. "EXPANDED GRAPHITE WITH SS304/SS316 REINFORCEMENT" = SOFT_CUT (metallic insert/tanged, NOT spiral wound); set moc accordingly. Any "{{MOC}} WITH SS304/SS316/MS/STEEL INSERT" = SOFT_CUT. "NON-METALLIC/NON METALLIC" = always SOFT_CUT.
+2. SPIRAL_WOUND: wound metallic gasket — keywords: spiral wound/SPW/SPWD/SPRL-WND/WND/GASKETSPIRAL(trailing digit=NPS)/SW gasket; or winding material + filler + ring combo. "WND" alone = SPIRAL_WOUND (e.g. "ALLOY 20 WND PTFE FILL ALLOY 20 I/R CS O/R").
+3. RTJ: ring type joint — RTJ/R.T.J/ring joint/ring type gasket/octagonal ring/oval ring/JOINT TORE/JOINT TORIQUE/ring no R-nn/RX-nn/BX-nn/API 6A rings.
+4. KAMM: Kammprofile/CAMPROFILE/CAM PROFILE — serrated metal core with graphite facing.
+5. DJI: Double Jacket — metallic jacket (COPPER/SS316L/SOFT IRON/ARMCO IRON) with filler; dims always OD×ID×THK.
+6. ISK: Insulating Gasket Kit (RF/FF flanges). 7. ISK_RTJ: ISK for RTJ flanges.
 
-You will receive a numbered list of descriptions. Return a JSON object with key "results" containing an array of extractions in the same order.
-
-Each extraction must follow this schema:
+Schema per item:
 {_FIELD_SCHEMA}
 
 Rules:
-- size: If NPS/inch given (e.g. "6\\"", "1.5\\"") use as-is. If NB or DN given (metric nominal bore), output as "X NB" e.g. "25 NB", "100 NB", "450 NB" — do NOT convert to inches. DN = NB (identical). For OD×ID dimensions use "OD NNNmm x ID NNNmm". Set size_type accordingly: NPS for inch sizes, NB for NB/DN sizes, OD_ID for OD/ID dimensions. If the description starts with or contains the word "INCH" as a unit indicator and a bare number appears elsewhere (especially at the end after a comma, e.g. "INCH GASKET, PTFE, FULL FACE ASME B16.21, 1.5 MM THK, ASME CLASS 150,1"), treat that bare trailing number as the NPS size in inches (output "1\\"" for 1). Never convert an NPS inch size to NB/DN format.
-- rating: use format "150#", "300#", "PN 10", "PN 16". Valid ASME classes: 150, 300, 600, 900, 1500, 2500, 3000.
-- gasket_type: SPIRAL_WOUND if description mentions "spiral wound", "spiral seal", "spiral winding", "SPW", "SPWD", "SPRL-WND", "WND", "SW gasket", "SPIRL WOUND" (typo), "GASKET SPIRAL" / "GASKETSPIRAL" / "GASKETSSPIRAL" (shorthand where trailing number is NPS size e.g. "GASKETSPIRAL4" = 4" spiral wound), or combination of winding material + filler + ring. "WND" alone means winding (e.g. "ALLOY 20 WND PTFE FILL ALLOY 20 I/R CS O/R" = SPIRAL_WOUND with ALLOY 20 winding, PTFE filler, ALLOY 20 inner ring, CS outer ring)
-- gasket_type: RTJ if description mentions "ring joint", "RTJ", "R.T.J", "ring type joint", "ring type gasket", "octagonal ring", "oval ring", "JOINT TORE" (French), "JOINT TORIQUE" (French), RTJ ring number (R-nn), or API 6A ring numbers (RX-nn, BX-nn)
-- For SPIRAL_WOUND: set sw_winding_material (e.g. SS304), sw_filler (GRAPHITE/PTFE/MICA/CNAF), sw_outer_ring (e.g. CS), sw_inner_ring if present; leave moc null
-- For SOFT_CUT: set moc, leave sw_* and rtj_* fields null
-- For RTJ: set moc (e.g. SOFTIRON, SOFTIRON GALVANISED, SS316, LOW CARBON STEEL), rtj_groove_type (OCT or OVAL), rtj_hardness_bhn (90 for soft iron, 120 for LCS, 160 for SS); set ring_no if stated (e.g. "R-24", "RX-53", "BX-152"); leave sw_* fields null; standard is ASME B16.20
-- Normalize winding materials: "304 SS"/"SS 304"/"304SS"/"304 STAINLESS STEEL"/"304-SS"/"AISI 304" → "SS304"; "316 SS"/"316 STAINLESS STEEL"/"316-SS" → "SS316"; "316L SS"/"316L-SS" → "SS316L"; "SUPER DUPLEX"/"SDSS" → "SDSS (UNS S32750)"; "STAINLESS STEEL" alone (no grade) → null; "INCOLOY 825"/"INCOLOY825"/"INCOLOY" → "INCOLOY 825"; "INCONEL 625"/"INCONEL" → "INCONEL 625"
-- Normalize ring materials: "CARBON STEEL"/"MS"/"C.S."/"CS OR"/"CS" → "CS"; "SS316 IR"/"316-SS IR"/"IR SS316"/"IR SS-316" → "SS316" inner ring; "SS IR" generic inner ring; "INCOLOY 825" inner/outer ring → "INCOLOY 825"; "I/R" = inner ring, "O/R" = outer ring (e.g. "ALLOY 20 I/R" = inner ring ALLOY 20, "CS O/R" = outer ring CS, "/ OR CS" = outer ring CS, "/ IR SS-316" = inner ring SS316); "LTCS" = Low Temperature Carbon Steel (pass through as LTCS)
-- Normalize RTJ MOC: "SOFT IRON"/"SOFTIRON" → "SOFTIRON"; "SOFT IRON GALVANISED" → "SOFTIRON GALVANISED"; "LOW CARBON STEEL"/"LCS"/"CARBON STEEL"/"CN/ZN PLATED CARBON STEEL" → "LOW CARBON STEEL"; "316 S"/"STAINLESS STEEL 316" → "SS316"; "UNS S32205" / "UNS S32750" → keep as-is e.g. "UNS S32205"; "INCOLOY 825"/"INCOLOY825"/"INCOLOY" (in RTJ context) → "INCOLOY 825" with rtj_hardness_bhn=160; "INCONEL 625"/"INCONEL" → "INCONEL 625" with rtj_hardness_bhn=160
-- For RTJ: capture ring_no including RX and BX prefixes (API 6A): "RX53" → "RX-53", "BX-152" → "BX-152", "BX 156" → "BX-156", "RX 46" → "RX-46" (space between prefix and number is same as hyphen)
-- For RTJ hardness: "90 BHN MAX" → rtj_hardness_bhn=90; "22 HRC" or "MAX HARDNESS 22 HRC" → note in special; "83 HRBW" → note in special
-- face_type: null for spiral wound, RTJ, KAMM, and DJI; RF/FF/null for soft cut, ISK, and ISK_RTJ (extract from "RF", "FF", "Type F", "Full Face" etc.)
-- thickness_mm: null for RTJ (rings have no thickness field); extract number for others; null if not stated
-- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut NPS≤24"; ASME B16.47 for soft cut NPS≥26" (large bore); ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound. For ISK/ISK_RTJ: extract the standard stated by customer (e.g. "ASME B16.47 ( SERIES A )" if Series A is mentioned). If customer specifies "SERIES A" or "SERIES B" in the description, include it: "ASME B16.47 ( SERIES A )" or "ASME B16.47 ( SERIES B )"
-- special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc. For ISK/ISK_RTJ: capture the full component SET details verbatim, prefixed with "SET:" (e.g. "SET:G10 GASKET CORE 4 MM THK WITH PRIMARY SEAL PTFE SPRING ENERGISED RING, G10 WASHER 3 MM THK & SLEEVES, ZINC PLATED CS WASHER 3 MM THK"). For DJI: when description references a drawing number or says "AS PER DRAWING", set special to "AS PER DRAWING".
-- isk_style: extract the style code from the description if present — "STYLE-CS" for PGS COMMANDER EXTREME type gaskets (G10 laminate + metallic core); "STYLE-N" for ISK_RTJ type; otherwise null. Do NOT invent a style if not mentioned.
-- dji_filler: for DJI, extract the fill material — "GRAPHITE" if description says graphite/graphite filled; "ASBESTOS FREE" if asbestos-free fill is mentioned (French "ASBSTOS FREE" or "REVETU..." context); "ARMCO IRON" if armco iron is the fill; other filler as stated. Default null (rules engine will default to GRAPHITE).
-- SOFT_CUT brand-name materials: trade names like "KROLLER & ZILLER", "KLINGER", "DONIT", "GARLOCK" followed by a grade code (e.g. "G-S-T-P/S") are SOFT_CUT gaskets — set moc to the full brand + grade string (e.g. "KROLLER & ZILLER (G-S-T-P/S)"). "WITH SPACER" means a spacer ring is included but does NOT change the gasket_type — it remains SOFT_CUT; capture "WITH SPACER" in the special field.
-- "NON-METALLIC GASKET", "NON METALLIC GASKET", or any description containing "non-metallic" / "non metallic" always means SOFT_CUT — never SPIRAL_WOUND, RTJ, KAMM, or DJI.
-- confidence: HIGH if all key fields clear, LOW if ambiguous"""
+- size: NPS/inch → as-is (e.g. "6\\""). NB/DN → "X NB" (e.g. "100 NB") — do NOT convert to inches; DN=NB. OD×ID → "OD NNNmm x ID NNNmm". size_type: NPS/NB/OD_ID. Bare trailing number after "INCH" keyword = NPS size in inches.
+- rating: "150#"/"300#"/"PN 10"/"PN 16". Valid ASME classes: 150/300/600/900/1500/2500/3000.
+- Normalize winding materials (sw_winding_material): 304SS/SS 304/AISI 304→SS304; 316SS/316-SS→SS316; 316L→SS316L; SUPER DUPLEX/SDSS→SDSS (UNS S32750); INCOLOY/INCOLOY 825→INCOLOY 825; INCONEL/INCONEL 625→INCONEL 625; "STAINLESS STEEL" alone (no grade)→null.
+- Normalize ring materials: CARBON STEEL/MS/C.S./CS→CS; I/R=inner ring, O/R=outer ring (e.g. "ALLOY 20 I/R"=sw_inner_ring=ALLOY 20, "CS O/R"=sw_outer_ring=CS); LTCS→pass through as LTCS. INCOLOY 825/INCONEL 625 rings→keep as-is.
+- Normalize RTJ MOC: SOFT IRON/SOFTIRON→SOFTIRON; SOFT IRON GALVANISED→SOFTIRON GALVANISED; LOW CARBON STEEL/LCS/CARBON STEEL/CN+ZN PLATED CS→LOW CARBON STEEL; 316 S/STAINLESS STEEL 316→SS316; UNS S32205/UNS S32750→keep as-is. Ring nos: RX53→RX-53, BX 156→BX-156 (space=hyphen). BHN: soft iron=90, LCS=120, SS316=160, INCOLOY 825/INCONEL 625=160.
+- SPIRAL_WOUND: sw_winding_material/sw_filler/sw_inner_ring/sw_outer_ring; moc=null. RTJ: moc/rtj_groove_type/rtj_hardness_bhn/ring_no; sw_*=null; standard=ASME B16.20. SOFT_CUT: moc; sw_*/rtj_*=null.
+- face_type: RF/FF for SOFT_CUT/ISK/ISK_RTJ; null for SPIRAL_WOUND/RTJ/KAMM/DJI.
+- thickness_mm: null for RTJ; extract number or null for others.
+- standard: API 6A/API Specs→"API 6A"; B16/A→"ASME B16.20"; ASME B16.21 (soft cut ≤24"); ASME B16.47 (soft cut ≥26"); ASME B16.20 (SW/RTJ ≤24"); ASME B16.47 (SW ≥26"). ISK/ISK_RTJ: extract customer-stated standard verbatim incl. SERIES A/B (e.g. "ASME B16.47 ( SERIES A )").
+- special: FOOD GRADE/NACE/LETHAL/EIL APPROVED/NACE MR 0175/API 6A/SERIES B. ISK/ISK_RTJ: prefix "SET:" + component details verbatim. DJI: set "AS PER DRAWING" when drawing referenced.
+- isk_style: STYLE-CS (G10 laminate+metallic core); STYLE-N (ISK_RTJ). Null if not explicitly stated.
+- dji_filler: GRAPHITE/ASBESTOS FREE/ARMCO IRON/other. Null = rules engine defaults GRAPHITE.
+- Brand name SOFT_CUT (KROLLER & ZILLER/KLINGER/DONIT/GARLOCK + grade code) → moc=full brand+grade. "WITH SPACER"=SOFT_CUT, capture in special.
+- confidence: HIGH if all key fields clear; LOW if ambiguous."""
 
 
 def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     """
     Extract structured fields for all items.
-    All LLM batches are fired in parallel via ThreadPoolExecutor.
-    progress_cb(done, total) is called from the main thread after each batch lands.
+    All LLM batches run concurrently via AsyncOpenAI + asyncio.gather in a background thread.
+    progress_cb(done, total) is called from the main thread while polling the progress queue.
     Deduplicates identical descriptions before batching.
     """
     for item in items:
@@ -111,48 +87,78 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     unique_descs_list = list({item['description'] for item in items})
     total = len(unique_descs_list)
     cache: dict = {}
-    lock = threading.Lock()
-    done = [0]  # mutable int for closure
 
     batches = [
         unique_descs_list[i:i + _BATCH_SIZE]
         for i in range(0, total, _BATCH_SIZE)
     ]
-    client = _get_openai_client()
 
-    def _run_batch(batch: list[str]):
-        return batch, (_llm_extract_batch(client, batch) if client else [None] * len(batch))
+    api_key = os.environ.get('OPENAI_API_KEY') or _get_streamlit_secret('OPENAI_API_KEY')
 
-    # Cap workers at 8 to avoid hammering the API rate limit
-    num_workers = min(len(batches), 8)
-    with ThreadPoolExecutor(max_workers=num_workers) as pool:
-        futures = [pool.submit(_run_batch, b) for b in batches]
-        for future in as_completed(futures):
-            batch, llm_results = future.result()
-            with lock:
-                for desc, result in zip(batch, llm_results):
-                    cache[desc] = result if result else _null_extract()
-                done[0] += len(batch)
-            # progress_cb called here — in the main Streamlit thread (as_completed loop)
-            if progress_cb:
-                progress_cb(done[0], total)
+    if not api_key:
+        # No client — return null stubs immediately
+        for desc in unique_descs_list:
+            cache[desc] = _null_extract()
+    else:
+        progress_q: _stdlib_queue.SimpleQueue = _stdlib_queue.SimpleQueue()
+        batch_results: list = []
 
-    results = []
+        async def _do_batch_async(async_client, batch: list[str]):
+            result = await _llm_extract_batch_async(async_client, batch)
+            progress_q.put(len(batch))
+            return batch, result
+
+        async def _run_all(key: str):
+            from openai import AsyncOpenAI
+            async_client = AsyncOpenAI(api_key=key, timeout=60.0)
+            tasks = [_do_batch_async(async_client, b) for b in batches]
+            return await asyncio.gather(*tasks)
+
+        def _bg():
+            batch_results.extend(asyncio.run(_run_all(api_key)))
+
+        t = threading.Thread(target=_bg, daemon=True)
+        t.start()
+
+        # Poll progress queue while background thread runs
+        done = 0
+        while t.is_alive():
+            try:
+                n = progress_q.get(block=False)
+                done += n
+                if progress_cb:
+                    progress_cb(done, total)
+            except _stdlib_queue.Empty:
+                time.sleep(0.05)
+        t.join()
+
+        # Drain any remaining progress signals
+        while True:
+            try:
+                n = progress_q.get(block=False)
+                done += n
+                if progress_cb:
+                    progress_cb(done, total)
+            except _stdlib_queue.Empty:
+                break
+
+        for batch, results in batch_results:
+            for desc, result in zip(batch, results):
+                cache[desc] = result if result else _null_extract()
+
+    output = []
     for item in items:
         extracted = cache[item['description']].copy()
         extracted['quantity'] = item.get('quantity')
         extracted['uom'] = item.get('uom', 'NOS')
         extracted['line_no'] = item.get('line_no')
         extracted['raw_description'] = item['description']
-        results.append(extracted)
-    return results
+        output.append(extracted)
+    return output
 
 
-def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
-    """Send a batch of descriptions to OpenAI in one API call. Returns list of dicts (or None on failure)."""
-    if not client:
-        return [None] * len(descriptions)
-
+async def _llm_extract_batch_async(async_client, descriptions: list[str]) -> list[dict | None]:
+    """Async version of _llm_extract_batch — used by extract_batch via asyncio.gather."""
     from data.reference_data import select_few_shot_examples
     examples = select_few_shot_examples(descriptions[0], n=4)
     examples_text = '\n'.join(
@@ -165,10 +171,9 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
         f"Now extract fields from each of the following {len(descriptions)} descriptions "
         f"and return {{\"results\": [...]}} with one entry per description in order:\n{numbered}"
     )
-
     for attempt in range(3):
         try:
-            resp = client.chat.completions.create(
+            resp = await async_client.chat.completions.create(
                 model='gpt-4o-mini',
                 messages=[
                     {'role': 'system', 'content': _BATCH_SYSTEM_PROMPT},
@@ -180,7 +185,6 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
             )
             data = json.loads(resp.choices[0].message.content)
             results = data.get('results', [])
-            # Pad with None if model returned fewer items than expected
             while len(results) < len(descriptions):
                 results.append(None)
             return results[:len(descriptions)]
@@ -189,11 +193,11 @@ def _llm_extract_batch(client, descriptions: list[str]) -> list[dict | None]:
             if '429' in msg or 'rate_limit' in msg.lower():
                 wait = 5.0 * (attempt + 1)
                 logger.info(f'Rate limited — waiting {wait:.1f}s (attempt {attempt + 1}/3)')
-                time.sleep(wait)
+                await asyncio.sleep(wait)
             else:
-                logger.warning(f'LLM batch extraction failed: {e}')
+                logger.warning(f'LLM async batch failed: {e}')
                 return [None] * len(descriptions)
-    logger.warning('LLM batch extraction failed after 3 attempts')
+    logger.warning('LLM async batch failed after 3 attempts')
     return [None] * len(descriptions)
 
 

@@ -67,7 +67,11 @@ if openai_key:
         try:
             from openai import OpenAI
             _test_client = OpenAI(api_key=openai_key, timeout=10.0)
-            _test_client.models.list()
+            _test_client.chat.completions.create(
+                model='gpt-4o-mini',
+                messages=[{'role': 'user', 'content': 'hi'}],
+                max_tokens=1,
+            )
             st.sidebar.success('OpenAI API key valid')
         except Exception as _e:
             err_msg = str(_e)
