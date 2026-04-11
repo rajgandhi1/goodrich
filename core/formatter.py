@@ -202,12 +202,24 @@ def _fmt_size(size: str, gtype: str) -> str:
     """Format size string for GGPL descriptions.
     - NB/DN metric sizes → 'DN N'
     - NPS inch sizes (with or without NPS/INCH/IN label) → 'N"'
+    - Mixed fractions → decimal: '1 1/4"' → '1.25"'
     """
     import re as _re
     s = size.strip()
-    # Already has inch symbol — strip any stray 'NPS' label and return
+    # Already has inch symbol — strip any stray 'NPS' label, then convert fraction to decimal
     if '"' in s:
-        return _re.sub(r'\bNPS\b\s*', '', s, flags=_re.IGNORECASE).strip()
+        s = _re.sub(r'\bNPS\b\s*', '', s, flags=_re.IGNORECASE).strip()
+        # Mixed fraction: "1 1/4"" → "1.25""
+        mf = _re.match(r'^(\d+)\s+(\d+)/(\d+)"$', s)
+        if mf:
+            val = int(mf.group(1)) + int(mf.group(2)) / int(mf.group(3))
+            return f'{_fmt_num(val)}"'
+        # Simple fraction: "3/4"" → "0.75""
+        sf = _re.match(r'^(\d+)/(\d+)"$', s)
+        if sf:
+            val = int(sf.group(1)) / int(sf.group(2))
+            return f'{_fmt_num(val)}"'
+        return s
     # Metric OD/ID strings — pass through unchanged
     if 'MM' in s.upper():
         return s

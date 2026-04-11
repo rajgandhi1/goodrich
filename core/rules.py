@@ -12,6 +12,7 @@ from data.reference_data import (
 STATUS_READY = 'ready'
 STATUS_CHECK = 'check'
 STATUS_MISSING = 'missing'
+STATUS_REGRET = 'regret'
 
 # Fields that cannot be defaulted — must be provided by customer
 CRITICAL_FIELDS = ['size', 'rating', 'moc']
@@ -990,6 +991,9 @@ def apply_rules(item: dict) -> dict:
     else:
         # --- Normalize MOC (soft cut) ---
         raw_moc = (item.get('moc') or '').strip().upper()
+        # Normalize brand+number codes: "AF 139" → "AF139", "AF 157" → "AF157", etc.
+        import re as _re_moc
+        raw_moc = _re_moc.sub(r'\bAF\s+(\d)', r'AF\1', raw_moc)
         if raw_moc in _AMBIGUOUS_MOC:
             flags.append('MOC "RUBBER" is ambiguous — confirm: Natural Rubber / EPDM / Neoprene / Chloroprene?')
             item['moc'] = raw_moc
@@ -1006,7 +1010,14 @@ def apply_rules(item: dict) -> dict:
                     or 'RENFORCEMENT' in raw_moc
                 )
             )
-            if not _is_composite and raw_moc not in ACCEPTED_MOC and raw_moc not in _MOC_ALIASES:
+            # "X / EQUIVALENT" or "X OR EQUIVALENT" specs are passed through verbatim — don't flag
+            _is_equivalent_spec = (
+                '/ EQUIVALENT' in raw_moc
+                or '/EQUIVALENT' in raw_moc
+                or 'OR EQUIVALENT' in raw_moc
+                or '/ EQUAL' in raw_moc
+            )
+            if not _is_composite and not _is_equivalent_spec and raw_moc not in ACCEPTED_MOC and raw_moc not in _MOC_ALIASES:
                 flags.append(f'MOC "{raw_moc}" not in standard list — verify spelling')
 
         # --- Default: face_type ---

@@ -10,6 +10,7 @@ import xlsxwriter
 _GREEN  = '#C6EFCE'
 _YELLOW = '#FFEB9C'
 _RED    = '#FFC7CE'
+_GREY   = '#D9D9D9'
 _HEADER = '#1F6FB2'
 
 
@@ -26,6 +27,8 @@ def build_excel(items: list[dict], customer: str = '', project_ref: str = '') ->
         'ready':   wb.add_format({**cell_base, 'bg_color': _GREEN}),
         'check':   wb.add_format({**cell_base, 'bg_color': _YELLOW}),
         'missing': wb.add_format({**cell_base, 'bg_color': _RED}),
+        'regret':  wb.add_format({**cell_base, 'bg_color': _GREY, 'font_color': '#888888',
+                                  'italic': True}),
         'plain':   wb.add_format({**cell_base}),
     }
 
@@ -65,9 +68,11 @@ def build_excel(items: list[dict], customer: str = '', project_ref: str = '') ->
         defaults = item.get('applied_defaults', [])
         notes = '; '.join(flags + [f'[default] {d}' for d in defaults])
 
+        ggpl_desc = ('REGRET — CANNOT PRODUCE' if status == 'regret'
+                     else item.get('ggpl_description', ''))
         ws.write(row, 0,  i,                                           row_fmt)
         ws.write(row, 1,  item.get('raw_description', ''),             row_fmt)
-        ws.write(row, 2,  item.get('ggpl_description', ''),            row_fmt)
+        ws.write(row, 2,  ggpl_desc,                                   row_fmt)
         ws.write(row, 3,  item.get('size', ''),                        row_fmt)
         ws.write(row, 4,  item.get('rating', ''),                      row_fmt)
         ws.write(row, 5,  item.get('moc', ''),                         row_fmt)

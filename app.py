@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 
 from core.parser import parse_email_text, parse_excel_file
-from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING
+from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING, STATUS_REGRET
 from core.formatter import format_description
 from core.exporter import build_excel
 
@@ -102,6 +102,8 @@ st.markdown("""
 .gq-check .lbl { color: #c08000; }
 .gq-missing { background: #fdecea; color: #b91c1c; }
 .gq-missing .lbl { color: #d94040; }
+.gq-regret  { background: #eeeeee; color: #666666; }
+.gq-regret .lbl { color: #888888; }
 
 /* ── Sidebar history entries ────────────────────────────────── */
 .gq-hist-meta { font-size: 0.78rem; opacity: 0.7; margin: 2px 0 6px; }
@@ -115,6 +117,7 @@ st.markdown("""
 .gq-pill-ready   { background: #1a7a3c; color: #fff; }
 .gq-pill-check   { background: #9a6800; color: #fff; }
 .gq-pill-missing { background: #b91c1c; color: #fff; }
+.gq-pill-regret  { background: #888888; color: #fff; }
 
 /* ── Sidebar section title ──────────────────────────────────── */
 .gq-sidebar-title {
@@ -186,6 +189,105 @@ details { border-radius: 8px !important; }
 
 /* ── Progress bar ───────────────────────────────────────────── */
 [data-testid="stProgressBar"] > div > div { background: #2e4470 !important; border-radius: 8px !important; }
+
+/* ── Floating chat widget ───────────────────────────────────── */
+#gq-fab {
+    position: fixed !important;
+    bottom: 24px !important;
+    right: 24px !important;
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 50% !important;
+    background: linear-gradient(135deg, #2e4470, #1a2740) !important;
+    color: #fff !important;
+    font-size: 1.4rem !important;
+    border: none !important;
+    cursor: pointer !important;
+    box-shadow: 0 4px 18px rgba(46,68,112,0.5) !important;
+    z-index: 10001 !important;
+    transition: transform 0.15s !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+#gq-fab:hover { transform: scale(1.08) !important; }
+
+#gq-chat-panel {
+    position: fixed !important;
+    bottom: 152px !important;
+    right: 24px !important;
+    width: 340px !important;
+    max-height: 420px !important;
+    background: #fff !important;
+    border-radius: 16px 16px 0 0 !important;
+    border: 1px solid #dde3f0 !important;
+    border-bottom: none !important;
+    z-index: 10000 !important;
+    display: none !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.14) !important;
+}
+#gq-chat-panel.gqcp-open { display: flex !important; }
+
+#gq-chat-hdr {
+    background: linear-gradient(135deg, #2e4470, #1a2740);
+    color: #fff;
+    padding: 0.7rem 1rem;
+    font-weight: 600;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+#gq-chat-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    background: #f7f9fe;
+    scroll-behavior: smooth;
+}
+#gq-chat-nokey {
+    padding: 0.45rem 0.75rem;
+    background: #fffbe6;
+    border-top: 1px solid #fde68a;
+    font-size: 0.78rem;
+    color: #92620a;
+    flex-shrink: 0;
+}
+
+/* Reposition st.chat_input to dock below the panel */
+.stChatInput, [data-testid="stChatInput"] {
+    position: fixed !important;
+    bottom: 90px !important;
+    right: 24px !important;
+    width: 340px !important;
+    left: auto !important;
+    z-index: 10000 !important;
+    background: #fff !important;
+    border-radius: 0 0 16px 16px !important;
+    border: 1px solid #dde3f0 !important;
+    border-top: 1px solid #e0e6f0 !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.14) !important;
+    display: none !important;
+}
+.stChatInput.gqci-open, [data-testid="stChatInput"].gqci-open {
+    display: block !important;
+}
+/* Black text, white bg inside the input box */
+.stChatInput input, [data-testid="stChatInput"] input,
+.stChatInput textarea, [data-testid="stChatInput"] textarea {
+    color: #111 !important;
+    background: #fff !important;
+    caret-color: #111 !important;
+}
+.stChatInput [data-testid="stChatInputContainer"],
+[data-testid="stChatInput"] [data-testid="stChatInputContainer"] {
+    background: #fff !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -200,8 +302,8 @@ GROOVE_OPTIONS = ['OCT', 'OVAL', '']
 # ---------------------------------------------------------------------------
 # Session state
 # ---------------------------------------------------------------------------
-if 'results' not in st.session_state:
-    st.session_state.results = []
+if 'working_items' not in st.session_state:
+    st.session_state.working_items = []
 if '_selected_rows' not in st.session_state:
     st.session_state._selected_rows = set()
 if 'filter_mode' not in st.session_state:
@@ -210,6 +312,12 @@ if 'run_history' not in st.session_state:
     st.session_state.run_history = []
 if '_history_loaded' not in st.session_state:
     st.session_state._history_loaded = False
+if '_show_confirm' not in st.session_state:
+    st.session_state._show_confirm = False
+if 'chat_messages' not in st.session_state:
+    st.session_state.chat_messages = []
+if 'chat_open' not in st.session_state:
+    st.session_state.chat_open = False
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
@@ -270,32 +378,36 @@ with st.sidebar:
             st.rerun()
 
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
-    st.markdown('<div class="gq-sidebar-title">Run History</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gq-sidebar-title">Enquiry History</div>', unsafe_allow_html=True)
 
     history = st.session_state.run_history
     if not history:
-        st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No runs yet this session.</p>',
+        st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No enquiries committed yet.</p>',
                     unsafe_allow_html=True)
     else:
         for idx, run in enumerate(reversed(history)):
             run_idx = len(history) - 1 - idx
-            label = run['customer'] or run['project_ref'] or f'Run {run_idx + 1}'
+            label = run['customer'] or run['project_ref'] or f'Enquiry {run_idx + 1}'
             with st.expander(f'**{label}**', expanded=False):
+                n_regret_h = run.get('n_regret', 0)
                 st.markdown(
                     f'<div class="gq-hist-meta">{run["timestamp"]}</div>'
                     f'<div class="gq-hist-pills">'
                     f'<span class="gq-pill gq-pill-ready">✅ {run["n_ready"]}</span>'
                     f'<span class="gq-pill gq-pill-check">🟡 {run["n_check"]}</span>'
                     f'<span class="gq-pill gq-pill-missing">🔴 {run["n_missing"]}</span>'
-                    f'</div>',
+                    + (f'<span class="gq-pill gq-pill-regret">⛔ {n_regret_h}</span>' if n_regret_h else '')
+                    + '</div>',
                     unsafe_allow_html=True,
                 )
                 btn_col, del_col = st.columns(2)
                 if btn_col.button('Restore', key=f'restore_{run_idx}'):
-                    st.session_state.results = run['items']
+                    st.session_state.working_items = [dict(i) for i in run['items']]
                     st.session_state._selected_rows = set()
                     st.session_state.pop('_bulk_df', None)
+                    st.session_state.pop('_last_excel', None)
                     st.session_state.filter_mode = 'All'
+                    st.session_state._show_confirm = False
                     st.rerun()
                 if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
                     from core.extractor import _get_redis, _cache_key
@@ -316,6 +428,7 @@ with st.sidebar:
                     st.rerun()
 
 
+
 # ---------------------------------------------------------------------------
 # App header
 # ---------------------------------------------------------------------------
@@ -330,40 +443,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Step 1 — Input
+# Customer / Project ref — captured once, used throughout
 # ---------------------------------------------------------------------------
-st.markdown("""
-<div class="gq-step">
-  <div class="gq-step-label">
-    <span class="gq-step-badge">1</span>
-    <p class="gq-step-title">Paste email or upload Excel</p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+ref_c1, ref_c2 = st.columns(2)
+with ref_c1:
+    customer = st.text_input('Customer name', key='inp_customer', placeholder='e.g. VA Tech Wabag')
+with ref_c2:
+    project_ref = st.text_input('Project / PO reference', key='inp_project_ref', placeholder='e.g. HPCL Vizag Refinery')
 
-col1, col2 = st.columns([1, 1], gap='large')
-
-with col1:
-    email_text = st.text_area(
-        'Paste email body',
-        height=200,
-        placeholder='Paste the customer email text containing gasket requirements...',
-        label_visibility='visible',
-    )
-
-with col2:
-    uploaded_file = st.file_uploader(
-        'Upload Excel file',
-        type=['xlsx', 'xls'],
-        help='Supports multi-sheet enquiry files',
-    )
-    st.markdown('<div style="height:0.5rem"></div>', unsafe_allow_html=True)
-    customer = st.text_input('Customer name', placeholder='e.g. VA Tech Wabag')
-    project_ref = st.text_input('Project / PO reference', placeholder='e.g. HPCL Vizag Refinery')
-
-st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
+st.markdown('<div style="height:0.3rem"></div>', unsafe_allow_html=True)
 
 
+# ---------------------------------------------------------------------------
+# Helper — build display rows
+# ---------------------------------------------------------------------------
 def _build_preview_df(items):
     STATUS_ICON = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}
     return pd.DataFrame([{
@@ -375,89 +468,16 @@ def _build_preview_df(items):
     } for item in items])
 
 
-if st.button('⚡  Process Enquiry', type='primary', use_container_width=True):
-    raw_items = []
-
-    if uploaded_file:
-        raw_items = parse_excel_file(uploaded_file.read())
-    elif email_text.strip():
-        raw_items = parse_email_text(email_text)
-
-    if not raw_items:
-        st.warning('No gasket line items found. Check your input and try again.')
-    else:
-        from core.extractor import extract_batch
-        unique_count = len({item['description'] for item in raw_items})
-
-        proc_container = st.container()
-        with proc_container:
-            status_text = st.empty()
-            progress_bar = st.progress(0)
-            preview_ph   = st.empty()
-
-        status_text.text(f'Extracting {unique_count} unique descriptions...')
-        progress_bar.progress(5)
-
-        def _on_progress(done, total):
-            pct = int(done / total * 100)
-            status_text.text(f'Extracting... {done}/{total} descriptions ({pct}%)')
-            progress_bar.progress(5 + int(done / total * 70))
-
-        extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
-        progress_bar.progress(75)
-
-        n = len(extracted_items)
-        step = max(1, n // 20)
-        processed = []
-
-        for i, extracted in enumerate(extracted_items, 1):
-            item = apply_rules(extracted)
-            item['ggpl_description'] = format_description(item)
-            processed.append(item)
-            progress_bar.progress(75 + int(i / n * 24))
-            if i % step == 0 or i == n:
-                status_text.text(f'Processing {i}/{n} items...')
-                preview_ph.dataframe(
-                    _build_preview_df(processed),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-        progress_bar.empty()
-        status_text.empty()
-        preview_ph.empty()
-        st.session_state.results = processed
-        st.session_state._selected_rows = set()
-        st.session_state.pop('_bulk_df', None)
-        st.session_state.filter_mode = 'All'
-
-        st.session_state.run_history.append({
-            'timestamp':   _dt.datetime.now().strftime('%d %b %H:%M'),
-            'customer':    customer or '',
-            'project_ref': project_ref or '',
-            'n_items':     len(processed),
-            'n_ready':     sum(1 for i in processed if i['status'] == STATUS_READY),
-            'n_check':     sum(1 for i in processed if i['status'] == STATUS_CHECK),
-            'n_missing':   sum(1 for i in processed if i['status'] == STATUS_MISSING),
-            'items':       processed,
-        })
-        if len(st.session_state.run_history) > 15:
-            st.session_state.run_history = st.session_state.run_history[-15:]
-        _save_history_to_redis()
-
-
-# ---------------------------------------------------------------------------
-# Helper — build display rows
-# ---------------------------------------------------------------------------
 def _build_rows(items):
     rows = []
     for item in items:
-        status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}.get(item['status'], '')
+        status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴', 'regret': '⛔'}.get(item['status'], '')
         flags    = item.get('flags', [])
         defaults = item.get('applied_defaults', [])
         parts    = list(flags) + [f'[default] {d}' for d in defaults]
         rows.append({
             '#':                    item.get('line_no', ''),
+            'Regret':               item.get('regret', False),
             'Customer Description': item.get('raw_description', ''),
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
             'Size':                 item.get('size') or '',
@@ -495,8 +515,7 @@ def _editor_fragment(items, display_indices):
     else:
         df = pd.DataFrame(_build_rows(display_items))
 
-    df = df.drop(columns=[c for c in ('Select', 'Delete') if c in df.columns])
-    df.insert(0, 'Delete', False)
+    df = df.drop(columns=[c for c in ('Select',) if c in df.columns])
     df.insert(0, 'Select', [i in st.session_state._selected_rows for i in range(len(df))])
 
     edited_df = st.data_editor(
@@ -505,8 +524,10 @@ def _editor_fragment(items, display_indices):
         height=min(80 + 35 * len(display_items), 620),
         hide_index=True,
         column_config={
-            'Select':               st.column_config.CheckboxColumn('Select', width='small'),
-            'Delete':               st.column_config.CheckboxColumn('🗑', width='small', help='Tick to delete on Update'),
+            'Select':               st.column_config.CheckboxColumn('☑', width='small',
+                                        help='Select rows for bulk actions below'),
+            'Regret':               st.column_config.CheckboxColumn('⛔ Regret', width='small',
+                                        help='Tick = GGPL cannot produce this item'),
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
             'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
@@ -517,7 +538,7 @@ def _editor_fragment(items, display_indices):
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
             'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
-            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='e.g. 90 BHN HARDNESS'),
+            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='e.g. 90BHN HARDNESS'),
             'SW Winding':           st.column_config.TextColumn('SW Winding', width='small'),
             'SW Filler':            st.column_config.TextColumn('SW Filler', width='small'),
             'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small'),
@@ -534,16 +555,17 @@ def _editor_fragment(items, display_indices):
     )
 
     st.session_state._selected_rows = {i for i, row in edited_df.iterrows() if row['Select']}
+    n_sel = len(st.session_state._selected_rows)
+    sel_label = f'{n_sel} selected' if n_sel else 'none selected'
 
-    if st.button('↻  Update Descriptions', type='secondary', key='update_btn'):
+    act_c1, act_c2, act_c3, act_c4 = st.columns([2.2, 2, 2, 4])
+
+    # ── Update Descriptions ──────────────────────────────────────────────────
+    if act_c1.button('↻  Update Descriptions', type='secondary', key='update_btn'):
         updated_full = list(items)
-        to_delete = set()
 
         for i, row in edited_df.iterrows():
             orig_idx = display_indices[i]
-            if row.get('Delete'):
-                to_delete.add(orig_idx)
-                continue
             base = items[orig_idx].copy()
             base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
             base['size']               = row['Size'] or base.get('size')
@@ -574,40 +596,249 @@ def _editor_fragment(items, display_indices):
             base['quantity']           = row['Qty'] or base.get('quantity')
             base['uom']                = row['UoM'] or 'NOS'
             base['special']            = row['Special'] or None
+            # Preserve regret from checkbox
+            base['regret'] = bool(row.get('Regret'))
             for f in ('size_norm', 'rating_norm', 'status', 'flags', 'applied_defaults', 'dimensions'):
                 base.pop(f, None)
-            item = apply_rules(base)
-            item['ggpl_description'] = format_description(item)
-            updated_full[orig_idx] = item
+            updated = apply_rules(base)
+            updated['ggpl_description'] = format_description(updated)
+            # Regret overrides calculated status
+            if base['regret']:
+                updated['status'] = STATUS_REGRET
+                updated['regret'] = True
+            updated_full[orig_idx] = updated
 
-        final = [item for idx, item in enumerate(updated_full) if idx not in to_delete]
-        for j, item in enumerate(final, 1):
-            item['line_no'] = j
-
-        st.session_state.results = final
+        for j, it in enumerate(updated_full, 1):
+            it['line_no'] = j
+        st.session_state.working_items = updated_full
         st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
         st.rerun(scope='app')
 
+    # ── Delete Selected ──────────────────────────────────────────────────────
+    if act_c2.button(f'🗑  Delete ({sel_label})', type='secondary', key='delete_sel_btn',
+                     disabled=(n_sel == 0)):
+        to_delete = {display_indices[i] for i in st.session_state._selected_rows}
+        final = [it for idx, it in enumerate(items) if idx not in to_delete]
+        for j, it in enumerate(final, 1):
+            it['line_no'] = j
+        st.session_state.working_items = final
+        st.session_state._selected_rows = set()
+        st.session_state.pop('_bulk_df', None)
+        st.rerun(scope='app')
+
+    # ── Mark as Regret ───────────────────────────────────────────────────────
+    if act_c3.button(f'⛔  Regret ({sel_label})', type='secondary', key='regret_sel_btn',
+                     disabled=(n_sel == 0),
+                     help='Mark selected items as REGRET — GGPL cannot produce'):
+        updated_full = list(items)
+        for i in st.session_state._selected_rows:
+            orig_idx = display_indices[i]
+            it = dict(updated_full[orig_idx])
+            # Toggle: if already regret, clear it; otherwise set it
+            if it.get('regret'):
+                it['regret'] = False
+                it.pop('status', None)
+                it = apply_rules(it)
+                it['ggpl_description'] = format_description(it)
+            else:
+                it['regret'] = True
+                it['status'] = STATUS_REGRET
+            updated_full[orig_idx] = it
+        st.session_state.working_items = updated_full
+        st.session_state._selected_rows = set()
+        st.session_state.pop('_bulk_df', None)
+        st.rerun(scope='app')
+
 
 # ---------------------------------------------------------------------------
-# Step 2 — Review & Edit
+# Step 1 — Input
 # ---------------------------------------------------------------------------
-if st.session_state.results:
-    items = st.session_state.results
+st.markdown("""
+<div class="gq-step">
+  <div class="gq-step-label">
+    <span class="gq-step-badge">1</span>
+    <p class="gq-step-title">Add items to working list</p>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+tab_email, tab_excel, tab_manual = st.tabs(['📧 Email / Text', '📊 Excel File', '✏️ Add Manually'])
+
+
+def _process_and_append(raw_items):
+    """Extract, apply rules, and append processed items to working_items."""
+    if not raw_items:
+        st.warning('No gasket line items found. Check your input and try again.')
+        return False
+
+    from core.extractor import extract_batch
+    unique_count = len({item['description'] for item in raw_items})
+
+    status_text = st.empty()
+    progress_bar = st.progress(0)
+    preview_ph   = st.empty()
+
+    status_text.text(f'Extracting {unique_count} unique descriptions...')
+    progress_bar.progress(5)
+
+    def _on_progress(done, total):
+        pct = int(done / total * 100)
+        status_text.text(f'Extracting... {done}/{total} descriptions ({pct}%)')
+        progress_bar.progress(5 + int(done / total * 70))
+
+    extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
+    progress_bar.progress(75)
+
+    n = len(extracted_items)
+    step = max(1, n // 20)
+    processed = []
+
+    # Offset line numbers from existing items
+    existing = st.session_state.working_items
+    line_offset = (max(i.get('line_no', 0) for i in existing) if existing else 0)
+
+    for i, extracted in enumerate(extracted_items, 1):
+        item = apply_rules(extracted)
+        item['ggpl_description'] = format_description(item)
+        item['line_no'] = line_offset + i
+        processed.append(item)
+        progress_bar.progress(75 + int(i / n * 24))
+        if i % step == 0 or i == n:
+            status_text.text(f'Processing {i}/{n} items...')
+            preview_ph.dataframe(
+                _build_preview_df(processed),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    progress_bar.empty()
+    status_text.empty()
+    preview_ph.empty()
+
+    st.session_state.working_items = existing + processed
+    st.session_state._selected_rows = set()
+    st.session_state.pop('_bulk_df', None)
+    st.session_state.filter_mode = 'All'
+    st.session_state._show_confirm = False
+    return True
+
+
+_wl_count = len(st.session_state.working_items)
+_wl_hint = (
+    f'Working list currently has **{_wl_count} item{"s" if _wl_count != 1 else ""}** — '
+    'new items will be appended. Use 🗑 Clear in the working list to start fresh.'
+    if _wl_count > 0 else
+    'Working list is empty — processed items will appear in Step 2 below.'
+)
+
+with tab_email:
+    email_text = st.text_area(
+        'Paste email body',
+        height=200,
+        placeholder='Paste the customer email text containing gasket requirements...',
+        label_visibility='visible',
+    )
+    st.caption(_wl_hint)
+    if st.button('⚡  Process & Add to List', type='primary', use_container_width=True, key='process_email_btn'):
+        if email_text.strip():
+            raw_items = parse_email_text(email_text)
+            if _process_and_append(raw_items):
+                st.rerun()
+        else:
+            st.warning('Please paste some email text first.')
+
+with tab_excel:
+    uploaded_file = st.file_uploader(
+        'Upload Excel file',
+        type=['xlsx', 'xls'],
+        help='Supports multi-sheet enquiry files',
+    )
+    st.caption(_wl_hint)
+    if st.button('⚡  Process & Add to List', type='primary', use_container_width=True, key='process_excel_btn'):
+        if uploaded_file:
+            raw_items = parse_excel_file(uploaded_file.read())
+            if _process_and_append(raw_items):
+                st.rerun()
+        else:
+            st.warning('Please upload an Excel file first.')
+
+with tab_manual:
+    st.caption('Fill in fields to add a single line item directly to the working list.')
+    with st.form('manual_add_form', clear_on_submit=True):
+        m_desc = st.text_input('Customer Description (optional)', placeholder='e.g. 4" 150# CNAF RF')
+        m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+        m_type   = m_c1.selectbox('Type', TYPE_OPTIONS, key='m_type')
+        m_size   = m_c1.text_input('Size', placeholder='e.g. 4" or 100 NB', key='m_size')
+        m_rating = m_c2.text_input('Rating', placeholder='e.g. 150# or PN16', key='m_rating')
+        m_moc    = m_c2.text_input('MOC', placeholder='e.g. CNAF', key='m_moc')
+        m_face   = m_c3.selectbox('Face', FACE_OPTIONS, key='m_face')
+        m_thk    = m_c3.number_input('Thickness (mm)', value=3.0, min_value=0.0, step=0.5, key='m_thk')
+        m_qty    = m_c4.number_input('Qty', value=1, min_value=0, step=1, key='m_qty')
+        m_uom    = m_c4.selectbox('UoM', UOM_OPTIONS, key='m_uom')
+        m_special = st.text_input('Special / Notes (optional)', placeholder='e.g. NACE MR0175', key='m_special')
+        submitted = st.form_submit_button('+ Add Item to List', type='secondary')
+
+    if submitted:
+        if not (m_size or m_moc):
+            st.warning('At least Size or MOC is required to add an item.')
+        else:
+            existing = st.session_state.working_items
+            next_ln = (max(i.get('line_no', 0) for i in existing) + 1) if existing else 1
+            raw = {
+                'line_no':         next_ln,
+                'raw_description': m_desc or '',
+                'description':     m_desc or f'{m_size} {m_rating} {m_moc}'.strip(),
+                'gasket_type':     m_type,
+                'size':            m_size or None,
+                'rating':          m_rating or None,
+                'moc':             m_moc.upper() if m_moc else None,
+                'face_type':       m_face or None,
+                'thickness_mm':    m_thk if m_thk else None,
+                'quantity':        m_qty if m_qty else None,
+                'uom':             m_uom,
+                'special':         m_special.upper() if m_special else None,
+                'confidence':      'MANUAL',
+            }
+            item = apply_rules(raw)
+            item['ggpl_description'] = format_description(item)
+            st.session_state.working_items = existing + [item]
+            st.session_state._show_confirm = False
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Step 2 — Working List
+# ---------------------------------------------------------------------------
+if st.session_state.working_items:
+    items = st.session_state.working_items
 
     n_ready   = sum(1 for i in items if i['status'] == STATUS_READY)
     n_check   = sum(1 for i in items if i['status'] == STATUS_CHECK)
     n_missing = sum(1 for i in items if i['status'] == STATUS_MISSING)
+    n_regret  = sum(1 for i in items if i['status'] == STATUS_REGRET)
 
-    st.markdown("""
-    <div class="gq-step">
-      <div class="gq-step-label">
-        <span class="gq-step-badge">2</span>
-        <p class="gq-step-title">Review &amp; Edit</p>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Step header + Clear List
+    wl_hdr, wl_clear = st.columns([9, 1])
+    with wl_hdr:
+        st.markdown(f"""
+        <div class="gq-step">
+          <div class="gq-step-label">
+            <span class="gq-step-badge">2</span>
+            <p class="gq-step-title">Working List &nbsp;<span style="font-weight:400;font-size:0.9rem;color:#5a7aab">({len(items)} items — keep adding or edit below)</span></p>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with wl_clear:
+        st.markdown('<div style="height:0.9rem"></div>', unsafe_allow_html=True)
+        if st.button('🗑 Clear', key='clear_list_btn', type='secondary', help='Remove all items from working list'):
+            st.session_state.working_items = []
+            st.session_state._selected_rows = set()
+            st.session_state.pop('_bulk_df', None)
+            st.session_state.pop('_last_excel', None)
+            st.session_state.filter_mode = 'All'
+            st.session_state._show_confirm = False
+            st.rerun()
 
     # Colored metric cards
     st.markdown(f"""
@@ -628,6 +859,10 @@ if st.session_state.results:
         <div class="val">{n_missing}</div>
         <div class="lbl">🔴 Action Needed</div>
       </div>
+      <div class="gq-metric gq-regret">
+        <div class="val">{n_regret}</div>
+        <div class="lbl">⛔ Regret</div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -636,7 +871,7 @@ if st.session_state.results:
     with filter_col:
         filter_mode = st.radio(
             'Show',
-            ['All', 'Issues (🟡 + 🔴)', 'Missing only (🔴)'],
+            ['All', 'Issues (🟡 + 🔴)', 'Missing only (🔴)', 'Regret only (⛔)'],
             horizontal=True,
             key='filter_mode',
             label_visibility='collapsed',
@@ -653,6 +888,9 @@ if st.session_state.results:
     elif filter_mode == 'Missing only (🔴)':
         display_indices = [i for i, item in enumerate(items)
                            if item['status'] == STATUS_MISSING]
+    elif filter_mode == 'Regret only (⛔)':
+        display_indices = [i for i, item in enumerate(items)
+                           if item['status'] == STATUS_REGRET]
     else:
         display_indices = list(range(len(items)))
 
@@ -671,7 +909,7 @@ if st.session_state.results:
                 'gasket_type': 'SOFT_CUT',
             })
             new_item['ggpl_description'] = format_description(new_item)
-            st.session_state.results.append(new_item)
+            st.session_state.working_items.append(new_item)
             st.session_state.pop('_bulk_df', None)
             st.session_state._selected_rows = set()
             st.rerun(scope='app')
@@ -749,21 +987,83 @@ if st.session_state.results:
             )
 
     # -------------------------------------------------------------------------
-    # Step 3 — Export
+    # Step 3 — Generate Enquiry
     # -------------------------------------------------------------------------
     st.markdown("""
     <div class="gq-step" style="border-left-color:#1a7a3c">
       <div class="gq-step-label">
         <span class="gq-step-badge" style="background:#1a7a3c">3</span>
-        <p class="gq-step-title">Export Quote</p>
+        <p class="gq-step-title">Generate Enquiry</p>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    excel_bytes = build_excel(items, customer=customer, project_ref=project_ref)
-    filename = f"quote_{project_ref or customer or 'output'}.xlsx".replace(' ', '_')
+    if not st.session_state._show_confirm:
+        st.caption('When you are happy with the working list, click below to do a final review before committing to history.')
+        gen_col, _ = st.columns([3, 7])
+        with gen_col:
+            if st.button('📋  Generate Enquiry', type='primary', use_container_width=True, key='gen_enquiry_btn'):
+                st.session_state._show_confirm = True
+                st.rerun()
+    else:
+        st.markdown(f'**Final Verification** — {len(items)} items · review before saving to history.')
+        st.dataframe(_build_preview_df(items), use_container_width=True, hide_index=True)
 
-    dl_col, info_col = st.columns([2, 3])
+        conf_c1, conf_c2, _ = st.columns([2, 1.5, 6])
+        with conf_c1:
+            if st.button('✅  Confirm & Save to History', type='primary', key='confirm_save_btn', use_container_width=True):
+                # Build and store Excel
+                excel_bytes = build_excel(items, customer=customer, project_ref=project_ref)
+                filename = f"quote_{project_ref or customer or 'output'}.xlsx".replace(' ', '_')
+                st.session_state['_last_excel'] = excel_bytes
+                st.session_state['_last_filename'] = filename
+
+                # Commit to history
+                st.session_state.run_history.append({
+                    'timestamp':   _dt.datetime.now().strftime('%d %b %H:%M'),
+                    'customer':    customer or '',
+                    'project_ref': project_ref or '',
+                    'n_items':     len(items),
+                    'n_ready':     n_ready,
+                    'n_check':     n_check,
+                    'n_missing':   n_missing,
+                    'n_regret':    n_regret,
+                    'items':       items,
+                })
+                if len(st.session_state.run_history) > 15:
+                    st.session_state.run_history = st.session_state.run_history[-15:]
+                _save_history_to_redis()
+
+                # Clear working list
+                st.session_state.working_items = []
+                st.session_state._selected_rows = set()
+                st.session_state.pop('_bulk_df', None)
+                st.session_state._show_confirm = False
+                st.rerun()
+        with conf_c2:
+            if st.button('Cancel', key='cancel_confirm_btn', type='secondary', use_container_width=True):
+                st.session_state._show_confirm = False
+                st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Download section — shown after enquiry is committed
+# ---------------------------------------------------------------------------
+if st.session_state.get('_last_excel'):
+    excel_bytes = st.session_state['_last_excel']
+    filename    = st.session_state.get('_last_filename', 'quote.xlsx')
+
+    st.markdown("""
+    <div class="gq-step" style="border-left-color:#1a7a3c">
+      <div class="gq-step-label">
+        <span class="gq-step-badge" style="background:#1a7a3c">✓</span>
+        <p class="gq-step-title">Enquiry Committed — Download Ready</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.success(f'Enquiry saved to history: **{filename}**')
+    dl_col, new_col, _ = st.columns([2, 2, 6])
     with dl_col:
         st.download_button(
             label='⬇  Download Quote Excel',
@@ -773,14 +1073,117 @@ if st.session_state.results:
             type='primary',
             use_container_width=True,
         )
-    with info_col:
-        st.markdown(
-            f'<p style="color:#555;font-size:0.85rem;margin:0.6rem 0 0">'
-            f'<strong>{filename}</strong><br>'
-            f'{len(items)} items · '
-            f'<span style="color:#1a7a3c">{n_ready} ready</span> · '
-            f'<span style="color:#9a6800">{n_check} defaults</span> · '
-            f'<span style="color:#b91c1c">{n_missing} missing</span>'
-            f'</p>',
-            unsafe_allow_html=True,
+    with new_col:
+        if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn', use_container_width=True):
+            st.session_state.pop('_last_excel', None)
+            st.session_state.pop('_last_filename', None)
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Floating chat widget — bottom-right popup
+# ---------------------------------------------------------------------------
+def _build_chat_html():
+    msgs = st.session_state.chat_messages[-15:]
+    if not msgs:
+        return (
+            '<div style="color:#aaa;font-size:0.83rem;text-align:center;padding:2.5rem 1rem;">'
+            'Ask me anything about gaskets!</div>'
         )
+    out = []
+    for m in msgs:
+        txt = (m['content']
+               .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+               .replace('\n', '<br>'))
+        if m['role'] == 'user':
+            out.append(
+                f'<div style="background:#2e4470;color:#fff;border-radius:14px 14px 2px 14px;'
+                f'padding:0.55rem 0.8rem;font-size:0.82rem;margin-bottom:0.45rem;'
+                f'max-width:84%;margin-left:auto;word-break:break-word">{txt}</div>'
+            )
+        else:
+            if m.get('error'):
+                bg, tc, bdr = '#fdecea', '#b91c1c', 'border:1px solid #fca5a5;'
+            else:
+                bg, tc, bdr = '#fff', '#111827', 'border:1px solid #e8ecf8;'
+            out.append(
+                f'<div style="background:{bg};color:{tc};{bdr}border-radius:14px 14px 14px 2px;'
+                f'padding:0.55rem 0.8rem;font-size:0.82rem;margin-bottom:0.45rem;'
+                f'max-width:88%;word-break:break-word">{txt}</div>'
+            )
+    return ''.join(out)
+
+
+_api_ok = bool(_os.environ.get('OPENAI_API_KEY'))
+_panel_cls = 'gqcp-open' if st.session_state.chat_open else ''
+_fab_lbl = '✕' if st.session_state.chat_open else '💬'
+
+st.markdown(f"""
+<button id="gq-fab" onclick="toggleGqChat()" title="Gasket Assistant">{_fab_lbl}</button>
+
+<div id="gq-chat-panel" class="{_panel_cls}">
+  <div id="gq-chat-hdr">
+    <span>⚙️ Gasket Assistant</span>
+    <button onclick="toggleGqChat()"
+      style="background:none;border:none;color:#fff;cursor:pointer;font-size:1rem;padding:0;line-height:1">✕</button>
+  </div>
+  <div id="gq-chat-body">
+    {_build_chat_html()}
+  </div>
+  {'<div id="gq-chat-nokey">Enter your OpenAI API key in the sidebar to enable the assistant.</div>'
+   if not _api_ok else ''}
+</div>
+
+<script>
+(function() {{
+  function syncChatInput(open) {{
+    document.querySelectorAll('.stChatInput, [data-testid="stChatInput"]').forEach(function(el) {{
+      if (open) el.classList.add('gqci-open');
+      else      el.classList.remove('gqci-open');
+    }});
+  }}
+  window.toggleGqChat = function() {{
+    var panel = document.getElementById('gq-chat-panel');
+    var fab   = document.getElementById('gq-fab');
+    var open  = panel.classList.toggle('gqcp-open');
+    fab.innerHTML = open ? '✕' : '💬';
+    syncChatInput(open);
+  }};
+  // Sync on load: if panel already has open class (set by Python), also show the input
+  var panel = document.getElementById('gq-chat-panel');
+  if (panel && panel.classList.contains('gqcp-open')) syncChatInput(true);
+  // Scroll messages to bottom
+  var body = document.getElementById('gq-chat-body');
+  if (body) body.scrollTop = body.scrollHeight;
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+if _api_ok:
+    _q = st.chat_input('Ask about gaskets…', key='float_chat')
+    if _q:
+        st.session_state.chat_open = True
+        st.session_state.chat_messages.append({'role': 'user', 'content': _q})
+        try:
+            from openai import OpenAI as _OAI
+            _cl = _OAI(api_key=_os.environ['OPENAI_API_KEY'])
+            _sys = (
+                'You are a concise technical expert on industrial gaskets for Goodrich Gasket Pvt. Ltd. '
+                'Specialise in: soft cut (CNAF, PTFE, Neoprene, Graphite, Klingersil), spiral wound, RTJ, '
+                'Kammprofile, DJI, ISK. Topics: material selection, pressure ratings (ASME 150#-2500#, PN6-PN400), '
+                'standards (ASME B16.21/B16.20/B16.47, EN 1514-1), dimensions, and application suitability. '
+                'Keep replies short and technical. Politely decline non-gasket topics.'
+            )
+            _hx = [{'role': 'system', 'content': _sys}]
+            _hx += [{'role': m['role'], 'content': m['content']} for m in st.session_state.chat_messages]
+            _r = _cl.chat.completions.create(
+                model='gpt-4o-mini', messages=_hx, temperature=0.2, max_tokens=350,
+            )
+            st.session_state.chat_messages.append(
+                {'role': 'assistant', 'content': _r.choices[0].message.content.strip()}
+            )
+        except Exception as _e:
+            st.session_state.chat_messages.append(
+                {'role': 'assistant', 'content': f'Error: {_e}', 'error': True}
+            )
+        st.rerun()
