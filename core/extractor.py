@@ -40,6 +40,8 @@ _FIELD_SCHEMA = """{
   "thickness_mm": 3,
   "standard": "ASME B16.21 | ASME B16.20 | EN 1514-1 | other | null",
   "special": "any special requirements e.g. FOOD GRADE or null",
+  "isk_style": "e.g. STYLE-CS | STYLE-N | null (ISK/ISK_RTJ only — style identifier)",
+  "dji_filler": "e.g. GRAPHITE | ASBESTOS FREE | CERAMIC | null (DJI only — fill material)",
   "sw_winding_material": "e.g. SS304 | SS316 | null (spiral wound only)",
   "sw_filler": "e.g. GRAPHITE | PTFE | MICA | null (spiral wound only)",
   "sw_inner_ring": "e.g. SS304 | CS | null (spiral wound only)",
@@ -59,9 +61,9 @@ Handle gasket types:
 1. SOFT_CUT: flat ring (RF/FF), materials like CNAF, PTFE, NEOPRENE, EPDM, NATURAL RUBBER, GRAPHITE, EXPANDED GRAPHITE, VITON, NON ASBESTOS, SBR, NBR, NITRILE RUBBER, SILICONE RUBBER, BUTYL RUBBER, ARAMID FIBER, CERAMIC FIBER, THERMICULITE, CORK, LEATHER. "EXPANDED GRAPHITE WITH SS304/SS316 REINFORCEMENT/RENFORCEMENT" is SOFT_CUT — SS304/SS316 here is a metallic insert/tanged reinforcement, NOT a spiral wound winding; set moc="EXPANDED GRAPHITE WITH SS304 REINFORCEMENT" (or SS316 as applicable). Similarly "X WITH SS304/SS316/MS/STEEL INSERT" combinations (e.g. EPDM WITH SS304 INSERT, PTFE WITH SS316 INSERT) are SOFT_CUT with a metallic insert. "VITON GASKET" = SOFT_CUT with moc="VITON GASKET".
 2. SPIRAL_WOUND: metallic wound gasket, typically with graphite/PTFE filler and centering/inner rings
 3. RTJ: Ring Type Joint — octagonal or oval metallic ring, e.g. Soft Iron, SS316, Low Carbon Steel
-4. KAMM: Kammprofile gasket — serrated metal core with graphite facing; similar ring/filler structure to SW
-5. DJI: Double Jacket (Jacketed) gasket — metallic jacket, usually Copper or SS, with graphite fill; dimensions given as ID × OD × THK
-6. ISK: Insulating Gasket Kit — GRE (G10) or similar; spec details usually passed through from customer
+4. KAMM: Kammprofile (also called CAMPROFILE, CAM PROFILE, KAMMPROFILE) gasket — serrated metal core with graphite facing; similar ring/filler structure to SW
+5. DJI: Double Jacket (Jacketed) gasket — metallic jacket (COPPER, SS316L, SOFT IRON, ARMCO IRON etc.) with filler (usually GRAPHITE); dimensions always given as OD × ID × THK
+6. ISK: Insulating Gasket Kit — GRE (G10) or similar, for RF/FF flanges
 7. ISK_RTJ: Insulating Gasket Kit for RTJ flanges
 
 You will receive a numbered list of descriptions. Return a JSON object with key "results" containing an array of extractions in the same order.
@@ -82,10 +84,12 @@ Rules:
 - Normalize RTJ MOC: "SOFT IRON"/"SOFTIRON" → "SOFTIRON"; "SOFT IRON GALVANISED" → "SOFTIRON GALVANISED"; "LOW CARBON STEEL"/"LCS"/"CARBON STEEL"/"CN/ZN PLATED CARBON STEEL" → "LOW CARBON STEEL"; "316 S"/"STAINLESS STEEL 316" → "SS316"; "UNS S32205" / "UNS S32750" → keep as-is e.g. "UNS S32205"; "INCOLOY 825"/"INCOLOY825"/"INCOLOY" (in RTJ context) → "INCOLOY 825" with rtj_hardness_bhn=160; "INCONEL 625"/"INCONEL" → "INCONEL 625" with rtj_hardness_bhn=160
 - For RTJ: capture ring_no including RX and BX prefixes (API 6A): "RX53" → "RX-53", "BX-152" → "BX-152", "BX 156" → "BX-156", "RX 46" → "RX-46" (space between prefix and number is same as hyphen)
 - For RTJ hardness: "90 BHN MAX" → rtj_hardness_bhn=90; "22 HRC" or "MAX HARDNESS 22 HRC" → note in special; "83 HRBW" → note in special
-- face_type: null for spiral wound and RTJ; RF/FF/null for soft cut
+- face_type: null for spiral wound, RTJ, KAMM, and DJI; RF/FF/null for soft cut, ISK, and ISK_RTJ (extract from "RF", "FF", "Type F", "Full Face" etc.)
 - thickness_mm: null for RTJ (rings have no thickness field); extract number for others; null if not stated
-- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut NPS≤24"; ASME B16.47 for soft cut NPS≥26" (large bore); ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound. If customer specifies "SERIES A" or "SERIES B" in the description, include it: "ASME B16.47 ( SERIES A )" or "ASME B16.47 ( SERIES B )"
-- special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc. For ISK/ISK_RTJ: also capture the full material spec details in special (e.g. "GRE (G10), W/316SS CORE, GRE (G10) SLEEVES AND WASHER" or "SET:G10 GASKET CORE 4 MM THK WITH PRIMARY SEAL PTFE SPRING ENERGISED RING, G10 WASHER 3 MM THK & SLEEVES, ZINC PLATED CS WASHER 3 MM THK") — pass these through verbatim from the customer description.
+- Standard: "API 6A" or "API Specs" → standard="API 6A"; "B16/A" → "ASME B16.20"; ASME without B16 qualifier → let type determine; ASME B16.21 for soft cut NPS≤24"; ASME B16.47 for soft cut NPS≥26" (large bore); ASME B16.20 for spiral wound NPS≤24" and all RTJ; ASME B16.47 for NPS≥26" spiral wound. For ISK/ISK_RTJ: extract the standard stated by customer (e.g. "ASME B16.47 ( SERIES A )" if Series A is mentioned). If customer specifies "SERIES A" or "SERIES B" in the description, include it: "ASME B16.47 ( SERIES A )" or "ASME B16.47 ( SERIES B )"
+- special: capture FOOD GRADE, NACE, LETHAL, EIL APPROVED, SERIES B, API 6A, NACE MR 0175, etc. For ISK/ISK_RTJ: capture the full component SET details verbatim, prefixed with "SET:" (e.g. "SET:G10 GASKET CORE 4 MM THK WITH PRIMARY SEAL PTFE SPRING ENERGISED RING, G10 WASHER 3 MM THK & SLEEVES, ZINC PLATED CS WASHER 3 MM THK"). For DJI: when description references a drawing number or says "AS PER DRAWING", set special to "AS PER DRAWING".
+- isk_style: extract the style code from the description if present — "STYLE-CS" for PGS COMMANDER EXTREME type gaskets (G10 laminate + metallic core); "STYLE-N" for ISK_RTJ type; otherwise null. Do NOT invent a style if not mentioned.
+- dji_filler: for DJI, extract the fill material — "GRAPHITE" if description says graphite/graphite filled; "ASBESTOS FREE" if asbestos-free fill is mentioned (French "ASBSTOS FREE" or "REVETU..." context); "ARMCO IRON" if armco iron is the fill; other filler as stated. Default null (rules engine will default to GRAPHITE).
 - SOFT_CUT brand-name materials: trade names like "KROLLER & ZILLER", "KLINGER", "DONIT", "GARLOCK" followed by a grade code (e.g. "G-S-T-P/S") are SOFT_CUT gaskets — set moc to the full brand + grade string (e.g. "KROLLER & ZILLER (G-S-T-P/S)"). "WITH SPACER" means a spacer ring is included but does NOT change the gasket_type — it remains SOFT_CUT; capture "WITH SPACER" in the special field.
 - "NON-METALLIC GASKET", "NON METALLIC GASKET", or any description containing "non-metallic" / "non metallic" always means SOFT_CUT — never SPIRAL_WOUND, RTJ, KAMM, or DJI.
 - confidence: HIGH if all key fields clear, LOW if ambiguous"""
@@ -198,6 +202,7 @@ def _null_extract() -> dict:
         'rating': None, 'gasket_type': 'SOFT_CUT', 'moc': None,
         'face_type': None, 'thickness_mm': None, 'standard': None,
         'special': 'LLM unavailable — review manually',
+        'isk_style': None, 'dji_filler': None,
         'sw_winding_material': None, 'sw_filler': None,
         'sw_inner_ring': None, 'sw_outer_ring': None,
         'rtj_groove_type': None, 'rtj_hardness_bhn': None,

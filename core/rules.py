@@ -780,7 +780,7 @@ def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
         elif outer_ring:
             item['moc'] = f'{winding_mat} KAMMPROFILE GASKET WITH {filler} FILLER + {outer_ring} OUTER RING'
         else:
-            item['moc'] = f'{winding_mat} KAMMPROFILE WITH {filler} COATED ON BOTH SIDES'
+            item['moc'] = f'KAMMPROFILE {winding_mat} WITH {filler} LAYER ON BOTH SIDES'
     elif not item.get('moc'):
         flags.append('KAMM: winding material not identified — verify SS316/SS304/etc.')
 
@@ -814,6 +814,10 @@ def _apply_dji_rules(item: dict, flags: list, applied_defaults: list) -> None:
     if not item.get('thickness_mm'):
         flags.append('DJI: thickness not specified — confirm with customer')
     item['face_type'] = None
+    # Default filler to GRAPHITE if not extracted by LLM
+    if not item.get('dji_filler'):
+        item['dji_filler'] = 'GRAPHITE'
+        applied_defaults.append('DJI filler defaulted to GRAPHITE')
     # EN 1514-4 for PN-rated flanges; no standard otherwise (DJI is OD/ID based)
     is_pn_dji = str(item.get('rating') or '').upper().startswith('PN')
     item['standard'] = 'EN 1514-4' if is_pn_dji else None
@@ -827,10 +831,33 @@ def _apply_dji_rules(item: dict, flags: list, applied_defaults: list) -> None:
 # ---------------------------------------------------------------------------
 
 def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
-    # ISK/ISK-RTJ: size + class are key; rest of spec is passed through as-is
-    item['face_type'] = None
+    gtype = item.get('gasket_type', 'ISK')
+
+    # Face type: extract from LLM or default RF
+    if not item.get('face_type'):
+        item['face_type'] = 'RF'
+        applied_defaults.append('face type defaulted to RF (ISK)')
+
     item['thickness_mm'] = None
-    item['standard'] = item.get('standard') or 'ASME B16.5'
+
+    if gtype == 'ISK_RTJ':
+        if not item.get('standard'):
+            item['standard'] = 'ASME B16.5'
+            applied_defaults.append('standard defaulted to ASME B16.5 (ISK_RTJ)')
+    else:
+        # Standard ISK: always determine from size per GGPL convention
+        # (GGPL uses B16.20 for <26" and B16.47 for ≥26", regardless of what customer states)
+        is_pn = str(item.get('rating') or '').upper().startswith('PN')
+        if is_pn:
+            item['standard'] = 'EN 1514-5'
+            applied_defaults.append('standard set to EN 1514-5 (ISK on PN-rated flanges)')
+        else:
+            nps_val = _size_nps_value_from_item(item)
+            if nps_val is not None and nps_val >= 26:
+                _set_b1647_standard(item, flags, applied_defaults)
+            else:
+                item['standard'] = 'ASME B16.20'
+                applied_defaults.append('standard set to ASME B16.20 (ISK)')
 
 
 def _sanitize_llm_nulls(item: dict) -> dict:

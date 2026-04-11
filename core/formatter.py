@@ -131,23 +131,22 @@ def _fmt_kamm(item: dict) -> str:
         id_ = item.get('id_mm')
         if not (od and id_ and moc):
             return ''
-        parts = [f'SIZE: {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD X {_fmt_num(thk)}MM THK,{moc}']
-        if standard:
-            parts.append(f',{standard}')
-        return ''.join(parts)
+        special = (item.get('special') or '').strip()
+        special_str = f' ({special})' if special else ''
+        # OD/ID KAMM: space-separated (no comma) between dims/special and MOC
+        return f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM X {_fmt_num(thk)}MM THK{special_str} {moc}'
 
     if not (size and rating and moc):
         return ''
     size_str = _fmt_size(size, 'KAMM')
     rating_str = _fmt_rating(rating)
-    parts = [f'SIZE: {size_str} X {rating_str} X {_fmt_num(thk)}MM THK,{moc}']
+    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thk)}MM THK,{moc}']
     if standard:
         parts.append(f',{standard}')
     return ''.join(parts)
 
 
 def _fmt_dji(item: dict) -> str:
-    """SIZE: {od}MM OD X {id}MM ID X {thk}MM THK, DOUBLE JACKET GASKET WITH {moc} + GRAPHITE FILLED"""
     od = item.get('od_mm')
     id_ = item.get('id_mm')
     thk = item.get('thickness_mm')
@@ -155,11 +154,20 @@ def _fmt_dji(item: dict) -> str:
     if not (od and id_ and moc):
         return ''
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
-    return f'SIZE: {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}, DOUBLE JACKET GASKET WITH {moc} + GRAPHITE FILLED'
+    filler = (item.get('dji_filler') or 'GRAPHITE').strip().upper()
+    special = (item.get('special') or '').upper()
+    dims = f'SIZE: {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
+
+    if 'AS PER DRAWING' in special or 'DRAWING' in special:
+        # Industrial / heat-exchanger pattern: DOUBLE JACKETED, {moc} WITH {filler} FILLER (AS PER DRAWING)
+        filler_str = f'{filler} FILLER' if filler == 'GRAPHITE' else filler
+        return f'{dims}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)'
+    else:
+        # Standard piping pattern: DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED
+        return f'{dims}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED'
 
 
 def _fmt_isk(item: dict) -> str:
-    """SIZE: {size} X {rating}#, INSULATING GASKET, ..."""
     size = item.get('size')
     rating = item.get('rating')
     if not (size and rating):
@@ -167,13 +175,29 @@ def _fmt_isk(item: dict) -> str:
     gtype = item.get('gasket_type', 'ISK')
     size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
-    special = item.get('special') or ''
+    special = (item.get('special') or '').strip()
+    isk_style = (item.get('isk_style') or '').strip()
+    face_type = item.get('face_type') or ''
+    standard = item.get('standard') or ''
+
     if gtype == 'ISK_RTJ':
-        spec = f'({special}) ' if special else ''
-        return f'SIZE: {size_str} X {rating_str}, ISK STYLE-N (TYPE F - RF) {spec}TO SUIT ASME B16.5 (TYPE-RTJ)'
-    else:
-        spec = f', {special}' if special else ' KIT'
-        return f'SIZE: {size_str} X {rating_str}, INSULATING GASKET{spec}'
+        style = isk_style or 'STYLE-N'
+        spec = f'({special})' if special else ''
+        sep = ' ' if spec else ''
+        std_str = f'TO SUIT {standard} (TYPE-RTJ)' if standard else 'TO SUIT ASME B16.5 (TYPE-RTJ)'
+        return f'SIZE: {size_str} X {rating_str}, ISK {style} (TYPE F - RF) {spec}{sep}{std_str}'.strip()
+
+    # Standard ISK
+    out = f'SIZE: {size_str} X {rating_str}, INSULATING GASKET KIT'
+    if isk_style:
+        out += f', {isk_style}'
+    if special:
+        # Comma before (SET:...) when style is present; space-only otherwise
+        out += f', ({special})' if isk_style else f' ({special})'
+    tail = ', '.join(filter(None, [face_type, standard]))
+    if tail:
+        out += f', {tail}'
+    return out
 
 
 def _fmt_size(size: str, gtype: str) -> str:
