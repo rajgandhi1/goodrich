@@ -73,7 +73,7 @@ def _cache_key(desc: str) -> str:
 
 _FIELD_SCHEMA = """{
   "size": "e.g. 2\\" or OD 584MM or null",
-  "size_type": "NPS | NB | OD_ID | UNKNOWN",
+  "size_type": "NPS | NB | DN | OD_ID | UNKNOWN",
   "od_mm": null,
   "id_mm": null,
   "rating": "e.g. 150# or PN 10 or null",
@@ -111,7 +111,7 @@ Schema per item:
 {_FIELD_SCHEMA}
 
 Rules:
-- size: NPS/inch → as-is (e.g. "6\\""). NB/DN → "X NB" (e.g. "100 NB") — do NOT convert to inches; DN=NB. OD×ID → "OD NNNmm x ID NNNmm". size_type: NPS/NB/OD_ID. Bare trailing number after "INCH" keyword = NPS size in inches. "OD - 35, ID - 12" or "OD-35 ID-12" or "OD: 35" format → od_mm=35, id_mm=12, size_type=OD_ID.
+- size: NPS/inch → as-is (e.g. "6\\""). NB → "X NB" (e.g. "25 NB"), size_type=NB. DN → "DN X" (e.g. "DN 25"), size_type=DN. Do NOT convert NB↔DN or to inches. OD×ID → "OD NNNmm x ID NNNmm". size_type: NPS/NB/DN/OD_ID. Bare trailing number after "INCH" keyword = NPS size in inches. "OD - 35, ID - 12" or "OD-35 ID-12" or "OD: 35" format → od_mm=35, id_mm=12, size_type=OD_ID.
 - rating: "150#"/"300#"/"PN 10"/"PN 16". Valid ASME classes: 150/300/600/900/1500/2500/3000.
 - thickness_mm: null for RTJ; extract number or null for others. Patterns: "3MM THK", "THK-1.5", "THK 3", "3T" or "T-3" prefix/suffix (e.g. "3T X 1285 OD" or "(Without Rib)3T" → thickness_mm=3), "Ø67 x Ø27 x 3MM" (last dim = thickness).
 - Normalize winding materials (sw_winding_material): 304SS/SS 304/AISI 304→SS304; 316SS/316-SS→SS316; 316L→SS316L; SUPER DUPLEX/SDSS→SDSS (UNS S32750); INCOLOY/INCOLOY 825→INCOLOY 825; INCONEL/INCONEL 625→INCONEL 625; "STAINLESS STEEL" alone (no grade)→null.

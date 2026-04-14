@@ -98,7 +98,7 @@ def _fmt_rtj(item: dict) -> str:
         rating = item.get('rating')
         if not (size and rating):
             return ''
-        size_str = size if ('"' in size or 'NB' in size) else f'{size}"'
+        size_str = size if ('"' in size or 'NB' in size.upper() or size.upper().startswith('DN')) else f'{size}"'
         parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc_base]
         if coating:
             parts.append(coating)
@@ -200,7 +200,8 @@ def _fmt_isk(item: dict) -> str:
 
 def _fmt_size(size: str, gtype: str) -> str:
     """Format size string for GGPL descriptions.
-    - NB/DN metric sizes → 'DN N'
+    - NB sizes ('25 NB') → kept as '25 NB'
+    - DN sizes ('DN 25') → kept as 'DN 25'
     - NPS inch sizes (with or without NPS/INCH/IN label) → 'N"'
     - Mixed fractions → decimal: '1 1/4"' → '1.25"'
     """
@@ -223,10 +224,14 @@ def _fmt_size(size: str, gtype: str) -> str:
     # Metric OD/ID strings — pass through unchanged
     if 'MM' in s.upper():
         return s
-    # NB size: "100 NB" / "20 NB" → "DN 100" / "DN 20"
-    m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', s, _re.IGNORECASE)
+    # DN prefix: "DN 100" / "DN25" → "DN 100" / "DN 25"
+    m = _re.match(r'^DN\s*(\d+(?:\.\d+)?)$', s, _re.IGNORECASE)
     if m:
         return f'DN {int(float(m.group(1)))}'
+    # NB suffix: "100 NB" / "25NB" → "100 NB" / "25 NB"
+    m = _re.match(r'^(\d+(?:\.\d+)?)\s*NB$', s, _re.IGNORECASE)
+    if m:
+        return f'{int(float(m.group(1)))} NB'
     # Strip NPS / INCH / IN label and append inch symbol
     bare = _re.sub(r'\bNPS\b|\bINCH(ES)?\b|\bIN\b', '', s, flags=_re.IGNORECASE).strip()
     return f'{bare}"'

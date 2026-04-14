@@ -407,7 +407,7 @@ if '_show_confirm' not in st.session_state:
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
+    st.session_state.chat_open = False  # unused for panel CSS; panel state managed by JS sessionStorage
 if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
 
@@ -1225,14 +1225,11 @@ def _build_chat_html():
 
 
 _api_ok = bool(_os.environ.get('OPENAI_API_KEY'))
-_panel_cls = 'gqcp-open' if st.session_state.chat_open else ''
 
 st.markdown(f"""
-<button id="gq-fab" title="Gasket Assistant">
-  {'&#10005;' if _panel_cls else '&#128172;'}
-</button>
+<button id="gq-fab" title="Gasket Assistant">&#128172;</button>
 
-<div id="gq-chat-panel" class="{_panel_cls}">
+<div id="gq-chat-panel">
   <div id="gq-chat-hdr">
     <span class="gq-online-dot"></span>
     <span>Gasket Assistant</span>
@@ -1246,6 +1243,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # Attach click handlers via iframe (Streamlit CSP blocks inline onclick attrs)
+# Panel open/close state is stored in sessionStorage so it survives Streamlit reruns.
 _components.html("""
 <script>
 (function attach() {
@@ -1254,15 +1252,25 @@ _components.html("""
   var closeBtn = parent.document.getElementById('gq-chat-close');
   var body = parent.document.getElementById('gq-chat-body');
   if (!fab || !panel) { setTimeout(attach, 100); return; }
+
+  // Restore open state from sessionStorage (survives Streamlit reruns)
+  if (parent.sessionStorage.getItem('gq_chat_open') === '1') {
+    panel.classList.add('gqcp-open');
+    fab.innerHTML = '&#10005;';
+    if (body) body.scrollTop = body.scrollHeight;
+  }
+
   fab.onclick = function() {
     var open = panel.classList.toggle('gqcp-open');
     fab.innerHTML = open ? '&#10005;' : '&#128172;';
+    parent.sessionStorage.setItem('gq_chat_open', open ? '1' : '0');
     if (open && body) body.scrollTop = body.scrollHeight;
   };
   if (closeBtn) {
     closeBtn.onclick = function() {
       panel.classList.remove('gqcp-open');
       fab.innerHTML = '&#128172;';
+      parent.sessionStorage.setItem('gq_chat_open', '0');
     };
   }
   if (body) body.scrollTop = body.scrollHeight;
@@ -1273,7 +1281,6 @@ _components.html("""
 if _api_ok:
     _q = st.chat_input('Ask about gaskets…', key='float_chat')
     if _q:
-        st.session_state.chat_open = True
         st.session_state.chat_messages.append({'role': 'user', 'content': _q})
         st.session_state.chat_loading = True
         st.rerun()
