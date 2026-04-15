@@ -574,6 +574,12 @@ def test_isk_formatter():
           'face_type': 'RF', 'standard': '',
           'isk_standard_explicit': False, 'isk_fire_safety': 'NON FIRE SAFE', 'moc': None},
          'SIZE: 32" X 150#, INSULATING GASKET KIT, GRE (G-11), RF (NON FIRE SAFE)'),
+        # --- No style, special starts with WITH — space join, no comma ---
+        ({'gasket_type': 'ISK', 'size': '1-1/2"', 'rating': '900#',
+          'isk_style': '', 'special': 'WITH WASHER & SLEEVE (G-10/11) WITH SS316 CORE, PTFE SS PRESSURE ENERGIZED SPIRAL SPRING',
+          'face_type': 'RF', 'standard': '',
+          'isk_standard_explicit': False, 'isk_fire_safety': 'NON FIRE SAFE', 'moc': None},
+         'SIZE: 1-1/2" X 900#, INSULATING GASKET KIT WITH WASHER & SLEEVE (G-10/11) WITH SS316 CORE, PTFE SS PRESSURE ENERGIZED SPIRAL SPRING, RF (NON FIRE SAFE)'),
     ]
 
     for i, (item, expected) in enumerate(cases):
