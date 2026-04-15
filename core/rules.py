@@ -945,6 +945,24 @@ def _extract_isk_special_from_desc(item: dict) -> str | None:
     return None
 
 
+_ISK_ABBREV = [
+    # Abbreviation → full GGPL-standard term (applied to special field post-LLM)
+    (re.compile(r'\bPRES(?:SURE)?\s+ENRG(?:IZED)?\b', re.IGNORECASE), 'PRESSURE ENERGIZED'),
+    (re.compile(r'\bSPIRL\b', re.IGNORECASE), 'SPIRAL'),
+    (re.compile(r'\bSPNG\b', re.IGNORECASE), 'SPRING'),
+    (re.compile(r'\bENRG(?:IZED)?\b', re.IGNORECASE), 'ENERGIZED'),
+    (re.compile(r'\bSPRING\s+ENRG(?:IZED)?\b', re.IGNORECASE), 'SPRING ENERGIZED'),
+]
+
+
+def _normalize_isk_special(special: str) -> str:
+    """Expand common LLM abbreviations in ISK special field to full GGPL terms."""
+    s = special
+    for pattern, replacement in _ISK_ABBREV:
+        s = pattern.sub(replacement, s)
+    return s
+
+
 def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     gtype = item.get('gasket_type', 'ISK')
 
@@ -977,6 +995,10 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
         extracted_special = _extract_isk_special_from_desc(item)
         if extracted_special:
             item['special'] = extracted_special
+
+    # Normalize common ISK component abbreviations in special field
+    if item.get('special'):
+        item['special'] = _normalize_isk_special(item['special'])
 
     # Fire safety: regex inference is more reliable than LLM for this field
     # (LLM can cross-contaminate values across batched items).
