@@ -108,6 +108,55 @@ def test_lt_excel():
     print(f'  Parsed {len(items)} items from L&T Excel ✓')
 
 
+def test_isk_formatter():
+    """Test ISK formatter output for common patterns — no LLM needed."""
+    cases = [
+        # STYLE-CS large bore with fire safety
+        {
+            'item': {
+                'gasket_type': 'ISK', 'size': '42"', 'rating': '150#',
+                'isk_style': 'STYLE-CS', 'special': 'GRE (G-11)',
+                'face_type': 'RF', 'standard': 'ASME B16.47 (SERIES-A)',
+                'isk_standard_explicit': True, 'isk_fire_safety': 'NON FIRE SAFE',
+                'moc': None, 'quantity': 1,
+            },
+            'expected': 'SIZE: 42" X 150#, INSULATING GASKET KIT, STYLE-CS, (SET: GRE (G-11)), RF, ASME B16.47 (SERIES-A), (NON FIRE SAFE)',
+        },
+        # STYLE-N with spec and no standard (not explicit)
+        {
+            'item': {
+                'gasket_type': 'ISK', 'size': '8"', 'rating': '300#',
+                'isk_style': 'STYLE-N', 'special': 'GRE (G-10)',
+                'face_type': 'RF', 'standard': 'ASME B16.5',
+                'isk_standard_explicit': False, 'isk_fire_safety': '',
+                'moc': None, 'quantity': 2,
+            },
+            'expected': 'SIZE: 8" X 300#, INSULATING GASKET KIT (STYLE-N) GRE (G-10), RF',
+        },
+        # No style, NON FIRE SAFE (fire safety attaches to face with space, not comma)
+        {
+            'item': {
+                'gasket_type': 'ISK', 'size': '32"', 'rating': '150#',
+                'isk_style': '', 'special': 'GRE (G-11)',
+                'face_type': 'RF', 'standard': '',
+                'isk_standard_explicit': False, 'isk_fire_safety': 'NON FIRE SAFE',
+                'moc': None, 'quantity': 4,
+            },
+            'expected': 'SIZE: 32" X 150#, INSULATING GASKET KIT, GRE (G-11), RF (NON FIRE SAFE)',
+        },
+    ]
+
+    for i, case in enumerate(cases):
+        item = case['item']
+        result = format_description(item)
+        assert result == case['expected'], (
+            f'\nCase {i+1} failed:'
+            f'\n  Expected: {case["expected"]}'
+            f'\n  Got:      {result}'
+        )
+    print(f'  All {len(cases)} ISK formatter cases passed ✓')
+
+
 if __name__ == '__main__':
     print('\nRunning pipeline tests...\n')
     tests = [
@@ -115,6 +164,7 @@ if __name__ == '__main__':
         test_rubber_flagged_as_missing,
         test_neoprene_items_ready_or_check,
         test_description_format,
+        test_isk_formatter,
         test_excel_wabag,
         test_lt_excel,
     ]

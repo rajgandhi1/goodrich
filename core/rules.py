@@ -505,10 +505,10 @@ def _set_b1647_standard(item: dict, flags: list, applied_defaults: list) -> None
     """Normalize B16.47 standard and flag if series A/B not specified."""
     std = (item.get('standard') or '').upper()
     if 'SERIES A' in std or 'SERIES-A' in std:
-        item['standard'] = 'ASME B16.47 ( SERIES A )'
+        item['standard'] = 'ASME B16.47 (SERIES-A)'
         return
     if 'SERIES B' in std or 'SERIES-B' in std:
-        item['standard'] = 'ASME B16.47 ( SERIES B )'
+        item['standard'] = 'ASME B16.47 (SERIES-B)'
         return
     item['standard'] = 'ASME B16.47'
     if _B1647_FLAG not in flags:
@@ -883,8 +883,77 @@ def _apply_dji_rules(item: dict, flags: list, applied_defaults: list) -> None:
 # ISK helpers
 # ---------------------------------------------------------------------------
 
+_FIRE_SAFE_RE = re.compile(r'\bFIRE\s*SAFE\b', re.IGNORECASE)
+_NON_FIRE_SAFE_RE = re.compile(r'\bNON[-\s]FIRE\s*SAFE\b', re.IGNORECASE)
+# Spring-energised seal patterns → NON FIRE SAFE
+_SPRING_SEAL_RE = re.compile(
+    r'\bPRES\s+ENRG\b|\bPRESSURE\s+ENERGI[SZ]ED\b|\bSPRING[\s-]ENERGI[SZ]ED\b|'
+    r'\bSPIRL\s+SPRING\b|\bSPIRAL\s+SPRING\b|\bSPRING\s+SEAL\b|\bSS\s+PRES\s+ENRG\b',
+    re.IGNORECASE,
+)
+# TEFLON/PTFE flat seal patterns → FIRE SAFE
+_TEFLON_SEAL_RE = re.compile(
+    r'\bW/TEFLON\s+SEALS?\b|\bTEFLON\s+SEALS?\b|\bPTFE/EPDM\s+SEAL\b|\bW/TEFLON\b',
+    re.IGNORECASE,
+)
+
+
+def _infer_isk_fire_safety(item: dict) -> str | None:
+    """Infer ISK fire safety from description and special field using regex patterns.
+    Returns 'FIRE SAFE', 'NON FIRE SAFE', or None if undeterminable.
+    """
+    combined = ' '.join(filter(None, [
+        item.get('raw_description', ''),
+        item.get('special', ''),
+    ]))
+    if _NON_FIRE_SAFE_RE.search(combined):
+        return 'NON FIRE SAFE'
+    if _FIRE_SAFE_RE.search(combined):
+        return 'FIRE SAFE'
+    # Domain rules
+    if _SPRING_SEAL_RE.search(combined):
+        return 'NON FIRE SAFE'
+    if _TEFLON_SEAL_RE.search(combined):
+        return 'FIRE SAFE'
+    return None
+
+
+_ISK_MATERIAL_RE = re.compile(
+    r'(GLASS\s+REINFORCED\s+EPOXY\b.*|GRE\s+G[-\s]?1[01]\b.*)',
+    re.IGNORECASE,
+)
+# Boilerplate in WAFER-format descriptions that should be stripped
+_ISK_WAFER_BOILERPLATE_RE = re.compile(
+    r'(?:MANUFACTURE\s+STD\s+WAFER\s+\d+\s+R\.?F\.?\s*\(125-250\s+AARH\)\s*_?\s*|'
+    r'Standard\s+MANUFACTURE\s+STD\s+WAFER\s+\d+\s+R\.?F\.?\s*)',
+    re.IGNORECASE,
+)
+
+
+def _extract_isk_special_from_desc(item: dict) -> str | None:
+    """When LLM fails to populate 'special' for ISK, try to extract material
+    description from the raw_description. Handles WAFER-format ISK descriptions like:
+    'NPS: 16 ... MANUFACTURE STD WAFER 300 R.F. (125-250 AARH) _ GLASS REINFORCED EPOXY (NEMA G10) W/TEFLON SEALS SS 316 METAL CORE REINFORCEMENT'
+    → 'GLASS REINFORCED EPOXY (NEMA G10) W/TEFLON SEALS SS 316 METAL CORE REINFORCEMENT'
+    """
+    raw = (item.get('raw_description') or '').strip()
+    # Strip the WAFER boilerplate then check for GRE/GLASS REINFORCED EPOXY
+    cleaned = _ISK_WAFER_BOILERPLATE_RE.sub('', raw)
+    m = _ISK_MATERIAL_RE.search(cleaned)
+    if m:
+        return m.group(0).strip()
+    return None
+
+
 def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     gtype = item.get('gasket_type', 'ISK')
+
+    # TYPE-E = full face (FF) by definition; TYPE-F = raised face (RF) always
+    isk_style_raw = (item.get('isk_style') or '').upper()
+    if 'TYPE-E' in isk_style_raw or isk_style_raw == 'TYPE E':
+        item['face_type'] = 'FF'
+    elif 'TYPE-F' in isk_style_raw or isk_style_raw == 'TYPE F':
+        item['face_type'] = 'RF'  # Type F = raised face = always RF
 
     # Face type: extract from LLM or default RF
     if not item.get('face_type'):
@@ -892,6 +961,36 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
         applied_defaults.append('face type defaulted to RF (ISK)')
 
     item['thickness_mm'] = None
+
+    # Normalize rating: ASME class numbers without '#' → add '#' (e.g. "300" → "300#")
+    raw_rating = str(item.get('rating') or '').strip()
+    if raw_rating and not raw_rating.upper().startswith('PN') and not raw_rating.endswith('#'):
+        _ASME_CLASSES_ISK = {150, 300, 600, 900, 1500, 2500, 3000}
+        try:
+            if int(raw_rating) in _ASME_CLASSES_ISK:
+                item['rating'] = raw_rating + '#'
+        except ValueError:
+            pass
+
+    # If LLM failed to extract special, try regex extraction from raw description
+    if not item.get('special'):
+        extracted_special = _extract_isk_special_from_desc(item)
+        if extracted_special:
+            item['special'] = extracted_special
+
+    # Fire safety: regex inference is more reliable than LLM for this field
+    # (LLM can cross-contaminate values across batched items).
+    # Inference overrides LLM when it finds a clear pattern.
+    inferred_fs = _infer_isk_fire_safety(item)
+    if inferred_fs:
+        item['isk_fire_safety'] = inferred_fs
+    # else: keep LLM value (if any) or leave None
+
+    # Track whether the customer explicitly stated a standard (used by formatter)
+    customer_standard = item.get('standard')
+    item['isk_standard_explicit'] = bool(
+        customer_standard and str(customer_standard).lower() not in ('null', 'none', '')
+    )
 
     if gtype == 'ISK_RTJ':
         if not item.get('standard'):

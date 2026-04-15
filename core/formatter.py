@@ -174,9 +174,15 @@ def _fmt_isk(item: dict) -> str:
     size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
     special = (item.get('special') or '').strip()
-    isk_style = (item.get('isk_style') or '').strip()
+    isk_style = (item.get('isk_style') or '').strip().upper()
     face_type = item.get('face_type') or ''
     standard = item.get('standard') or ''
+    fire_safety = (item.get('isk_fire_safety') or '').strip().upper()
+    # Normalize hyphen variants: "NON-FIRE SAFE" → "NON FIRE SAFE"
+    fire_safety = fire_safety.replace('NON-FIRE', 'NON FIRE')
+    # Only include standard in output when explicitly stated by customer (not rules-defaulted),
+    # except for STYLE-CS where the standard is always shown (important for large-bore ID)
+    std_explicit = item.get('isk_standard_explicit', True)
 
     if gtype == 'ISK_RTJ':
         style = isk_style or 'STYLE-N'
@@ -185,16 +191,79 @@ def _fmt_isk(item: dict) -> str:
         std_str = f'TO SUIT {standard} (TYPE-RTJ)' if standard else 'TO SUIT ASME B16.5 (TYPE-RTJ)'
         return f'SIZE: {size_str} X {rating_str}, ISK {style} (TYPE F - RF) {spec}{sep}{std_str}'.strip()
 
-    # Standard ISK
-    out = f'SIZE: {size_str} X {rating_str}, INSULATING GASKET KIT'
+    base = f'SIZE: {size_str} X {rating_str}'
+
+    # STYLE-CS: "SIZE: S X R, INSULATING GASKET KIT, STYLE-CS, (SET: ...), face, standard"
+    if isk_style == 'STYLE-CS':
+        out = f'{base}, INSULATING GASKET KIT, STYLE-CS'
+        if special:
+            set_str = special if special.upper().startswith('SET:') else f'SET: {special}'
+            out += f', ({set_str})'
+        # Always include standard for STYLE-CS (needed for large-bore series A/B identification)
+        tail_parts = list(filter(None, [face_type, standard]))
+        if fire_safety:
+            tail_parts.append(f'({fire_safety})')
+        if tail_parts:
+            out += ', ' + ', '.join(tail_parts)
+        return out
+
+    # STYLE-N: "SIZE: S X R, INSULATING GASKET KIT (STYLE-N) spec, face (fire_safety)"
+    if isk_style == 'STYLE-N':
+        out = f'{base}, INSULATING GASKET KIT (STYLE-N)'
+        if special:
+            out += f' {special}'
+        tail_parts = []
+        if face_type:
+            face_str = face_type
+            if fire_safety:
+                face_str += f' ({fire_safety})'
+            tail_parts.append(face_str)
+        elif fire_safety:
+            tail_parts.append(f'({fire_safety})')
+        if std_explicit and standard:
+            tail_parts.append(standard)
+        if tail_parts:
+            out += ', ' + ', '.join(tail_parts)
+        return out
+
+    # TYPE-E / TYPE-F: "SIZE: S X R, INSULATING GASKET KIT, spec, TYPE E/F, face (fire_safety)"
+    if isk_style in ('TYPE-E', 'TYPE-F', 'TYPE E', 'TYPE F'):
+        display_style = isk_style.replace('-', ' ')
+        out = f'{base}, INSULATING GASKET KIT'
+        if special:
+            out += f', {special}'
+        out += f', {display_style}'
+        if face_type and fire_safety:
+            tail_parts = [f'{face_type} ({fire_safety})']
+        elif face_type:
+            tail_parts = [face_type]
+            if fire_safety:
+                tail_parts.append(f'({fire_safety})')
+        else:
+            tail_parts = [f'({fire_safety})'] if fire_safety else []
+        if std_explicit and standard:
+            tail_parts.append(standard)
+        if tail_parts:
+            out += ', ' + ', '.join(tail_parts)
+        return out
+
+    # No style / other style: "SIZE: S X R, INSULATING GASKET KIT, spec, face (fire_safety)"
+    out = f'{base}, INSULATING GASKET KIT'
     if isk_style:
         out += f', {isk_style}'
     if special:
-        # Comma before (SET:...) when style is present; space-only otherwise
-        out += f', ({special})' if isk_style else f' ({special})'
-    tail = ', '.join(filter(None, [face_type, standard]))
-    if tail:
-        out += f', {tail}'
+        out += f', {special}'
+    std_to_show = standard if std_explicit else ''
+    # Fire safety attaches to face_type with space (e.g. "RF (FIRE SAFE)"), not comma-separated
+    if face_type and fire_safety:
+        face_str = f'{face_type} ({fire_safety})'
+        tail_parts = list(filter(None, [face_str, std_to_show]))
+    else:
+        tail_parts = list(filter(None, [face_type, std_to_show]))
+        if fire_safety:
+            tail_parts.append(f'({fire_safety})')
+    if tail_parts:
+        out += ', ' + ', '.join(tail_parts)
     return out
 
 

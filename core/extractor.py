@@ -35,21 +35,29 @@ _RTJ_RE = re.compile(
 )
 _KAMM_RE = re.compile(r'\bKAMM(?:PROFILE)?\b|\bCAM[\s\-]?PROFILE\b', re.IGNORECASE)
 _DJI_RE = re.compile(r'\bDOUBLE[\s\-]JACKET(?:ED)?\b', re.IGNORECASE)
-_ISK_RE = re.compile(r'\bINSULATING\s+GASKET\b|\bISK\b|\bINSULATION\s+KIT\b', re.IGNORECASE)
+_ISK_RE = re.compile(
+    r'\bINSULATING\s+GASKET\b|\bINSULATION\s+GASKET\b|'
+    r'\bISK\b|\bINSULATION\s+KITS?\b|\bINSULATING\s+KITS?\b|'
+    r'\bFLANGE\s+ISOLATION\b|\bISOLATION\s+GASKET\b|'
+    r'\bINST\.?\s+KIT\b',
+    re.IGNORECASE,
+)
 
 
 def _regex_detect_type(desc: str) -> str | None:
     """Return gasket_type if clearly detectable from keywords, else None."""
     if _SW_RE.search(desc):
         return 'SPIRAL_WOUND'
-    if _RTJ_RE.search(desc):
-        return 'RTJ'
     if _KAMM_RE.search(desc):
         return 'KAMM'
     if _DJI_RE.search(desc):
         return 'DJI'
+    # Check ISK before RTJ: "RTJ" in ISK descriptions often refers to the mating flange,
+    # not the gasket itself (e.g. "ISK for RTJ flanges", "WAFER 1500 RTJ")
     if _ISK_RE.search(desc):
         return 'ISK'
+    if _RTJ_RE.search(desc):
+        return 'RTJ'
     return None
 
 _CACHE_TTL = 30 * 24 * 3600  # 30 days — gasket specs are stable
@@ -83,7 +91,8 @@ _FIELD_SCHEMA = """{
   "thickness_mm": 3,
   "standard": "ASME B16.21 | ASME B16.20 | EN 1514-1 | other | null",
   "special": "any special requirements e.g. FOOD GRADE or null",
-  "isk_style": "e.g. STYLE-CS | STYLE-N | null (ISK/ISK_RTJ only — style identifier)",
+  "isk_style": "e.g. STYLE-CS | STYLE-N | TYPE-E | TYPE-F | null (ISK/ISK_RTJ only — style identifier)",
+  "isk_fire_safety": "FIRE SAFE | NON FIRE SAFE | null (ISK/ISK_RTJ only)",
   "dji_filler": "e.g. GRAPHITE | ASBESTOS FREE | CERAMIC | null (DJI only — fill material)",
   "sw_winding_material": "e.g. SS304 | SS316 | null (spiral wound only)",
   "sw_filler": "e.g. GRAPHITE | PTFE | MICA | null (spiral wound only)",
@@ -105,7 +114,8 @@ Gasket types:
 3. RTJ: ring type joint — RTJ/R.T.J/ring joint/ring type gasket/octagonal ring/oval ring/JOINT TORE/JOINT TORIQUE/ring no R-nn/RX-nn/BX-nn/API 6A rings.
 4. KAMM: Kammprofile/CAMPROFILE/CAM PROFILE — serrated metal core with graphite facing.
 5. DJI: Double Jacket — metallic jacket (COPPER/SS316L/SOFT IRON/ARMCO IRON) with filler; dims always OD×ID×THK.
-6. ISK: Insulating Gasket Kit (RF/FF flanges). 7. ISK_RTJ: ISK for RTJ flanges.
+6. ISK: Insulating Gasket Kit (RF/FF flanges) — keywords: Insulating Gasket Kit/Set, Insulation Gasket Kit, ISK, Flange Isolation Gasket (PGS COMMANDER EXTREME), INST. KIT, GSKT INSULATION. GRE G-10/G-11/G10/G11 laminate description = ISK. NOTE: "RTJ" in description may refer to the mating flange, not gasket type — if description says TYPE-F RF or ISK TYPE-F, use ISK not ISK_RTJ.
+7. ISK_RTJ: ISK replacing an RTJ groove — keywords: ISK RTJ, ISK TYPE-RTJ, insulating ring type joint.
 
 Schema per item:
 {_FIELD_SCHEMA}
@@ -121,11 +131,42 @@ Rules:
 - SPIRAL_WOUND: sw_winding_material/sw_filler/sw_inner_ring/sw_outer_ring; moc=null. RTJ: moc/rtj_groove_type/rtj_hardness_bhn/ring_no; sw_*=null; standard=ASME B16.20. SOFT_CUT: moc; sw_*/rtj_*=null.
 - face_type: RF/FF for SOFT_CUT/ISK/ISK_RTJ; null for SPIRAL_WOUND/RTJ/KAMM/DJI.
 - standard: API 6A/API Specs→"API 6A"; B16/A→"ASME B16.20"; ASME B16.21 (soft cut ≤24"); ASME B16.47 (soft cut ≥26"); ASME B16.20 (SW/RTJ ≤24"); ASME B16.47 (SW ≥26"). ISK/ISK_RTJ: extract customer-stated standard verbatim incl. SERIES A/B (e.g. "ASME B16.47 ( SERIES A )").
-- special: FOOD GRADE/NACE/LETHAL/EIL APPROVED/NACE MR 0175/API 6A/SERIES B. ISK/ISK_RTJ: prefix "SET:" + component details verbatim. DJI: set "AS PER DRAWING" when drawing referenced or when "(WITHOUT RIB)"/"(WITH RIB)"/"(WITHOUT RIB)" appears (drawing-controlled dimensions).
-- isk_style: STYLE-CS (G10 laminate+metallic core); STYLE-N (ISK_RTJ). Null if not explicitly stated.
+- special: FOOD GRADE/NACE/LETHAL/EIL APPROVED/NACE MR 0175/API 6A/SERIES B. ISK/ISK_RTJ: capture component material details starting from the material description — include GRE/GLASS REINFORCED EPOXY/NEMA G10/G11 laminate, primary seal, secondary seal, sleeve, insulating washer, metallic washer, core material, PTFE seals. EXCLUDE only these exact boilerplate phrases: "MANUFACTURE STD", "PGS COMMANDER EXTREME", "(125-250 AARH)", "to suit flange", "Standard MANUFACTURE STD WAFER". Do NOT exclude "GLASS REINFORCED EPOXY (NEMA G10)", "GRE G-10", "TEFLON SEALS". DJI: set "AS PER DRAWING" when drawing referenced or when "(WITHOUT RIB)"/"(WITH RIB)" appears.
+- isk_style: STYLE-CS = G10/G11 laminate WITH metallic core (SS316/UNS S32760/Inconel/duplex etc) — e.g. "GRE G10 laminate, Super Duplex UNS S32760 Steel core". STYLE-N = only when explicitly stated "STYLE-N"/"STYLE N" in description. TYPE-E = only when "Type E" or "(type E)" explicitly stated. TYPE-F = only when "Type F" or "(type F)" explicitly stated. NULL if none explicitly stated (do NOT default to STYLE-N). "Type F" + G10/G11 laminate + metallic core → use STYLE-CS (not TYPE-F).
+- isk_fire_safety: Extract from description. "FIRE SAFE"/"(FIRE SAFE)"/"FS" → "FIRE SAFE". "NON FIRE SAFE"/"NON-FIRE SAFE"/"(NON FIRE SAFE)"/"NFS"/"(NON-FIRE SAFE)" → "NON FIRE SAFE". Domain rule: PTFE spring-energised/pressure-energised seal (PTFE SS PRES ENRG, SPRING ENERGISED SEAL, SPIRAL SPRING) → "NON FIRE SAFE"; TEFLON/PTFE flat seal (W/TEFLON SEALS, PTFE SEAL without spring) → "FIRE SAFE". Null if not determinable.
+- ISK size parsing: packed formats like "10150#INSULATING GASKET" → size="10\\"", rating="150#"; "32INST. KIT GASKET RF 600#" → size="32\\"", rating="600#"; "2INSULATING GASKET KIT 600#" → size="2\\"", rating="600#". "NPS: 1 Th: 9,09" → size="1\\"", thickness_mm=9.09 (European decimal comma). "1+1/2" → size="1-1/2\\"". EN packed sizes: "EN 1514-1 25 PN16" or "EN 151425PN16" → size="DN 25", rating="PN 16". face_type: FF for EN/PN-rated ISK (unless stated otherwise).
 - dji_filler: GRAPHITE/ASBESTOS FREE/ARMCO IRON/other. Null = rules engine defaults GRAPHITE.
 - Brand name SOFT_CUT (KROLLER & ZILLER/KLINGER/DONIT/GARLOCK/SUPERLITE + grade code) → moc=full brand+grade. "WITH SPACER"=SOFT_CUT, capture in special.
 - confidence: HIGH if all key fields clear; LOW if ambiguous."""
+
+_ASME_CLASSES = r'150|300|600|900|1500|2500|3000'
+
+_PACKED_ISK_RE1 = re.compile(
+    rf'^(\d{{1,4}})({_ASME_CLASSES})#(\s*(?:INST|INSUL))',
+    re.IGNORECASE,
+)
+_PACKED_ISK_RE2 = re.compile(
+    r'^(\d{1,4})(INST(?:ULATING|\.?\s)|INSULATING)',
+    re.IGNORECASE,
+)
+
+
+def _preprocess_isk_packed(desc: str) -> str:
+    """Expand compact ISK size+rating formats to help LLM parse them correctly.
+    Examples:
+      '10150#INSULATING GASKET KIT' → '10" 150# INSULATING GASKET KIT'
+      '32INST. KIT GASKET RF 600#'  → '32" INST. KIT GASKET RF 600#'
+      '2INSULATING GASKET KIT 600#' → '2" INSULATING GASKET KIT 600#'
+    """
+    # Pattern 1: size+class# packed e.g. "10150#INSULATING"
+    m = _PACKED_ISK_RE1.match(desc)
+    if m:
+        return _PACKED_ISK_RE1.sub(r'\1" \2#\3', desc, count=1)
+    # Pattern 2: size directly glued to ISK keyword e.g. "32INST." or "2INSULATING"
+    m = _PACKED_ISK_RE2.match(desc)
+    if m:
+        return _PACKED_ISK_RE2.sub(r'\1" \2', desc, count=1)
+    return desc
 
 
 def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
@@ -139,6 +180,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     for item in items:
         if item.get('description'):
             item['description'] = re.sub(r'[\r\n]+', ' ', item['description']).strip()
+            item['description'] = _preprocess_isk_packed(item['description'])
 
     unique_descs_list = list({item['description'] for item in items})
     total = len(unique_descs_list)
@@ -312,7 +354,7 @@ def _null_extract() -> dict:
         'rating': None, 'gasket_type': 'SOFT_CUT', 'moc': None,
         'face_type': None, 'thickness_mm': None, 'standard': None,
         'special': 'LLM unavailable — review manually',
-        'isk_style': None, 'dji_filler': None,
+        'isk_style': None, 'isk_fire_safety': None, 'dji_filler': None,
         'sw_winding_material': None, 'sw_filler': None,
         'sw_inner_ring': None, 'sw_outer_ring': None,
         'rtj_groove_type': None, 'rtj_hardness_bhn': None,
