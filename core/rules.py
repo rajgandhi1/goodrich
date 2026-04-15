@@ -799,7 +799,7 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
     elif rn_upper.startswith('RX-'):
         item['standard'] = 'NACE MR-01-75 / ISO 15156, API 6B'
     elif rn_upper.startswith('BX-'):
-        item['standard'] = 'API 6A'
+        item['standard'] = 'ASME B16.20'
     else:
         size_val = _size_nps_value_from_item(item)
         if size_val is not None and size_val >= 26:

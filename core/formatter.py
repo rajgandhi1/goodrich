@@ -90,7 +90,7 @@ def _fmt_rtj(item: dict) -> str:
         return ''
 
     moc_base, coating = _split_rtj_moc(moc)
-    hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)}BHN HARDNESS' if bhn else None)
+    hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)} BHN HARDNESS' if bhn else None)
 
     # Large bore RTJ: no ring number — use SIZE: X" X RATING# format
     if not ring_no:
@@ -100,6 +100,16 @@ def _fmt_rtj(item: dict) -> str:
             return ''
         size_str = size if ('"' in size or 'NB' in size.upper() or size.upper().startswith('DN')) else f'{size}"'
         parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc_base]
+        if coating:
+            parts.append(coating)
+        if hardness_str:
+            parts.append(hardness_str)
+        parts.append(standard)
+        return ', '.join(parts)
+
+    # BX rings (API pressure-containing closures): no groove designation in GGPL description
+    if ring_no.upper().startswith('BX-'):
+        parts = [f'SIZE : {ring_no}', moc_base]
         if coating:
             parts.append(coating)
         if hardness_str:
@@ -130,9 +140,10 @@ def _fmt_kamm(item: dict) -> str:
         if not (od and id_ and moc):
             return ''
         special = (item.get('special') or '').strip()
-        special_str = f' ({special})' if special else ''
-        # OD/ID KAMM: space-separated (no comma) between dims/special and MOC
-        return f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM X {_fmt_num(thk)}MM THK{special_str} {moc}'
+        dims = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD X {_fmt_num(thk)}MM THK'
+        if special:
+            return f'{dims},{special},{moc}'
+        return f'{dims},{moc}'
 
     if not (size and rating and moc):
         return ''
@@ -160,6 +171,10 @@ def _fmt_dji(item: dict) -> str:
         # Industrial / heat-exchanger pattern: DOUBLE JACKETED, {moc} WITH {filler} FILLER (AS PER DRAWING)
         filler_str = f'{filler} FILLER' if filler == 'GRAPHITE' else filler
         return f'{dims}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)'
+    elif 'CORRUGATED' in filler:
+        # Corrugated type pattern: {moc} DOUBLE JACKETED GASKET WITH {filler} FILLER
+        filler_str = filler if filler.endswith('FILLER') else f'{filler} FILLER'
+        return f'{dims}, {moc} DOUBLE JACKETED GASKET WITH {filler_str}'
     else:
         # Standard piping pattern: DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED
         return f'{dims}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED'
@@ -207,9 +222,10 @@ def _fmt_isk(item: dict) -> str:
             out += ', ' + ', '.join(tail_parts)
         return out
 
-    # STYLE-N: "SIZE: S X R, INSULATING GASKET KIT (STYLE-N) spec, face (fire_safety)"
-    if isk_style == 'STYLE-N':
-        out = f'{base}, INSULATING GASKET KIT (STYLE-N)'
+    # STYLE-N and equivalent parenthesized styles (FCS, TYPE-D):
+    # "SIZE: S X R, INSULATING GASKET KIT ({style}) spec, face (fire_safety)"
+    if isk_style in ('STYLE-N', 'FCS', 'TYPE-D'):
+        out = f'{base}, INSULATING GASKET KIT ({isk_style})'
         if special:
             out += f' {special}'
         tail_parts = []
@@ -252,7 +268,9 @@ def _fmt_isk(item: dict) -> str:
     if isk_style:
         out += f', {isk_style}'
     if special:
-        out += f', {special}'
+        # Special starting with WITH/FOR connects directly (no comma): "INSULATING GASKET KIT WITH ..."
+        sep = ' ' if special.upper().startswith(('WITH ', 'FOR ')) else ', '
+        out += f'{sep}{special}'
     std_to_show = standard if std_explicit else ''
     # Fire safety attaches to face_type with space (e.g. "RF (FIRE SAFE)"), not comma-separated
     if face_type and fire_safety:
