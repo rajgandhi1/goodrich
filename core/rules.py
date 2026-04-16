@@ -945,6 +945,26 @@ def _extract_isk_special_from_desc(item: dict) -> str | None:
     return None
 
 
+# Matches core material in raw ISK descriptions: "316 SS CORE", "SS316 CORE", "SS 316 CORE",
+# "SS316L CORE", "DUPLEX CORE", "INCONEL CORE", "CS CORE", etc.
+_ISK_CORE_RE = re.compile(
+    r'\b(?:SS\s*3\d{2}L?|3\d{2}L?\s*SS|DUPLEX|SUPER\s+DUPLEX|INCONEL|HASTELLOY|CS|CARBON\s+STEEL|ALLOY\s+\w+)\s+CORE\b',
+    re.IGNORECASE,
+)
+
+
+def _recover_isk_core(item: dict) -> None:
+    """If core material appears in raw description but is absent from special, append it."""
+    raw = (item.get('raw_description') or '').strip()
+    special = (item.get('special') or '').upper()
+    m = _ISK_CORE_RE.search(raw)
+    if m and 'CORE' not in special:
+        core_str = m.group(0).upper()
+        # Normalise "316 SS CORE" → "SS316 CORE"
+        core_str = re.sub(r'^(\d{3}L?)\s*(SS)', r'SS\1', core_str)
+        item['special'] = (item['special'] + ', ' + core_str).lstrip(', ') if item.get('special') else core_str
+
+
 _ISK_ABBREV = [
     # Abbreviation → full GGPL-standard term (applied to special field post-LLM)
     (re.compile(r'\bPRES(?:SURE)?\s+ENRG(?:IZED)?\b', re.IGNORECASE), 'PRESSURE ENERGIZED'),
@@ -999,6 +1019,9 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # Normalize common ISK component abbreviations in special field
     if item.get('special'):
         item['special'] = _normalize_isk_special(item['special'])
+
+    # Recover core material the LLM may have dropped (e.g. "316 SS CORE" → appended to special)
+    _recover_isk_core(item)
 
     # Fire safety: regex inference is more reliable than LLM for this field
     # (LLM can cross-contaminate values across batched items).
