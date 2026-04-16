@@ -62,7 +62,10 @@ def format_description(item: dict) -> str:
     if gtype == 'SPIRAL_WOUND' and special:
         parts.append(special)
 
-    return ', '.join(parts)
+    # SOFT_CUT uses GGPL's space-comma separator: "...THK ,MOC ,RF ,ASME B16.21"
+    # SPIRAL_WOUND keeps the standard comma-space separator
+    sep = ' ,' if gtype == 'SOFT_CUT' else ', '
+    return sep.join(parts)
 
 
 _RTJ_COATINGS = ('GALVANISED', 'ZINC PLATED', 'PHOSPHATE COATED', 'NICKEL PLATED', 'CADMIUM PLATED')
@@ -89,7 +92,6 @@ def _fmt_rtj(item: dict) -> str:
     if not moc:
         return ''
 
-    moc_base, coating = _split_rtj_moc(moc)
     hardness_str = hardness_spec if hardness_spec else (f'{int(bhn)} BHN HARDNESS' if bhn else None)
 
     # Large bore RTJ: no ring number — use SIZE: X" X RATING# format
@@ -99,31 +101,25 @@ def _fmt_rtj(item: dict) -> str:
         if not (size and rating):
             return ''
         size_str = size if ('"' in size or 'NB' in size.upper() or size.upper().startswith('DN')) else f'{size}"'
-        parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc_base]
-        if coating:
-            parts.append(coating)
+        parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc]
         if hardness_str:
             parts.append(hardness_str)
         parts.append(standard)
-        return ', '.join(parts)
+        return ' ,'.join(parts)
 
     # BX rings (API pressure-containing closures): no groove designation in GGPL description
     if ring_no.upper().startswith('BX-'):
-        parts = [f'SIZE : {ring_no}', moc_base]
-        if coating:
-            parts.append(coating)
+        parts = [f'SIZE : {ring_no}', moc]
         if hardness_str:
             parts.append(hardness_str)
         parts.append(standard)
-        return ', '.join(parts)
+        return ' ,'.join(parts)
 
-    parts = [f'SIZE : {ring_no}', 'RTJ', groove, moc_base]
-    if coating:
-        parts.append(coating)
+    parts = [f'SIZE : {ring_no}', 'RTJ', groove, moc]
     if hardness_str:
         parts.append(hardness_str)
     parts.append(standard)
-    return ', '.join(parts)
+    return ' ,'.join(parts)
 
 
 def _fmt_kamm(item: dict) -> str:

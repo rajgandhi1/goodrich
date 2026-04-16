@@ -622,7 +622,7 @@ _RTJ_HARDNESS_DEFAULTS = {
     # Nickel alloys (ASME B16.20 / API 6A max BHN values)
     'MONEL 400': 130, 'MONEL 800': 150,
     'INCONEL 600': 160,                          # Alloy 600 (UNS N06600)
-    'INCONEL 625': 160,                          # Alloy 625 (UNS N06625)
+    'INCONEL 625': 210,                          # Alloy 625 (UNS N06625) — GGPL standard
     'INCONEL 718': 160,
     'HASTELLOY C276': 200,                       # UNS N10276
     'HASTELLOY C22': 200,
@@ -717,19 +717,29 @@ _RTJ_MOC_ALIASES = {
 
 
 def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
-    # Normalize MOC
+    # Normalize MOC — if LLM returned null, try to recover from raw_description via aliases
     raw_moc = (item.get('moc') or '').strip().upper()
-    # UNS materials pass through as-is
+    if not raw_moc:
+        raw_desc_upper = (item.get('raw_description') or '').upper()
+        for alias_key in sorted(_RTJ_MOC_ALIASES, key=len, reverse=True):
+            if re.search(r'\b' + re.escape(alias_key) + r'\b', raw_desc_upper):
+                raw_moc = alias_key
+                break
     if raw_moc.startswith('UNS '):
         norm_moc = raw_moc
     else:
         norm_moc = _RTJ_MOC_ALIASES.get(raw_moc, raw_moc) if raw_moc else None
     item['moc'] = norm_moc
 
-    # Groove type — default OCT
-    if not item.get('rtj_groove_type'):
-        item['rtj_groove_type'] = 'OCT'
-        applied_defaults.append('groove type defaulted to OCT')
+    # Groove type — normalise abbreviation then default
+    _groove_norm = {'OCT': 'OCTAGONAL', 'OVAL': 'OVAL'}
+    if item.get('rtj_groove_type'):
+        item['rtj_groove_type'] = _groove_norm.get(
+            item['rtj_groove_type'].upper(), item['rtj_groove_type'].upper()
+        )
+    else:
+        item['rtj_groove_type'] = 'OCTAGONAL'
+        applied_defaults.append('groove type defaulted to OCTAGONAL')
 
     # Convert HRBW (Rockwell B) to BHN if the description contains HRB/HRBW values
     # (customer spec sheets sometimes use HRB instead of BHN)
@@ -750,7 +760,7 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         bhn = _RTJ_HARDNESS_DEFAULTS.get(norm_moc)
         if bhn:
             item['rtj_hardness_bhn'] = bhn
-            item['rtj_hardness_spec'] = f"{bhn}BHN HARDNESS"
+            item['rtj_hardness_spec'] = f"{bhn} BHN HARDNESS"
             applied_defaults.append(f'BHN hardness defaulted to {bhn} for {norm_moc}')
         else:
             # BHN is mandatory on all RTJ gaskets (ASME B16.20)
@@ -758,7 +768,7 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
                 f'RTJ BHN hardness not known for "{norm_moc}" — confirm BHN value with customer (ASME B16.20)'
             )
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
-        item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])}BHN HARDNESS"
+        item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
     elif not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and not norm_moc:
         flags.append('RTJ BHN hardness not specified — confirm with customer (ASME B16.20)')
 

@@ -4,6 +4,9 @@ End-to-end pipeline tests using the WABAG email and L&T Excel as inputs.
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+
 from core.parser import parse_email_text, parse_excel_file
 from core.extractor import extract_batch
 from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING
@@ -120,7 +123,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 1.5" X 150# X 3MM THK, REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70, FF, ASME B16.21',
+            'expected': 'SIZE : 1.5" X 150# X 3MM THK ,REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70 ,FF ,ASME B16.21',
         },
         # Same MOC, larger bore 6"
         {
@@ -129,7 +132,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 6" X 150# X 3MM THK, REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70, FF, ASME B16.21',
+            'expected': 'SIZE : 6" X 150# X 3MM THK ,REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70 ,FF ,ASME B16.21',
         },
         # Large bore 48" — B16.47 Series B
         {
@@ -138,7 +141,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70',
                 'face_type': 'FF', 'standard': 'ASME B16.47 (SERIES-B)',
             },
-            'expected': 'SIZE : 48" X 150# X 3MM THK, REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70, FF, ASME B16.47 (SERIES-B)',
+            'expected': 'SIZE : 48" X 150# X 3MM THK ,REINFORCED CHLOROPENE RUBBER SHORE A HARDNESS OF 70 ,FF ,ASME B16.47 (SERIES-B)',
         },
         # RF face, ARAMID WITH NBR BINDER
         {
@@ -147,7 +150,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'ARAMID WITH NBR BINDER',
                 'face_type': 'RF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 1" X 150# X 3MM THK, ARAMID WITH NBR BINDER, RF, ASME B16.21',
+            'expected': 'SIZE : 1" X 150# X 3MM THK ,ARAMID WITH NBR BINDER ,RF ,ASME B16.21',
         },
         # 1.5mm thickness (thin gasket)
         {
@@ -156,7 +159,7 @@ def test_softcut_formatter():
                 'thickness_mm': 1.5, 'moc': 'CNAF',
                 'face_type': 'RF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 10" X 150# X 1.5MM THK, CNAF, RF, ASME B16.21',
+            'expected': 'SIZE : 10" X 150# X 1.5MM THK ,CNAF ,RF ,ASME B16.21',
         },
         # 7mm thickness, FF
         {
@@ -165,7 +168,7 @@ def test_softcut_formatter():
                 'thickness_mm': 7, 'moc': 'REINFORCED CHLOROPENE RUBBER',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 10" X 150# X 7MM THK, REINFORCED CHLOROPENE RUBBER, FF, ASME B16.21',
+            'expected': 'SIZE : 10" X 150# X 7MM THK ,REINFORCED CHLOROPENE RUBBER ,FF ,ASME B16.21',
         },
         # EPDM 24" 7mm FF
         {
@@ -174,7 +177,7 @@ def test_softcut_formatter():
                 'thickness_mm': 7, 'moc': 'EPDM',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 24" X 150# X 7MM THK, EPDM, FF, ASME B16.21',
+            'expected': 'SIZE : 24" X 150# X 7MM THK ,EPDM ,FF ,ASME B16.21',
         },
         # DN metric size — 3" (NPS) equivalent
         {
@@ -183,7 +186,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : 3" X 150# X 3MM THK, EPDM GASKET, FF, ASME B16.21',
+            'expected': 'SIZE : 3" X 150# X 3MM THK ,EPDM GASKET ,FF ,ASME B16.21',
         },
         # DN 100 — formatter keeps DN prefix with space
         {
@@ -192,7 +195,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : DN 100 X 150# X 3MM THK, EPDM GASKET, FF, ASME B16.21',
+            'expected': 'SIZE : DN 100 X 150# X 3MM THK ,EPDM GASKET ,FF ,ASME B16.21',
         },
         # DN 150 3mm FF
         {
@@ -201,7 +204,7 @@ def test_softcut_formatter():
                 'thickness_mm': 3, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : DN 150 X 150# X 3MM THK, EPDM GASKET, FF, ASME B16.21',
+            'expected': 'SIZE : DN 150 X 150# X 3MM THK ,EPDM GASKET ,FF ,ASME B16.21',
         },
         # DN 350 7mm FF (< 26" NPS equivalent → B16.21)
         {
@@ -210,7 +213,7 @@ def test_softcut_formatter():
                 'thickness_mm': 7, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : DN 350 X 150# X 7MM THK, EPDM GASKET, FF, ASME B16.21',
+            'expected': 'SIZE : DN 350 X 150# X 7MM THK ,EPDM GASKET ,FF ,ASME B16.21',
         },
         # DN 500 7mm FF
         {
@@ -219,7 +222,7 @@ def test_softcut_formatter():
                 'thickness_mm': 7, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.21',
             },
-            'expected': 'SIZE : DN 500 X 150# X 7MM THK, EPDM GASKET, FF, ASME B16.21',
+            'expected': 'SIZE : DN 500 X 150# X 7MM THK ,EPDM GASKET ,FF ,ASME B16.21',
         },
         # DN 700 8mm FF — large bore → B16.47 Series A
         {
@@ -228,7 +231,7 @@ def test_softcut_formatter():
                 'thickness_mm': 8, 'moc': 'EPDM GASKET',
                 'face_type': 'FF', 'standard': 'ASME B16.47 (SERIES-A)',
             },
-            'expected': 'SIZE : DN 700 X 150# X 8MM THK, EPDM GASKET, FF, ASME B16.47 (SERIES-A)',
+            'expected': 'SIZE : DN 700 X 150# X 8MM THK ,EPDM GASKET ,FF ,ASME B16.47 (SERIES-A)',
         },
     ]
 
@@ -325,47 +328,47 @@ def test_rtj_formatter():
     cases = [
         # R-46, Inconel 625, 210 BHN — plain B16.20
         (rtj('R-46', 'INCONEL 625', 210, _B16),
-         'SIZE : R-46, RTJ, OCTAGONAL, INCONEL 625, 210 BHN HARDNESS, ASME B16.20'),
-        # R-46, Soft Iron Galvanised, 90 BHN — coating split from moc
+         'SIZE : R-46 ,RTJ ,OCTAGONAL ,INCONEL 625 ,210 BHN HARDNESS ,ASME B16.20'),
+        # R-46, Soft Iron Galvanised, 90 BHN — coating kept as part of moc (not split)
         (rtj('R-46', 'SOFT IRON GALVANISED', 90, _B16),
-         'SIZE : R-46, RTJ, OCTAGONAL, SOFT IRON, GALVANISED, 90 BHN HARDNESS, ASME B16.20'),
+         'SIZE : R-46 ,RTJ ,OCTAGONAL ,SOFT IRON GALVANISED ,90 BHN HARDNESS ,ASME B16.20'),
         # R-75, Inconel 625, 210 BHN
         (rtj('R-75', 'INCONEL 625', 210, _B16),
-         'SIZE : R-75, RTJ, OCTAGONAL, INCONEL 625, 210 BHN HARDNESS, ASME B16.20'),
+         'SIZE : R-75 ,RTJ ,OCTAGONAL ,INCONEL 625 ,210 BHN HARDNESS ,ASME B16.20'),
         # R-63, Inconel 625, 210 BHN
         (rtj('R-63', 'INCONEL 625', 210, _B16),
-         'SIZE : R-63, RTJ, OCTAGONAL, INCONEL 625, 210 BHN HARDNESS, ASME B16.20'),
+         'SIZE : R-63 ,RTJ ,OCTAGONAL ,INCONEL 625 ,210 BHN HARDNESS ,ASME B16.20'),
         # R-63, Soft Iron Galvanised, 90 BHN
         (rtj('R-63', 'SOFT IRON GALVANISED', 90, _B16),
-         'SIZE : R-63, RTJ, OCTAGONAL, SOFT IRON, GALVANISED, 90 BHN HARDNESS, ASME B16.20'),
+         'SIZE : R-63 ,RTJ ,OCTAGONAL ,SOFT IRON GALVANISED ,90 BHN HARDNESS ,ASME B16.20'),
         # NACE cases — standard field contains both NACE and B16.20 as one string
         (rtj('R-46', 'UNS S32205', 230, _NACE_B16),
-         'SIZE : R-46, RTJ, OCTAGONAL, UNS S32205, 230 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-46 ,RTJ ,OCTAGONAL ,UNS S32205 ,230 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-12', 'SOFT IRON', 90, _NACE_B16),
-         'SIZE : R-12, RTJ, OCTAGONAL, SOFT IRON, 90 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-12 ,RTJ ,OCTAGONAL ,SOFT IRON ,90 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-12', 'UNS S32205', 230, _NACE_B16),
-         'SIZE : R-12, RTJ, OCTAGONAL, UNS S32205, 230 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-12 ,RTJ ,OCTAGONAL ,UNS S32205 ,230 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-14', 'SOFT IRON', 90, _NACE_B16),
-         'SIZE : R-14, RTJ, OCTAGONAL, SOFT IRON, 90 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-14 ,RTJ ,OCTAGONAL ,SOFT IRON ,90 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-14', 'UNS S32205', 230, _NACE_B16),
-         'SIZE : R-14, RTJ, OCTAGONAL, UNS S32205, 230 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-14 ,RTJ ,OCTAGONAL ,UNS S32205 ,230 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-16', 'SOFT IRON', 90, _NACE_B16),
-         'SIZE : R-16, RTJ, OCTAGONAL, SOFT IRON, 90 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-16 ,RTJ ,OCTAGONAL ,SOFT IRON ,90 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-20', 'SOFT IRON', 90, _NACE_B16),
-         'SIZE : R-20, RTJ, OCTAGONAL, SOFT IRON, 90 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-20 ,RTJ ,OCTAGONAL ,SOFT IRON ,90 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         (rtj('R-23', 'SOFT IRON', 90, _NACE_B16),
-         'SIZE : R-23, RTJ, OCTAGONAL, SOFT IRON, 90 BHN HARDNESS, NACE MR-01-75 / ISO 15156, ASME B16.20'),
+         'SIZE : R-23 ,RTJ ,OCTAGONAL ,SOFT IRON ,90 BHN HARDNESS ,NACE MR-01-75 / ISO 15156, ASME B16.20'),
         # BX rings — no RTJ/groove designation, ASME B16.20
         (rtj('BX-155', 'SS316', 160, _B16),
-         'SIZE : BX-155, SS316, 160 BHN HARDNESS, ASME B16.20'),
+         'SIZE : BX-155 ,SS316 ,160 BHN HARDNESS ,ASME B16.20'),
         (rtj('BX-156', 'SS316', 160, _B16),
-         'SIZE : BX-156, SS316, 160 BHN HARDNESS, ASME B16.20'),
+         'SIZE : BX-156 ,SS316 ,160 BHN HARDNESS ,ASME B16.20'),
         (rtj('BX-157', 'SS316', 160, _B16),
-         'SIZE : BX-157, SS316, 160 BHN HARDNESS, ASME B16.20'),
+         'SIZE : BX-157 ,SS316 ,160 BHN HARDNESS ,ASME B16.20'),
         (rtj('BX-159', 'SS316', 160, _B16),
-         'SIZE : BX-159, SS316, 160 BHN HARDNESS, ASME B16.20'),
+         'SIZE : BX-159 ,SS316 ,160 BHN HARDNESS ,ASME B16.20'),
         (rtj('BX-159', 'SS304', 160, _B16),
-         'SIZE : BX-159, SS304, 160 BHN HARDNESS, ASME B16.20'),
+         'SIZE : BX-159 ,SS304 ,160 BHN HARDNESS ,ASME B16.20'),
     ]
 
     for i, (item, expected) in enumerate(cases):

@@ -104,7 +104,7 @@ _FIELD_SCHEMA = """{
   "confidence": "HIGH | MEDIUM | LOW"
 }"""
 
-_BATCH_SIZE = 20  # descriptions per LLM call
+_BATCH_SIZE = 8   # descriptions per LLM call (smaller batches = faster per-call, avoids timeouts)
 
 _BATCH_SYSTEM_PROMPT = f"""You are a gasket spec extraction assistant. Extract fields from customer descriptions and return ONLY valid JSON with key "results" (array, same order as input).
 
@@ -228,7 +228,7 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
 
         async def _run_all(key: str):
             from openai import AsyncOpenAI
-            async_client = AsyncOpenAI(api_key=key, timeout=60.0)
+            async_client = AsyncOpenAI(api_key=key, timeout=120.0)
             return await asyncio.gather(*[_do_batch_async(async_client, b) for b in batches])
 
         def _bg():
@@ -322,10 +322,14 @@ async def _llm_extract_batch_async(async_client, descriptions: list[str]) -> lis
                 results.append(None)
             return results[:len(descriptions)]
         except Exception as e:
-            msg = str(e)
-            if '429' in msg or 'rate_limit' in msg.lower():
+            msg = str(e).lower()
+            if '429' in str(e) or 'rate_limit' in msg:
                 wait = 5.0 * (attempt + 1)
                 logger.info(f'Rate limited — waiting {wait:.1f}s (attempt {attempt + 1}/3)')
+                await asyncio.sleep(wait)
+            elif 'timeout' in msg or 'timed out' in msg:
+                wait = 10.0 * (attempt + 1)
+                logger.warning(f'LLM timeout — retrying in {wait:.1f}s (attempt {attempt + 1}/3)')
                 await asyncio.sleep(wait)
             else:
                 logger.warning(f'LLM async batch failed: {e}')
