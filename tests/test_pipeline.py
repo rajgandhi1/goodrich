@@ -664,6 +664,74 @@ def test_dji_formatter():
     print(f'  All {len(cases)} DJI formatter cases passed ✓')
 
 
+def test_spw_nps_class_format():
+    """Regex+rules pipeline for 'N NPS x CLASS R x THK+THK (OUTER & INNER RING)' format.
+    No LLM — tests: NPS-suffix size, dual-layer thickness suppression, ring material extraction,
+    large-bore B16.47 override, mixed-fraction size decimal conversion.
+    Note: filler defaults to GRAPHITE (regex+rules only). LLM may determine FLEXIBLE GRAPHITE
+    for SS304 winding per GGPL convention.
+    """
+    from core.regex_extractor import regex_extract
+
+    def _run(desc):
+        rx = regex_extract(desc)
+        item = dict(rx)
+        item['description'] = desc
+        item['quantity'] = 1
+        item['uom'] = 'NOS'
+        processed = apply_rules(item)
+        return format_description(processed)
+
+    cases = [
+        # SS316 inner & CS outer — CLASS 150
+        ('2 NPS x CLASS 150 x 4.45 THK + 3.2 THK (CS OUTER RING & SS316 INNER RING) ASME B16.20',
+         'SIZE : 2" X 150# X 4.5MM THK, SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & CS OUTER RING, ASME B16.20'),
+        # SS316 inner & CS outer — CLASS 600
+        ('3 NPS x CLASS 600 x 4.45 THK + 3.2 THK (CS OUTER RING & SS316 INNER RING) ASME B16.20',
+         'SIZE : 3" X 600# X 4.5MM THK, SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & CS OUTER RING, ASME B16.20'),
+        # SS316 inner & outer — CLASS 150
+        ('2 NPS x CLASS 150 x 4.45 THK + 3.2 THK (SS316 OUTER RING & SS316 INNER RING) ASME B16.20',
+         'SIZE : 2" X 150# X 4.5MM THK, SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & SS316 OUTER RING, ASME B16.20'),
+        # SS316 inner & outer — CLASS 300
+        ('2 NPS x CLASS 300 x 4.45 THK + 3.2 THK (SS316 OUTER RING & SS316 INNER RING) ASME B16.20',
+         'SIZE : 2" X 300# X 4.5MM THK, SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & SS316 OUTER RING, ASME B16.20'),
+        # SS304 inner & CS outer — CLASS 300 (filler defaults to GRAPHITE without LLM)
+        ('2 NPS x CLASS 300 x 4.45 THK + 3.2 THK (CS OUTER RING & SS304 INNER RING) ASME B16.20',
+         'SIZE : 2" X 300# X 4.5MM THK, SS304 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS304 INNER RING & CS OUTER RING, ASME B16.20'),
+        # SS316L inner & outer — CLASS 300
+        ('4 NPS x CLASS 300 x 4.45 THK + 3.2 THK (SS316L OUTER RING & SS316L INNER RING) ASME B16.20',
+         'SIZE : 4" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316L INNER RING & SS316L OUTER RING, ASME B16.20'),
+        # SS316L inner & CS outer — CLASS 300
+        ('3 NPS x CLASS 300 x 4.45 THK + 3.2 THK (CS OUTER RING & SS316L INNER RING) ASME B16.20',
+         'SIZE : 3" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316L INNER RING & CS OUTER RING, ASME B16.20'),
+        # SS321 inner & outer — CLASS 900 (large bore 30" → B16.47)
+        ('30 NPS x CLASS 900 x 4.45 THK + 3.2 THK (SS321 OUTER RING & SS321 INNER RING) ASME B16.20',
+         'SIZE : 30" X 900# X 4.5MM THK, SS321 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS321 INNER RING & SS321 OUTER RING, ASME B16.47'),
+        # SS321 inner & outer — CLASS 900 (16" < 26" → B16.20)
+        ('16 NPS x CLASS 900 x 4.45 THK + 3.2 THK (SS321 OUTER RING & SS321 INNER RING) ASME B16.20',
+         'SIZE : 16" X 900# X 4.5MM THK, SS321 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS321 INNER RING & SS321 OUTER RING, ASME B16.20'),
+        # Mixed fraction size: 1 1/2 NPS → 1.5"
+        ('1 1/2 NPS x CLASS 150 x 4.45 THK + 3.2 THK (CS OUTER RING & SS 304 INNER RING) ASME B16.20',
+         'SIZE : 1.5" X 150# X 4.5MM THK, SS304 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS304 INNER RING & CS OUTER RING, ASME B16.20'),
+        # SS304L inner & CS outer — CLASS 300
+        ('2 NPS x CLASS 300 x 4.45 THK + 3.2 THK (CS OUTER RING & SS304L INNER RING) ASME B16.20',
+         'SIZE : 2" X 300# X 4.5MM THK, SS304L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS304L INNER RING & CS OUTER RING, ASME B16.20'),
+        # 6 NPS CLASS 150 SS316 inner & CS outer
+        ('6 NPS x CLASS 150 x 4.45 THK + 3.2 THK (CS OUTER RING & SS316 INNER RING) ASME B16.20',
+         'SIZE : 6" X 150# X 4.5MM THK, SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & CS OUTER RING, ASME B16.20'),
+    ]
+
+    for i, (desc, expected) in enumerate(cases):
+        got = _run(desc)
+        assert got == expected, (
+            f'\nCase {i+1} failed:'
+            f'\n  Input:    {desc}'
+            f'\n  Expected: {expected}'
+            f'\n  Got:      {got}'
+        )
+    print(f'  All {len(cases)} SPW NPS×CLASS format cases passed ✓')
+
+
 if __name__ == '__main__':
     print('\nRunning pipeline tests...\n')
     tests = [
@@ -674,6 +742,7 @@ if __name__ == '__main__':
         test_softcut_formatter,
         test_softcut_large_bore_rules,
         test_spw_formatter,
+        test_spw_nps_class_format,
         test_rtj_formatter,
         test_kamm_formatter,
         test_isk_formatter,
