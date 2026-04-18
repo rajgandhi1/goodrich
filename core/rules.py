@@ -352,13 +352,13 @@ _SW_RING_ALIASES = {
     'MILD STEEL': 'CS', 'CS': 'CS',
     # --- SS300-series austenitic ---
     'SS304': 'SS304', 'SS 304': 'SS304', '304': 'SS304', '304SS': 'SS304',
-    '304 SS': 'SS304', 'AISI 304': 'SS304', 'TYPE 304': 'SS304',
-    'SS304L': 'SS304L', 'SS 304L': 'SS304L', '304L': 'SS304L', 'AISI 304L': 'SS304L',
+    '304 SS': 'SS304', 'AISI 304': 'SS304', 'TYPE 304': 'SS304', 'AISI 304': 'SS304',
+    'SS304L': 'SS304L', 'SS 304L': 'SS304L', '304L': 'SS304L', 'AISI 304L': 'SS304L', '304L SS': 'SS304L',
     'SS310': 'SS310', 'SS 310': 'SS310', '310': 'SS310', 'AISI 310': 'SS310',
     'SS310S': 'SS310S', 'SS 310S': 'SS310S', '310S': 'SS310S',
     'SS316': 'SS316', 'SS 316': 'SS316', '316': 'SS316', '316SS': 'SS316',
     '316 SS': 'SS316', 'AISI 316': 'SS316', 'TYPE 316': 'SS316',
-    'SS316L': 'SS316L', 'SS 316L': 'SS316L', '316L': 'SS316L', 'AISI 316L': 'SS316L',
+    'SS316L': 'SS316L', 'SS 316L': 'SS316L', '316L': 'SS316L', 'AISI 316L': 'SS316L', '316L SS': 'SS316L',
     'SS316H': 'SS316H', 'SS 316H': 'SS316H', '316H': 'SS316H',
     'SS317': 'SS317', 'SS 317': 'SS317', '317': 'SS317',
     'SS317L': 'SS317L', 'SS 317L': 'SS317L', '317L': 'SS317L',
@@ -408,6 +408,10 @@ _SW_RING_ALIASES = {
     'ZINC-PLATED CARBON STEEL': 'ZINC PLATED CARBON STEEL',
     'ZINC PLATED CS': 'ZINC PLATED CARBON STEEL',
     'ZINC PLATED MS': 'ZINC PLATED CARBON STEEL',
+    'ZINC COATED CARBON STEEL': 'ZINC COATED CARBON STEEL',
+    'ZINC-COATED CARBON STEEL': 'ZINC COATED CARBON STEEL',
+    'ZINC COATED CS': 'ZINC COATED CARBON STEEL',
+    'ZINC COATED MS': 'ZINC COATED CARBON STEEL',
     # --- Duplex / super duplex (common aliases) ---
     'DUPLEX': 'UNS S31803', '2205': 'UNS S32205',
     'SUPER DUPLEX': 'UNS S32750', 'SDSS': 'UNS S32750', '2507': 'UNS S32750',
@@ -421,6 +425,11 @@ _SW_FILLER_ALIASES = {
     'GRAPH': 'GRAPHITE', 'GR': 'GRAPHITE',
     'FLEXICARB': 'FLEXIBLE GRAPHITE', 'FLEXI-CARB': 'FLEXIBLE GRAPHITE',
     'SIGRAFLEX': 'FLEXIBLE GRAPHITE', 'GRAFOIL': 'FLEXIBLE GRAPHITE',
+    'FLEX INHIB GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEX INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEXIBLE INHIB GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEX. INHIB. GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
+    'FLEX INHIB': 'FLEXIBLE INHIBITED GRAPHITE',
     'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
     # Flexible inhibited graphite (corrosion-inhibited grade — noted explicitly in GGPL descriptions)
     'FLEXIBLE INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
@@ -574,11 +583,6 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
         winding_mat = None
         item['sw_winding_material'] = None
 
-    # FLEXIBLE INHIBITED GRAPHITE: GGPL convention is to also append the filler
-    # as a note at the end of the description — store in special for formatter to pick up.
-    if filler == 'FLEXIBLE INHIBITED GRAPHITE' and not item.get('special'):
-        item['special'] = 'FLEXIBLE INHIBITED GRAPHITE FILLER'
-
     # Infer winding material from ring material when not explicitly stated
     if not winding_mat and not grade_flag_fired:
         inferred = inner_ring or outer_ring
@@ -601,6 +605,12 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
     # No face type for spiral wound
     item['face_type'] = None
+
+    # B16.5 is a flange standard (not a gasket standard) — if it appears in a SPW
+    # description it was referenced for the flange class, not the gasket. Clear it
+    # so the correct gasket standard (B16.20) is applied below.
+    if (item.get('standard') or '').upper() in ('ASME B16.5', 'B16.5'):
+        item['standard'] = None
 
     # Standard: EN 1514-2 for PN-rated; B16.47 always enforced for ≥26" NPS (even if
     # customer stated B16.20 — GGPL convention overrides customer spec for large bore)
@@ -780,12 +790,12 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         else:
             # BHN is mandatory on all RTJ gaskets (ASME B16.20)
             flags.append(
-                f'RTJ BHN hardness not known for "{norm_moc}" — confirm BHN value with customer (ASME B16.20)'
+                f'Missing critical field: BHN hardness — not known for "{norm_moc}", confirm with customer (ASME B16.20)'
             )
     elif item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec'):
         item['rtj_hardness_spec'] = f"{int(item['rtj_hardness_bhn'])} BHN HARDNESS"
     elif not item.get('rtj_hardness_bhn') and not item.get('rtj_hardness_spec') and not norm_moc:
-        flags.append('RTJ BHN hardness not specified — confirm with customer (ASME B16.20)')
+        flags.append('Missing critical field: BHN hardness not specified — confirm with customer (ASME B16.20)')
 
     # Validate supplied BHN does not exceed material maximum (ASME B16.20)
     if norm_moc and item.get('rtj_hardness_bhn'):
@@ -1258,7 +1268,11 @@ def apply_rules(item: dict) -> dict:
 
     # --- Critical field validation — varies by type ---
     if gasket_type == 'RTJ':
-        crit = ['size', 'rating', 'moc', 'ring_no']
+        # Ring number uniquely identifies size+rating — if present, size and rating are not required
+        if item.get('ring_no'):
+            crit = ['moc']
+        else:
+            crit = ['size', 'rating', 'moc']
     elif gasket_type == 'KAMM':
         # OD/ID KAMM: check od_mm + id_mm + moc (moc built from sw_winding_material by rules engine)
         # NPS KAMM: check size + rating + moc

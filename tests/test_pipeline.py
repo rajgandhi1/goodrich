@@ -816,6 +816,47 @@ def test_spw_special_egalv():
     print(f'  All {len(cases)} E.GALV special-field cases passed ✓')
 
 
+def test_spw_matl_labels():
+    """MATL: field labels, structured catalog descriptions, and inch thickness rounding."""
+    from core.regex_extractor import regex_extract
+
+    def _run(desc):
+        rx = regex_extract(desc)
+        item = dict(rx)
+        item['description'] = desc
+        item['quantity'] = 1
+        item['uom'] = 'NOS'
+        processed = apply_rules(item)
+        return format_description(processed), processed
+
+    cases = [
+        # Structured MATL: labels with FLEX INHIB filler and inch thickness
+        (
+            '3.GASKET:SPIRAL WOUNDTYPE:SPIRAL WOUND PIPE SIZE:2 IN CLASS:150LB SPIRAL WOUND '
+            'THCK:0.175 IN WINDING MATL:316L SS FILLER MATL:GRAPHITE CENTERING RING MATL:316L SS '
+            'INNERING RING MATL:316L SS STYLE:FLEXITALLIC SPEC:ASM E B 16.21 SIZE:2 IN 2 IN GASKET '
+            '150 CLASS FF SPWD 316L WINDINGS W/FLEX INHIB GRAPHITE FILLER 316L INNER CENTERING RING '
+            'ASME B16.5 & B16.20 Manufacturer(MA) - RML',
+            'SIZE : 2" X 150# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH FLEXIBLE INHIBITED GRAPHITE FILLER + SS316L INNER RING & SS316L OUTER RING, ASME B16.20',
+        ),
+        # Catalog colon-label style with S-150 rating, zinc-plated inner ring
+        (
+            'SPIRAL WOUND GASKET CWR S-150 4", Filler: graphite or PTFE, winding: AISI 304 , Inner Ring: zinc-plated carbon steel',
+            'SIZE : 4" X 150# X 4.5MM THK, SS304 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + ZINC PLATED CARBON STEEL INNER RING, ASME B16.20',
+        ),
+    ]
+
+    for i, (desc, expected) in enumerate(cases):
+        got, processed = _run(desc)
+        assert got == expected, (
+            f'\nCase {i+1} failed:'
+            f'\n  Input:    {desc[:80]}...'
+            f'\n  Expected: {expected}'
+            f'\n  Got:      {got}'
+        )
+    print(f'  All {len(cases)} MATL-label / catalog-label cases passed ✓')
+
+
 if __name__ == '__main__':
     print('\nRunning pipeline tests...\n')
     tests = [
@@ -829,6 +870,7 @@ if __name__ == '__main__':
         test_spw_nps_class_format,
         test_spw_compact_formats,
         test_spw_special_egalv,
+        test_spw_matl_labels,
         test_rtj_formatter,
         test_kamm_formatter,
         test_isk_formatter,
