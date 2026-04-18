@@ -51,9 +51,18 @@ _ISK_RTJ_RE = re.compile(
 )
 
 
+_SW_RING_RE = re.compile(
+    r'\bINNER\s+RING\b|\bOUTER\s+RING\b|\bCENTERING\s+RING\b|\bI/R\b|\bO/R\b',
+    re.IGNORECASE,
+)
+
+
 def _detect_type(desc: str) -> str:
     """Detect gasket type from keywords. Returns type string."""
     if _SW_RE.search(desc):
+        return 'SPIRAL_WOUND'
+    # Inner/outer ring always implies spiral wound
+    if _SW_RING_RE.search(desc):
         return 'SPIRAL_WOUND'
     if _KAMM_RE.search(desc):
         return 'KAMM'

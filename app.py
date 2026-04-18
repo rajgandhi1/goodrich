@@ -856,7 +856,7 @@ with tab_email:
         label_visibility='visible',
     )
     st.caption(_wl_hint)
-    if st.button('⚡  Process & Add to List', type='primary', width="stretch", key='process_email_btn'):
+    if st.button('⚡  Process & Add to List', type='primary', key='process_email_btn'):
         if email_text.strip():
             raw_items = parse_email_text(email_text)
             if _process_and_append(raw_items):
@@ -871,7 +871,7 @@ with tab_excel:
         help='Supports multi-sheet enquiry files',
     )
     st.caption(_wl_hint)
-    if st.button('⚡  Process & Add to List', type='primary', width="stretch", key='process_excel_btn'):
+    if st.button('⚡  Process & Add to List', type='primary', key='process_excel_btn'):
         if uploaded_file:
             raw_items = parse_excel_file(uploaded_file.read())
             if _process_and_append(raw_items):
@@ -1118,16 +1118,16 @@ if st.session_state.working_items:
         st.caption('When you are happy with the working list, click below to do a final review before committing to history.')
         gen_col, _ = st.columns([3, 7])
         with gen_col:
-            if st.button('📋  Generate Enquiry', type='primary', width="stretch", key='gen_enquiry_btn'):
+            if st.button('📋  Generate Enquiry', type='primary', key='gen_enquiry_btn'):
                 st.session_state._show_confirm = True
                 st.rerun()
     else:
         st.markdown(f'**Final Verification** — {len(items)} items · review before saving to history.')
-        st.dataframe(_build_preview_df(items), width="stretch", hide_index=True)
+        st.dataframe(_build_preview_df(items), hide_index=True)
 
         conf_c1, conf_c2, _ = st.columns([2, 1.5, 6])
         with conf_c1:
-            if st.button('✅  Confirm & Save to History', type='primary', key='confirm_save_btn', width="stretch"):
+            if st.button('✅  Confirm & Save to History', type='primary', key='confirm_save_btn'):
                 # Build and store Excel
                 excel_bytes = build_excel(items, customer=customer, project_ref=project_ref)
                 filename = f"quote_{project_ref or customer or 'output'}.xlsx".replace(' ', '_')
@@ -1157,7 +1157,7 @@ if st.session_state.working_items:
                 st.session_state._show_confirm = False
                 st.rerun()
         with conf_c2:
-            if st.button('Cancel', key='cancel_confirm_btn', type='secondary', width="stretch"):
+            if st.button('Cancel', key='cancel_confirm_btn', type='secondary'):
                 st.session_state._show_confirm = False
                 st.rerun()
 
@@ -1190,7 +1190,7 @@ if st.session_state.get('_last_excel'):
             width="stretch",
         )
     with new_col:
-        if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn', width="stretch"):
+        if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn'):
             st.session_state.pop('_last_excel', None)
             st.session_state.pop('_last_filename', None)
             st.rerun()

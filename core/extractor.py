@@ -226,6 +226,12 @@ def _merge_results(regex_result: dict, llm_result: dict | None) -> dict:
                 merged[field] = llm_val
             else:
                 merged[field] = regex_val or 'SOFT_CUT'
+            # Inner/outer ring always means spiral wound — override any misclassification
+            llm_ir = llm_result.get('sw_inner_ring') if llm_result else None
+            llm_or = llm_result.get('sw_outer_ring') if llm_result else None
+            if (regex_result.get('sw_inner_ring') or llm_ir or
+                    regex_result.get('sw_outer_ring') or llm_or):
+                merged[field] = 'SPIRAL_WOUND'
         elif field == 'size_type':
             # Prefer regex unless it's UNKNOWN and LLM has something
             if regex_val and regex_val != 'UNKNOWN':
