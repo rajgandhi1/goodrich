@@ -3,7 +3,6 @@ Gasket Quote Processor — Streamlit MVP
 Soft cut & spiral wound gaskets.
 """
 import streamlit as st
-import streamlit.components.v1 as _components
 import pandas as pd
 
 from core.parser import parse_email_text, parse_excel_file
@@ -1268,17 +1267,17 @@ st.markdown(f"""
 
 # Attach click handlers via iframe (Streamlit CSP blocks inline onclick attrs)
 # Panel open/close state is stored in sessionStorage so it survives Streamlit reruns.
-_components.html("""
+st.html("""
 <script>
 (function attach() {
-  var fab = parent.document.getElementById('gq-fab');
-  var panel = parent.document.getElementById('gq-chat-panel');
-  var closeBtn = parent.document.getElementById('gq-chat-close');
-  var body = parent.document.getElementById('gq-chat-body');
+  var fab = document.getElementById('gq-fab');
+  var panel = document.getElementById('gq-chat-panel');
+  var closeBtn = document.getElementById('gq-chat-close');
+  var body = document.getElementById('gq-chat-body');
   if (!fab || !panel) { setTimeout(attach, 100); return; }
 
   // Restore open state from sessionStorage (survives Streamlit reruns)
-  if (parent.sessionStorage.getItem('gq_chat_open') === '1') {
+  if (sessionStorage.getItem('gq_chat_open') === '1') {
     panel.classList.add('gqcp-open');
     fab.innerHTML = '&#10005;';
     if (body) body.scrollTop = body.scrollHeight;
@@ -1287,20 +1286,20 @@ _components.html("""
   fab.onclick = function() {
     var open = panel.classList.toggle('gqcp-open');
     fab.innerHTML = open ? '&#10005;' : '&#128172;';
-    parent.sessionStorage.setItem('gq_chat_open', open ? '1' : '0');
+    sessionStorage.setItem('gq_chat_open', open ? '1' : '0');
     if (open && body) body.scrollTop = body.scrollHeight;
   };
   if (closeBtn) {
     closeBtn.onclick = function() {
       panel.classList.remove('gqcp-open');
       fab.innerHTML = '&#128172;';
-      parent.sessionStorage.setItem('gq_chat_open', '0');
+      sessionStorage.setItem('gq_chat_open', '0');
     };
   }
   if (body) body.scrollTop = body.scrollHeight;
 })();
 </script>
-""", height=0)
+""", unsafe_allow_javascript=True)
 
 if _api_ok:
     _q = st.chat_input('Ask about gaskets…', key='float_chat')
