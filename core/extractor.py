@@ -143,7 +143,7 @@ async def _llm_extract_single_async(
     hint_str = ', '.join(hint_parts) if hint_parts else 'none'
 
     # Select 4 few-shot examples relevant to THIS item
-    examples = select_few_shot_examples(desc, n=4)
+    examples = select_few_shot_examples(desc, n=2)
     examples_text = '\n'.join(
         f'Input: "{e["input"]}"\nOutput: "{e["output"]}"'
         for e in examples
@@ -166,7 +166,7 @@ async def _llm_extract_single_async(
                     ],
                     temperature=0.1,
                     response_format={'type': 'json_object'},
-                    max_tokens=500,
+                    max_tokens=250,
                 )
                 data = json.loads(resp.choices[0].message.content)
                 # Validate minimal structure
@@ -345,13 +345,15 @@ def extract_batch(items: list[dict], progress_cb=None) -> list[dict]:
     for desc in uncached:
         rx = regex_extract(desc)
         regex_results[desc] = rx
-        if rx['confidence'] == 'HIGH':
-            # Done — no LLM needed
+        if rx['confidence'] in ('HIGH', 'MEDIUM'):
+            # HIGH: all critical fields found — no LLM needed
+            # MEDIUM: only 1 critical field missing; LLM rarely recovers
+            # a missing MOC/winding that isn't in the text, so skip LLM
             cache[desc] = rx
         else:
             need_llm.append(desc)
 
-    # Report progress for regex HIGH items
+    # Report progress for regex HIGH/MEDIUM items
     high_count = len(uncached) - len(need_llm)
     if progress_cb and high_count > 0:
         progress_cb(len(cache), total)
