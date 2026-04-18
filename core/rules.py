@@ -574,7 +574,7 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     if filler == 'FLEXIBLE INHIBITED GRAPHITE' and not item.get('special'):
         item['special'] = 'FLEXIBLE INHIBITED GRAPHITE FILLER'
 
-    # Build MOC string if not already set
+    # Build MOC string from component fields
     if not item.get('moc') and winding_mat:
         item['moc'] = _build_sw_moc(winding_mat, filler, inner_ring, outer_ring)
     elif not item.get('moc') and not grade_flag_fired:
@@ -837,6 +837,7 @@ def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
     item['sw_outer_ring'] = outer_ring or None
     item['sw_inner_ring'] = inner_ring or None
 
+    # Build MOC string from component fields (moc is always cleared before apply_rules for KAMM)
     if not item.get('moc') and winding_mat:
         if inner_ring and outer_ring:
             item['moc'] = f'{winding_mat} KAMMPROFILE GASKET WITH {filler} FILLER + {inner_ring} INNER RING & {outer_ring} OUTER RING'

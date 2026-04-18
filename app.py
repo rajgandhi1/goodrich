@@ -705,9 +705,9 @@ def _editor_fragment(items, display_indices):
             base['isk_washer_material']  = row['ISK Washers'] or None
             base['kamm_core_material']   = row['KAMM Core'] or None
             base['kamm_surface_material']= row['KAMM Surface'] or None
-            if base.get('gasket_type') == 'SPIRAL_WOUND' and any([
-                row['SW Winding'], row['SW Filler'], row['SW Outer Ring'], row['SW Inner Ring']
-            ]):
+            # For SPW/KAMM, always clear MOC so apply_rules rebuilds it from
+            # the current component fields (winding, filler, inner/outer ring).
+            if base.get('gasket_type') in ('SPIRAL_WOUND', 'KAMM'):
                 base['moc'] = None
             base['quantity']           = row['Qty'] or base.get('quantity')
             base['uom']                = row['UoM'] or 'NOS'
