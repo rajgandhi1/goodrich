@@ -141,6 +141,11 @@ _PACKED_SIZE_GASKET_RE = re.compile(
 _MIXED_FRAC_RE = re.compile(r'\b(\d+)\s*[-\s]\s*(\d+)/(\d+)\s*["\s]', re.IGNORECASE)
 # "2.1/16" pattern (API flanges)
 _API_FRAC_RE = re.compile(r'\b(\d+)\.(\d+)/(\d+)["\s]', re.IGNORECASE)
+# Bare fractional decimal inch — no " suffix, appears between commas: ",0.875,"
+# Matches sub-2" decimals (0.125–1.875) to avoid confusing with ratings/thicknesses
+_BARE_FRAC_INCH_RE = re.compile(
+    r'(?:^|,)\s*((?:0|1)\.\d{2,4})\s*(?:,|$)'
+)
 
 
 def _extract_size(desc: str, gasket_type: str) -> dict:
@@ -268,6 +273,15 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         result['size_type'] = 'NPS'
         return result
 
+    # 9. Bare fractional decimal (no " suffix) between commas — e.g. ",0.875," in row data
+    m = _BARE_FRAC_INCH_RE.search(desc)
+    if m:
+        val = float(m.group(1))
+        if 0.125 <= val <= 1.875:
+            result['size'] = f'{val}"'
+            result['size_type'] = 'NPS'
+            return result
+
     return result
 
 
@@ -292,6 +306,10 @@ _RATING_INCL_RE = re.compile(
 # "1500 PSI" pattern
 _RATING_PSI_RE = re.compile(
     rf'\b({_ASME_CLASSES})\s*PSI\b', re.IGNORECASE
+)
+# "300RF" or "150FF" — ASME class with face type suffix directly appended (no space/# needed)
+_RATING_FACE_RE = re.compile(
+    rf'\b({_ASME_CLASSES})\s*(?:RF|FF|RTJ|RJ)\b', re.IGNORECASE
 )
 
 
@@ -321,6 +339,11 @@ def _extract_rating(desc: str) -> str | None:
 
     # PSI
     m = _RATING_PSI_RE.search(upper)
+    if m:
+        return f'{m.group(1)}#'
+
+    # "300RF" / "150FF" — class with face-type suffix, no # symbol
+    m = _RATING_FACE_RE.search(upper)
     if m:
         return f'{m.group(1)}#'
 
@@ -438,7 +461,10 @@ _SPECIAL_KEYWORDS = re.compile(
     r'\bLETHAL\b|\bEIL\s+APPROVED\b|\bSERIES\s+[AB]\b|'
     r'\bAS\s+PER\s+DRAWING\b|\bAS\s+PER\s+DRG\b|'
     r'\bE\.?GALV(?:ANIZ(?:ED|ING)|ANIS(?:ED|ING))?\b|'
-    r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b',
+    r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b|'
+    r'\bEPOXY[\s\-]?COAT(?:ED|ING)?\b|'
+    r'\bZINC[\s\-]?COAT(?:ED|ING)?\b|\bGALVAN(?:IZ|IS)(?:ED|ING)\b|'
+    r'\bPHOSPHATE[\s\-]?COAT(?:ED|ING)?\b|\bNICKEL[\s\-]?PLAT(?:ED|ING)?\b',
     re.IGNORECASE,
 )
 
@@ -447,6 +473,14 @@ _EGALV_RE = re.compile(
     r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b|\bE\.?GALV(?:ANIZ(?:ED|ING)|ANIS(?:ED|ING))?\b',
     re.IGNORECASE,
 )
+# Normalise coating/surface-treatment keywords to GGPL standard form
+_COATING_NORMS = [
+    (re.compile(r'\bEPOXY[\s\-]?COAT(?:ED|ING)?\b', re.IGNORECASE), 'EPOXY COATED'),
+    (re.compile(r'\bZINC[\s\-]?COAT(?:ED|ING)?\b', re.IGNORECASE), 'ZINC COATED'),
+    (re.compile(r'\bGALVAN(?:IZ|IS)(?:ED|ING)\b', re.IGNORECASE), 'GALVANISED'),
+    (re.compile(r'\bPHOSPHATE[\s\-]?COAT(?:ED|ING)?\b', re.IGNORECASE), 'PHOSPHATE COATED'),
+    (re.compile(r'\bNICKEL[\s\-]?PLAT(?:ED|ING)?\b', re.IGNORECASE), 'NICKEL PLATED'),
+]
 
 
 def _extract_face_type(desc: str) -> str | None:
@@ -477,6 +511,11 @@ def _extract_special(desc: str) -> str | None:
         token = m.strip()
         if _EGALV_RE.fullmatch(token):
             token = 'E.GALV'
+        else:
+            for pat, replacement in _COATING_NORMS:
+                if pat.fullmatch(token):
+                    token = replacement
+                    break
         normalised.append(token)
     return ', '.join(normalised)
 
@@ -496,15 +535,44 @@ _SW_FILLER_WITH_RE = re.compile(
     r'WITH\s+([\w\s]+?)\s+FILL(?:ER|ED)?\s*(\([^)]+\))?',
     re.IGNORECASE,
 )
-# Inner ring: "SS316 INNER RING" / "SS316 I/R" / "I/R SS316" / "INNER RING SS316"
+# Inner ring: "SS316 INNER RING" / "SS316 I/R" / "I/R SS316" / "INNER RING SS316" / "IR SS316" / "SS316 IR"
 _SW_IR_RE = re.compile(
-    r'([\w\s]+?)\s+(?:INNER\s+RING|I/R)\b'
-    r'|\b(?:INNER\s+RING|I/R)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
+    r'([\w\s]+?)\s+(?:INNER\s+RING|I/R|\bIR\b)\b'
+    r'|\b(?:INNER\s+RING|I/R|IR)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
     re.IGNORECASE,
 )
-# Outer ring: "CS OUTER RING" or "CS O/R" or "CS CENTERING RING"
+# Outer ring: "CS OUTER RING" / "CS O/R" / "CS CENTERING RING" / "CS CR" / "CR CS"
 _SW_OR_RE = re.compile(
-    r'([\w\s]+?)\s+(?:OUTER\s+RING|O/R|CENTERING(?:\s+RING)?)\b',
+    r'([\w\s]+?)\s+(?:OUTER\s+RING|O/R|CENTERING(?:\s+RING)?|\bCR\b)\b'
+    r'|\b(?:OUTER\s+RING|O/R|CENTERING(?:\s+RING)?|CR)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
+    re.IGNORECASE,
+)
+# Filler brand names that may appear quoted/standalone after FILL keyword
+# e.g. "GRAPHITE FILL 'FLEXICARB'" → FLEXIBLE GRAPHITE
+_FILLER_BRAND_RE = re.compile(
+    r"['\"]?(FLEXICARB|FLEXI[\s\-]CARB|SIGRAFLEX|GRAFOIL|THERMICULITE|PAPYEX)\b['\"]?",
+    re.IGNORECASE,
+)
+
+# "CR/IR <material>" — shared material for both centering ring (outer) and inner ring
+_SW_CR_IR_RE = re.compile(
+    r'\bCR\s*/\s*IR\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
+    re.IGNORECASE,
+)
+# Keyword-before-material outer ring: "OUTER RING CARBON STEEL" / "O/R CS"
+# Captures 1–3 word material after keyword (handles CARBON STEEL, SOFT IRON, etc.)
+_SW_OR_AFTER_RE = re.compile(
+    r'\b(?:OUTER\s+RING|O/R|CENTERING(?:\s+RING)?|CR)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n]|$))',
+    re.IGNORECASE,
+)
+# Words that indicate a coating/treatment, NOT a ring material
+_NON_RING_MATERIAL_RE = re.compile(
+    r'\b(GALVANI[SZ]\w*|ELECTRO|EPOXY|PHOSPHATE|COAT(?:ED|ING)?|PLAT(?:ED|ING)?|TREATED|PAINTED)\b',
+    re.IGNORECASE,
+)
+# Keyword-before-material inner ring: "INNER RING SS304" / "I/R SS316" / "IR 316L"
+_SW_IR_AFTER_RE = re.compile(
+    r'\b(?:INNER\s+RING|I/R|IR)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n&+]|$|\b(?:OUTER|O/R)\b))',
     re.IGNORECASE,
 )
 # Winding material: SS316/SS304/etc before "SPIRAL WOUND" or standalone
@@ -578,6 +646,13 @@ def _extract_sw_fields(desc: str) -> dict:
         result['sw_inner_ring'] = _norm_ring_material(inout.group(1))
         result['sw_outer_ring'] = _norm_ring_material(inout.group(2))
 
+    # "CR/IR 316L" — centering ring (outer) and inner ring share one material
+    cr_ir = _SW_CR_IR_RE.search(upper)
+    if cr_ir:
+        mat = _norm_ring_material(cr_ir.group(1))
+        result['sw_inner_ring'] = result['sw_inner_ring'] or mat
+        result['sw_outer_ring'] = result['sw_outer_ring'] or mat
+
     # Winding material: look for material before "SPIRAL WOUND"
     if not result['sw_winding_material']:
         m = _SW_WINDING_BEFORE_RE.search(upper)
@@ -619,22 +694,45 @@ def _extract_sw_fields(desc: str) -> dict:
                 elif 'PTFE' in upper or 'TEFLON' in upper:
                     result['sw_filler'] = 'PTFE'
 
-    # Inner ring (only if not already set by INOUT= pattern)
-    if not result['sw_inner_ring']:
-        m = _SW_IR_RE.search(upper)
-        if m:
-            raw = (m.group(1) or m.group(2) or '').strip()
-            # Take last material-like token
-            mat = _norm_ring_material(raw.split()[-1] if raw else None)
-            result['sw_inner_ring'] = mat
+    # Override with specific filler brand name if present (e.g. 'FLEXICARB' → FLEXIBLE GRAPHITE)
+    bm = _FILLER_BRAND_RE.search(desc)
+    if bm:
+        brand_resolved = _norm_filler_material(bm.group(1).replace('-', ' ').upper())
+        if brand_resolved:
+            result['sw_filler'] = brand_resolved
 
-    # Outer ring (only if not already set by INOUT= pattern)
+    # Inner ring (only if not already set by INOUT= / CR-IR pattern)
+    if not result['sw_inner_ring']:
+        # Try keyword-before-material first ("INNER RING SS304", "I/R 316L")
+        m = _SW_IR_AFTER_RE.search(upper)
+        if m:
+            mat = _norm_ring_material(m.group(1).strip().split()[0])  # first token only
+            result['sw_inner_ring'] = mat
+        if not result['sw_inner_ring']:
+            # Fall back to material-before-keyword ("SS304 INNER RING")
+            m = _SW_IR_RE.search(upper)
+            if m:
+                raw = (m.group(1) or m.group(2) or '').strip()
+                mat = _norm_ring_material(raw.split()[-1] if raw else None)
+                result['sw_inner_ring'] = mat
+
+    # Outer ring (only if not already set by INOUT= / CR-IR pattern)
     if not result['sw_outer_ring']:
-        m = _SW_OR_RE.search(upper)
+        # Try keyword-before-material first ("OUTER RING CARBON STEEL", "O/R CS")
+        m = _SW_OR_AFTER_RE.search(upper)
         if m:
             raw = m.group(1).strip()
-            mat = _norm_ring_material(raw.split()[-1] if raw else None)
-            result['sw_outer_ring'] = mat
+            # Skip if captured text is a coating/treatment word (e.g. ELECTRO GALVANIZED)
+            if not _NON_RING_MATERIAL_RE.search(raw):
+                mat = _norm_ring_material(raw) or _norm_ring_material(raw.split()[-1])
+                result['sw_outer_ring'] = mat
+        if not result['sw_outer_ring']:
+            # Fall back to material-before-keyword ("CS OUTER RING")
+            m = _SW_OR_RE.search(upper)
+            if m:
+                raw = (m.group(1) or '').strip()
+                mat = _norm_ring_material(raw.split()[-1] if raw else None)
+                result['sw_outer_ring'] = mat
 
     # "inner & outer ring" with shared material: "SS316 inner & outer ring"
     shared_re = re.search(

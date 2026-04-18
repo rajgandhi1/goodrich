@@ -37,7 +37,7 @@ Sl.No	Line No	Release No	Notes	Quantity	Inv UoM
 
 # Expected GGPL descriptions for Neoprene items (from completed WABAG quote)
 EXPECTED_NEOPRENE = {
-    '0.5"':  'SIZE : 0.5" X 150# X 3MM THK ,NEOPRENE ,RF ,ASME B16.21',
+    '0.5"':  'SIZE : 1/2" X 150# X 3MM THK ,NEOPRENE ,RF ,ASME B16.21',
     '1"':    'SIZE : 1" X 150# X 3MM THK ,NEOPRENE ,RF ,ASME B16.21',
     '6"':    'SIZE : 6" X 150# X 3MM THK ,NEOPRENE ,RF ,ASME B16.21',
 }
@@ -732,6 +732,48 @@ def test_spw_nps_class_format():
     print(f'  All {len(cases)} SPW NPS×CLASS format cases passed ✓')
 
 
+def test_spw_compact_formats():
+    """Compact/abbreviated SPW descriptions: bare decimal size, FLEXICARB brand,
+    EPOXY COATED special, CR/IR shared ring material, 300RF rating format."""
+    from core.regex_extractor import regex_extract
+
+    def _run(desc):
+        rx = regex_extract(desc)
+        item = dict(rx)
+        item['description'] = desc
+        item['quantity'] = 1
+        item['uom'] = 'NOS'
+        processed = apply_rules(item)
+        return format_description(processed), processed
+
+    cases = [
+        # Bare decimal size 0.875 → 7/8", FLEXICARB brand → FLEXIBLE GRAPHITE,
+        # EPOXY COATED → special, OUTER RING <material after keyword>
+        (
+            "600 RF ,0.875,API 601 600 # SPIRAL WOUND GRAPHITE FILL 'FLEXICARB'"
+            "INNER RING 304 SS OUTER RING CARBON STEEL (EPOXY COATED)",
+            'SIZE : 7/8" X 600# X 4.5MM THK, SS304 SPIRAL WOUND GASKET WITH FLEXIBLE GRAPHITE FILLER'
+            ' + SS304 INNER RING & CS OUTER RING, EPOXY COATED, ASME B16.20',
+        ),
+        # CR/IR shared material, 300RF → 300#, large bore 28" → B16.47
+        (
+            'JOINT SPIRALE 28" 300RF SW CR/IR 316L GRAPHITE ASME B16.20',
+            'SIZE : 28" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER'
+            ' + SS316L INNER RING & SS316L OUTER RING, ASME B16.47',
+        ),
+    ]
+
+    for i, (desc, expected) in enumerate(cases):
+        got, processed = _run(desc)
+        assert got == expected, (
+            f'\nCase {i+1} failed:'
+            f'\n  Input:    {desc}'
+            f'\n  Expected: {expected}'
+            f'\n  Got:      {got}'
+        )
+    print(f'  All {len(cases)} compact SPW format cases passed ✓')
+
+
 def test_spw_special_egalv():
     """E.GALV / electro-galvanising abbreviation extracted into special field
     and rendered between MOC string and standard in GGPL description."""
@@ -785,6 +827,7 @@ if __name__ == '__main__':
         test_softcut_large_bore_rules,
         test_spw_formatter,
         test_spw_nps_class_format,
+        test_spw_compact_formats,
         test_spw_special_egalv,
         test_rtj_formatter,
         test_kamm_formatter,

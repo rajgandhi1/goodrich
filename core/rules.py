@@ -419,6 +419,8 @@ _SW_RING_ALIASES = {
 _SW_FILLER_ALIASES = {
     'FG': 'FLEXIBLE GRAPHITE', 'FLEXIBLE GRAPHITE': 'FLEXIBLE GRAPHITE', 'GRAPHITE': 'GRAPHITE',
     'GRAPH': 'GRAPHITE', 'GR': 'GRAPHITE',
+    'FLEXICARB': 'FLEXIBLE GRAPHITE', 'FLEXI-CARB': 'FLEXIBLE GRAPHITE',
+    'SIGRAFLEX': 'FLEXIBLE GRAPHITE', 'GRAFOIL': 'FLEXIBLE GRAPHITE',
     'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
     # Flexible inhibited graphite (corrosion-inhibited grade — noted explicitly in GGPL descriptions)
     'FLEXIBLE INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
@@ -576,6 +578,15 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # as a note at the end of the description — store in special for formatter to pick up.
     if filler == 'FLEXIBLE INHIBITED GRAPHITE' and not item.get('special'):
         item['special'] = 'FLEXIBLE INHIBITED GRAPHITE FILLER'
+
+    # Infer winding material from ring material when not explicitly stated
+    if not winding_mat and not grade_flag_fired:
+        inferred = inner_ring or outer_ring
+        if inferred and inferred not in ('CS', 'LTCS'):
+            # CS/LTCS rings are always the outer ring only; winding is a different alloy
+            winding_mat = inferred
+            item['sw_winding_material'] = winding_mat
+            applied_defaults.append(f'winding material inferred from ring material: {winding_mat}')
 
     # Build MOC string from component fields
     if not item.get('moc') and winding_mat:

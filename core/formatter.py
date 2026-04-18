@@ -401,11 +401,19 @@ def _isk_components(item: dict) -> str:
     return ' + '.join(parts)
 
 
+# Sub-1" NPS decimal → standard fractional name (0.875 → 7/8 etc.)
+_NPS_DECIMAL_TO_FRAC = {
+    0.125: '1/8', 0.25: '1/4', 0.375: '3/8',
+    0.5: '1/2', 0.75: '3/4', 0.875: '7/8',
+}
+
+
 def _fmt_size(size: str, gtype: str) -> str:
     """Format size string for GGPL descriptions.
     - NB sizes ('25 NB') → kept as '25 NB'
     - DN sizes ('DN 25') → kept as 'DN 25'
     - NPS inch sizes (with or without NPS/INCH/IN label) → 'N"'
+    - Sub-1" decimals → standard fractions: '0.875"' → '7/8"'
     - Mixed fractions → decimal: '1 1/4"' → '1.25"'
     """
     import re as _re
@@ -423,6 +431,13 @@ def _fmt_size(size: str, gtype: str) -> str:
         if sf:
             val = int(sf.group(1)) / int(sf.group(2))
             return f'{_fmt_num(val)}"'
+        # Sub-1" decimal → standard fractional name: "0.875"" → "7/8""
+        dec = _re.match(r'^(0\.\d+)"$', s)
+        if dec:
+            val = float(dec.group(1))
+            frac = _NPS_DECIMAL_TO_FRAC.get(round(val, 3))
+            if frac:
+                return f'{frac}"'
         return s
     # Metric OD/ID strings — pass through unchanged
     if 'MM' in s.upper():
