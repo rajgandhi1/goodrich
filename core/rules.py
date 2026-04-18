@@ -588,16 +588,17 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # No face type for spiral wound
     item['face_type'] = None
 
-    # Standard: EN 1514-2 for PN-rated, ASME B16.20 otherwise
-    if not item.get('standard'):
-        if is_pn_sw:
+    # Standard: EN 1514-2 for PN-rated; B16.47 always enforced for ≥26" NPS (even if
+    # customer stated B16.20 — GGPL convention overrides customer spec for large bore)
+    if is_pn_sw:
+        if not item.get('standard'):
             item['standard'] = 'EN 1514-2'
             applied_defaults.append('standard defaulted to EN 1514-2 (SPW on PN-rated flanges)')
-        elif size_val is not None and size_val >= 26:
-            _set_b1647_standard(item, flags, applied_defaults)
-        else:
-            item['standard'] = 'ASME B16.20'
-            applied_defaults.append('standard defaulted to ASME B16.20')
+    elif size_val is not None and size_val >= 26:
+        _set_b1647_standard(item, flags, applied_defaults)
+    elif not item.get('standard'):
+        item['standard'] = 'ASME B16.20'
+        applied_defaults.append('standard defaulted to ASME B16.20')
 
 
 # ---------------------------------------------------------------------------

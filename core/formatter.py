@@ -412,8 +412,8 @@ def _fmt_size(size: str, gtype: str) -> str:
     # Already has inch symbol — strip any stray 'NPS' label, then convert fraction to decimal
     if '"' in s:
         s = _re.sub(r'\bNPS\b\s*', '', s, flags=_re.IGNORECASE).strip()
-        # Mixed fraction: "1 1/4"" → "1.25""
-        mf = _re.match(r'^(\d+)\s+(\d+)/(\d+)"$', s)
+        # Mixed fraction with space or hyphen: "1 1/4"" or "1-1/4"" → "1.25""
+        mf = _re.match(r'^(\d+)[\s\-]+(\d+)/(\d+)"$', s)
         if mf:
             val = int(mf.group(1)) + int(mf.group(2)) / int(mf.group(3))
             return f'{_fmt_num(val)}"'

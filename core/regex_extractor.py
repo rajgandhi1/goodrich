@@ -123,6 +123,8 @@ _DN_RE = re.compile(r'\bDN[\s\-]*(\d+)\b', re.IGNORECASE)
 _NB_RE = re.compile(r'\b(\d+)\s*NB\b', re.IGNORECASE)
 # NPS explicit: "NPS 6" or "NPS: 6"
 _NPS_EXPLICIT_RE = re.compile(r'\bNPS[\s:]*(\d+(?:\.\d+)?)\b', re.IGNORECASE)
+# NPS suffix: "2 NPS" or "30 NPS" (number before NPS keyword)
+_NPS_SUFFIX_RE = re.compile(r'\b(\d+(?:\.\d+)?)\s+NPS\b', re.IGNORECASE)
 # Inch with quote: 6" or 1.5" or 1-1/2"
 _INCH_QUOTE_RE = re.compile(r'\b(\d+(?:\.\d+)?(?:\s*[-]\s*\d+/\d+)?)\s*"', re.IGNORECASE)
 # "X INCH" or "X IN "
@@ -220,8 +222,16 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         result['size_type'] = 'NPS'
         return result
 
-    # 5. NPS explicit
+    # 5. NPS explicit: "NPS 6"
     m = _NPS_EXPLICIT_RE.search(upper)
+    if m:
+        val = m.group(1)
+        result['size'] = f'{val}"'
+        result['size_type'] = 'NPS'
+        return result
+
+    # 5b. NPS suffix: "2 NPS" or "30 NPS"
+    m = _NPS_SUFFIX_RE.search(upper)
     if m:
         val = m.group(1)
         result['size'] = f'{val}"'
@@ -371,8 +381,18 @@ _THK_LAST_DIM_RE = re.compile(r'[XxX×]\s*(\d+(?:[.,]\d+)?)\s*(?:MM)?\s*$', re.I
 _THK_EURO_RE = re.compile(r'[XxX×]\s*(\d+),(\d+)\s*$', re.IGNORECASE)
 
 
+_THK_DUAL_LAYER_RE = re.compile(
+    r'\d+(?:[.,]\d+)?\s*(?:MM\s+)?THK\s*[+&]\s*\d+(?:[.,]\d+)?\s*(?:MM\s+)?THK',
+    re.IGNORECASE,
+)
+
+
 def _extract_thickness(desc: str) -> float | None:
-    """Extract thickness in mm."""
+    """Extract thickness in mm. Returns None for dual-layer specs like '4.45 THK + 3.2 THK'
+    (winding + ring dimensions) so rules.py can apply the correct standard default."""
+    if _THK_DUAL_LAYER_RE.search(desc):
+        return None
+
     m = _THK_MM_RE.search(desc)
     if m:
         return float(m.group(1).replace(',', '.'))
