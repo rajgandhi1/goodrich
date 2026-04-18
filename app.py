@@ -573,6 +573,7 @@ def _build_rows(items):
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
             'Size':                 item.get('size') or '',
             'Rating':               item.get('rating') or '',
+            'Standard':             item.get('standard') or '',
             'MOC':                  item.get('moc') or '',
             'Face':                 item.get('face_type') or '',
             'Thk (mm)':             item.get('thickness_mm') if item.get('thickness_mm') is not None else None,
@@ -630,6 +631,8 @@ def _editor_fragment(items, display_indices):
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
             'Size':                 st.column_config.TextColumn('Size', width='small'),
             'Rating':               st.column_config.TextColumn('Rating', width='small'),
+            'Standard':             st.column_config.TextColumn('Standard', width='medium',
+                                        help='e.g. ASME B16.20, ASME B16.21, ASME B16.47 (SERIES-A), API 6A'),
             'MOC':                  st.column_config.TextColumn('MOC', width='large'),
             'Face':                 st.column_config.SelectboxColumn('Face', options=FACE_OPTIONS, width='small'),
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
@@ -679,6 +682,7 @@ def _editor_fragment(items, display_indices):
             base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
             base['size']               = row['Size'] or base.get('size')
             base['rating']             = row['Rating'] or base.get('rating')
+            base['standard']           = row['Standard'] or None
             base['moc']                = row['MOC'] or None
             base['face_type']          = row['Face'] or None
             base['thickness_mm']       = row['Thk (mm)'] or None
@@ -1045,11 +1049,12 @@ if st.session_state.working_items:
             bulk_bhn     = bc7.number_input('BHN',       value=0,   min_value=0, step=10,   key='bulk_bhn',
                                             help='0 = no change')
             bulk_uom     = bc8.selectbox('UoM',          ['(no change)'] + UOM_OPTIONS,    key='bulk_uom')
-            bc9, bc10, bc11, bc12 = st.columns(4)
-            bulk_winding = bc9.text_input('SW Winding',     placeholder='e.g. SS316',    key='bulk_winding')
-            bulk_filler  = bc10.text_input('SW Filler',     placeholder='e.g. GRAPHITE', key='bulk_filler')
-            bulk_outer   = bc11.text_input('SW Outer Ring', placeholder='e.g. CS',       key='bulk_outer')
-            bulk_inner   = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',    key='bulk_inner')
+            bc9, bc10, bc11, bc12, bc13 = st.columns(5)
+            bulk_winding  = bc9.text_input('SW Winding',     placeholder='e.g. SS316',              key='bulk_winding')
+            bulk_filler   = bc10.text_input('SW Filler',     placeholder='e.g. GRAPHITE',           key='bulk_filler')
+            bulk_outer    = bc11.text_input('SW Outer Ring', placeholder='e.g. CS',                 key='bulk_outer')
+            bulk_inner    = bc12.text_input('SW Inner Ring', placeholder='e.g. SS316',              key='bulk_inner')
+            bulk_standard = bc13.text_input('Standard',      placeholder='e.g. ASME B16.20',        key='bulk_standard')
 
             if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
                 df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
@@ -1070,6 +1075,7 @@ if st.session_state.working_items:
                     if bulk_filler.strip():            df_bulk.at[idx, 'SW Filler']     = bulk_filler.strip().upper()
                     if bulk_outer.strip():             df_bulk.at[idx, 'SW Outer Ring'] = bulk_outer.strip().upper()
                     if bulk_inner.strip():             df_bulk.at[idx, 'SW Inner Ring'] = bulk_inner.strip().upper()
+                    if bulk_standard.strip():          df_bulk.at[idx, 'Standard']      = bulk_standard.strip()
                 st.session_state['_bulk_df'] = df_bulk
                 st.success(f'Applied to {len(target)} row(s). Click **↻ Update Descriptions** to regenerate.')
 

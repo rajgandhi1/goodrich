@@ -436,7 +436,15 @@ _STANDARD_RE = re.compile(
 _SPECIAL_KEYWORDS = re.compile(
     r'\bFOOD\s+GRADE\b|\bNACE(?:\s+MR[\s\-]?01[\s\-]?75)?\b|'
     r'\bLETHAL\b|\bEIL\s+APPROVED\b|\bSERIES\s+[AB]\b|'
-    r'\bAS\s+PER\s+DRAWING\b|\bAS\s+PER\s+DRG\b',
+    r'\bAS\s+PER\s+DRAWING\b|\bAS\s+PER\s+DRG\b|'
+    r'\bE\.?GALV(?:ANIZ(?:ED|ING)|ANIS(?:ED|ING))?\b|'
+    r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b',
+    re.IGNORECASE,
+)
+
+# Normalise electro-galvanising variations → GGPL standard abbreviation
+_EGALV_RE = re.compile(
+    r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b|\bE\.?GALV(?:ANIZ(?:ED|ING)|ANIS(?:ED|ING))?\b',
     re.IGNORECASE,
 )
 
@@ -462,9 +470,15 @@ def _extract_standard(desc: str) -> str | None:
 
 def _extract_special(desc: str) -> str | None:
     matches = _SPECIAL_KEYWORDS.findall(desc)
-    if matches:
-        return ', '.join(m.strip() for m in matches)
-    return None
+    if not matches:
+        return None
+    normalised = []
+    for m in matches:
+        token = m.strip()
+        if _EGALV_RE.fullmatch(token):
+            token = 'E.GALV'
+        normalised.append(token)
+    return ', '.join(normalised)
 
 
 # ---------------------------------------------------------------------------
@@ -476,14 +490,16 @@ _SW_FILLER_CTX_RE = re.compile(
     r'(\b[\w\s]+?)\s+FILL(?:ER|ED)?\b',
     re.IGNORECASE,
 )
-# "WITH FLEXIBLE GRAPHITE FILLER" or "WITH GRAPHITE FILLER"
+# "WITH FLEXIBLE GRAPHITE FILLER" or "WITH GRAPHITE FILLER(98% PURE GRAPHITE)"
+# Group 1 = base material, Group 2 = optional parenthetical qualifier after FILLER keyword
 _SW_FILLER_WITH_RE = re.compile(
-    r'WITH\s+([\w\s]+?)\s+FILL(?:ER|ED)?',
+    r'WITH\s+([\w\s]+?)\s+FILL(?:ER|ED)?\s*(\([^)]+\))?',
     re.IGNORECASE,
 )
-# Inner ring: "SS316 INNER RING" or "SS316 I/R" or "I/R SS316"
+# Inner ring: "SS316 INNER RING" / "SS316 I/R" / "I/R SS316" / "INNER RING SS316"
 _SW_IR_RE = re.compile(
-    r'([\w\s]+?)\s+(?:INNER\s+RING|I/R)\b|\b(?:I/R)\s+([\w\s]+?)(?=\s+(?:&|AND|\+)|$)',
+    r'([\w\s]+?)\s+(?:INNER\s+RING|I/R)\b'
+    r'|\b(?:INNER\s+RING|I/R)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
     re.IGNORECASE,
 )
 # Outer ring: "CS OUTER RING" or "CS O/R" or "CS CENTERING RING"
@@ -492,10 +508,11 @@ _SW_OR_RE = re.compile(
     re.IGNORECASE,
 )
 # Winding material: SS316/SS304/etc before "SPIRAL WOUND" or standalone
+# Allow optional comma between material and SPIRAL keyword (e.g. "UNS N06625, Spiral wound")
 _SW_WINDING_BEFORE_RE = re.compile(
     r'[,\s](SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|'
     r'HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|DUPLEX|SUPER\s*DUPLEX|'
-    r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+)\s+'
+    r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+)[,\s]+'
     r'(?:SPIRAL|SPRL|SPW)',
     re.IGNORECASE,
 )
@@ -504,6 +521,16 @@ _SW_WINDING_AFTER_RE = re.compile(
     r'WINDING\s+(?:MATERIAL[\s:]*)?'
     r'(SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|'
     r'HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3})',
+    re.IGNORECASE,
+)
+# Compact "316L/GRAPH" or "SS316L/GRAPHITE" — grade slash filler (no space around /)
+_SW_GRADE_SLASH_FILLER_RE = re.compile(
+    r'\b(SS\s*\d{3}\w?|\d{3}\w?)\s*/\s*(GRAPH\w*|PTFE|TEFLON|FG|FLEXIBLE\s+GRAPHITE|MICA|CERAMIC|VERMICULITE)',
+    re.IGNORECASE,
+)
+# Compact "INOUT=316L/CS" — inner/outer ring in one token
+_SW_INOUT_RE = re.compile(
+    r'\bINOUT\s*=\s*(\w+)\s*/\s*(\w+)',
     re.IGNORECASE,
 )
 
@@ -539,56 +566,75 @@ def _extract_sw_fields(desc: str) -> dict:
     }
     upper = desc.upper()
 
+    # Compact "316L/GRAPH" or "SS316L/GRAPHITE" — grade/filler slash notation
+    gsf = _SW_GRADE_SLASH_FILLER_RE.search(upper)
+    if gsf:
+        result['sw_winding_material'] = _norm_ring_material(gsf.group(1))
+        result['sw_filler'] = _norm_filler_material(gsf.group(2))
+
+    # Compact "INOUT=316L/CS" — inner ring / outer ring
+    inout = _SW_INOUT_RE.search(upper)
+    if inout:
+        result['sw_inner_ring'] = _norm_ring_material(inout.group(1))
+        result['sw_outer_ring'] = _norm_ring_material(inout.group(2))
+
     # Winding material: look for material before "SPIRAL WOUND"
-    m = _SW_WINDING_BEFORE_RE.search(upper)
-    if m:
-        result['sw_winding_material'] = _norm_ring_material(m.group(1))
-    else:
-        m = _SW_WINDING_AFTER_RE.search(upper)
+    if not result['sw_winding_material']:
+        m = _SW_WINDING_BEFORE_RE.search(upper)
         if m:
             result['sw_winding_material'] = _norm_ring_material(m.group(1))
         else:
-            # Try first SS/alloy mention as winding material
-            m = re.search(
-                r'\b(SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
-                r'ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|'
-                r'DUPLEX\s*SS?\d*|SUPER\s*DUPLEX)',
-                upper,
-            )
+            m = _SW_WINDING_AFTER_RE.search(upper)
             if m:
                 result['sw_winding_material'] = _norm_ring_material(m.group(1))
+            else:
+                # Try first SS/alloy/UNS mention as winding material
+                m = re.search(
+                    r'\b(SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
+                    r'ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|'
+                    r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+|'
+                    r'DUPLEX\s*SS?\d*|SUPER\s*DUPLEX)',
+                    upper,
+                )
+                if m:
+                    result['sw_winding_material'] = _norm_ring_material(m.group(1))
 
     # Filler
-    m = _SW_FILLER_WITH_RE.search(upper)
-    if m:
-        filler_raw = m.group(1).strip()
-        # Clean: take last meaningful words (remove "FLEXIBLE", keep material)
-        result['sw_filler'] = _norm_filler_material(filler_raw)
-    else:
-        m = _SW_FILLER_CTX_RE.search(upper)
+    if not result['sw_filler']:
+        m = _SW_FILLER_WITH_RE.search(upper)
         if m:
-            result['sw_filler'] = _norm_filler_material(m.group(1).strip().split()[-1])
+            filler_raw = m.group(1).strip()
+            paren = (m.group(2) or '').strip()  # e.g. "(98% PURE GRAPHITE)"
+            # Normalize the base material name, then re-attach any parenthetical
+            base = _norm_filler_material(filler_raw)
+            result['sw_filler'] = (f'{base} {paren}'.strip()) if (base and paren) else base
         else:
-            # Common standalone: "GRAPHITE" in SW context
-            if 'GRAPHITE' in upper:
-                result['sw_filler'] = 'GRAPHITE'
-            elif 'PTFE' in upper or 'TEFLON' in upper:
-                result['sw_filler'] = 'PTFE'
+            m = _SW_FILLER_CTX_RE.search(upper)
+            if m:
+                result['sw_filler'] = _norm_filler_material(m.group(1).strip().split()[-1])
+            else:
+                # Common standalone: "GRAPHITE" in SW context
+                if 'GRAPHITE' in upper:
+                    result['sw_filler'] = 'GRAPHITE'
+                elif 'PTFE' in upper or 'TEFLON' in upper:
+                    result['sw_filler'] = 'PTFE'
 
-    # Inner ring
-    m = _SW_IR_RE.search(upper)
-    if m:
-        raw = (m.group(1) or m.group(2) or '').strip()
-        # Take last material-like token
-        mat = _norm_ring_material(raw.split()[-1] if raw else None)
-        result['sw_inner_ring'] = mat
+    # Inner ring (only if not already set by INOUT= pattern)
+    if not result['sw_inner_ring']:
+        m = _SW_IR_RE.search(upper)
+        if m:
+            raw = (m.group(1) or m.group(2) or '').strip()
+            # Take last material-like token
+            mat = _norm_ring_material(raw.split()[-1] if raw else None)
+            result['sw_inner_ring'] = mat
 
-    # Outer ring
-    m = _SW_OR_RE.search(upper)
-    if m:
-        raw = m.group(1).strip()
-        mat = _norm_ring_material(raw.split()[-1] if raw else None)
-        result['sw_outer_ring'] = mat
+    # Outer ring (only if not already set by INOUT= pattern)
+    if not result['sw_outer_ring']:
+        m = _SW_OR_RE.search(upper)
+        if m:
+            raw = m.group(1).strip()
+            mat = _norm_ring_material(raw.split()[-1] if raw else None)
+            result['sw_outer_ring'] = mat
 
     # "inner & outer ring" with shared material: "SS316 inner & outer ring"
     shared_re = re.search(

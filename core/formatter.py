@@ -56,11 +56,12 @@ def format_description(item: dict) -> str:
     parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK', moc]
     if face:
         parts.append(face)
-    if standard:
-        parts.append(standard)
-    # Spiral wound only: append special notes (e.g. FLEXIBLE INHIBITED GRAPHITE FILLER)
+    # Spiral wound: special notes (e.g. E.GALV, FLEXIBLE INHIBITED GRAPHITE FILLER)
+    # come between MOC and standard per GGPL convention
     if gtype == 'SPIRAL_WOUND' and special:
         parts.append(special)
+    if standard:
+        parts.append(standard)
 
     # SOFT_CUT uses GGPL's space-comma separator: "...THK ,MOC ,RF ,ASME B16.21"
     # SPIRAL_WOUND keeps the standard comma-space separator

@@ -732,6 +732,48 @@ def test_spw_nps_class_format():
     print(f'  All {len(cases)} SPW NPS×CLASS format cases passed ✓')
 
 
+def test_spw_special_egalv():
+    """E.GALV / electro-galvanising abbreviation extracted into special field
+    and rendered between MOC string and standard in GGPL description."""
+    from core.regex_extractor import regex_extract
+
+    def _run(desc):
+        rx = regex_extract(desc)
+        item = dict(rx)
+        item['description'] = desc
+        item['quantity'] = 1
+        item['uom'] = 'NOS'
+        processed = apply_rules(item)
+        return format_description(processed), processed
+
+    cases = [
+        # Compact customer abbreviation E.GALV
+        ('4", GSKT SPIR WND 300# 4.5T, 316L/GRAPH INOUT=316L/CS E.GALV',
+         'SIZE : 4" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316L INNER RING & CS OUTER RING, E.GALV, ASME B16.20'),
+        # Written out in full
+        ('4" SPW 300# GRAPHITE SS316L/SS316L OUTER RING ELECTRO GALVANIZED',
+         'SIZE : 4" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316L OUTER RING, E.GALV, ASME B16.20'),
+        # Hyphenated form
+        ('4" SPIRAL WOUND 300# SS316L/GRAPHITE, INNER RING SS316L, ELECTRO-GALVANISED',
+         'SIZE : 4" X 300# X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316L INNER RING, E.GALV, ASME B16.20'),
+    ]
+
+    for i, (desc, expected) in enumerate(cases):
+        got, processed = _run(desc)
+        assert processed.get('special') == 'E.GALV', (
+            f'\nCase {i+1}: special field not set to E.GALV'
+            f'\n  Input: {desc}'
+            f'\n  Got special: {processed.get("special")!r}'
+        )
+        assert got == expected, (
+            f'\nCase {i+1} failed:'
+            f'\n  Input:    {desc}'
+            f'\n  Expected: {expected}'
+            f'\n  Got:      {got}'
+        )
+    print(f'  All {len(cases)} E.GALV special-field cases passed ✓')
+
+
 if __name__ == '__main__':
     print('\nRunning pipeline tests...\n')
     tests = [
@@ -743,6 +785,7 @@ if __name__ == '__main__':
         test_softcut_large_bore_rules,
         test_spw_formatter,
         test_spw_nps_class_format,
+        test_spw_special_egalv,
         test_rtj_formatter,
         test_kamm_formatter,
         test_isk_formatter,

@@ -418,6 +418,7 @@ _SW_RING_ALIASES = {
 # Source: Customer Enq - Quote Data - Material .csv (Filler Material section)
 _SW_FILLER_ALIASES = {
     'FG': 'FLEXIBLE GRAPHITE', 'FLEXIBLE GRAPHITE': 'FLEXIBLE GRAPHITE', 'GRAPHITE': 'GRAPHITE',
+    'GRAPH': 'GRAPHITE', 'GR': 'GRAPHITE',
     'EXFOLIATED GRAPHITE': 'GRAPHITE', 'EXPANDED GRAPHITE': 'GRAPHITE',
     # Flexible inhibited graphite (corrosion-inhibited grade — noted explicitly in GGPL descriptions)
     'FLEXIBLE INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
@@ -489,6 +490,8 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
     moc = f'{winding_mat} SPIRAL WOUND GASKET WITH {filler_str}'
     if inner_ring and outer_ring:
         moc += f' + {inner_ring} INNER RING & {outer_ring} OUTER RING'
+    elif inner_ring:
+        moc += f' + {inner_ring} INNER RING'
     elif outer_ring:
         moc += f' + {outer_ring} OUTER RING'
     return moc
