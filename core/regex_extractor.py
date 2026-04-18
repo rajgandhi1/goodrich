@@ -53,7 +53,7 @@ _ISK_RTJ_RE = re.compile(
 
 
 _SW_RING_RE = re.compile(
-    r'\bINNER\s+RING\b|\bOUTER\s+RING\b|\bCENTERING\s+RING\b|\bI/R\b|\bO/R\b',
+    r'\bINNER\s+RING\b|\bOUTER\s+RING\b|\bCENTERING\s+RING\b|\bI/R\b|\bO/R\b|\bI\s+RING\b',
     re.IGNORECASE,
 )
 
@@ -278,6 +278,13 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         result['size_type'] = 'NPS'
         return result
 
+    # 8c. Packed "CL30012"" — size is the digits after the known ASME class
+    m = _RATING_CL_PACKED_RE.search(desc)
+    if m:
+        result['size'] = f'{m.group(2)}"'
+        result['size_type'] = 'NPS'
+        return result
+
     # 9. Bare fractional decimal (no " suffix) between commas — e.g. ",0.875," in row data
     m = _BARE_FRAC_INCH_RE.search(desc)
     if m:
@@ -301,6 +308,10 @@ _RATING_HASH_RE = re.compile(
 # "CL 150" or "CL.150" or "CLASS 300" or "Cl.150"
 _RATING_CL_RE = re.compile(
     rf'\bCL(?:ASS)?[\s.]*({_ASME_CLASSES})\b', re.IGNORECASE
+)
+# Packed "CL30012"" — class rating glued to size with trailing inch mark (e.g. CL30012")
+_RATING_CL_PACKED_RE = re.compile(
+    rf'\bCL({_ASME_CLASSES})(\d+(?:\.\d+)?)"', re.IGNORECASE
 )
 # "PN 10" or "PN16" or "PN 40"
 _RATING_PN_RE = re.compile(r'\bPN[\s\-]*(\d+)\b', re.IGNORECASE)
@@ -338,6 +349,11 @@ def _extract_rating(desc: str) -> str | None:
 
     # CL/CLASS prefix
     m = _RATING_CL_RE.search(upper)
+    if m:
+        return f'{m.group(1)}#'
+
+    # Packed "CL30012"" — extract rating from glued CL+rating+size token
+    m = _RATING_CL_PACKED_RE.search(desc)
     if m:
         return f'{m.group(1)}#'
 
@@ -561,8 +577,8 @@ _SW_FILLER_WITH_RE = re.compile(
 # Inner ring: "SS316 INNER RING" / "SS316 I/R" / "I/R SS316" / "INNER RING SS316" / "IR SS316"
 # Also handles "INNERING RING" (customer typo) and "INNER CENTERING RING" (shared inner+outer ring)
 _SW_IR_RE = re.compile(
-    r'([\w\s]+?)\s+(?:INNER(?:ING)?\s+RING|I/R|\bIR\b)\b'
-    r'|\b(?:INNER(?:ING)?\s+RING|I/R|IR)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
+    r'([\w\s]+?)\s+(?:INNER(?:ING)?\s+RING|I/R|\bIR\b|\bI\s+RING\b)\b'
+    r'|\b(?:INNER(?:ING)?\s+RING|I/R|IR|I\s+RING)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
     re.IGNORECASE,
 )
 # Outer ring: "CS OUTER RING" / "CS O/R" / "CS CENTERING RING" / "CS CR" / "CR CS"
@@ -574,7 +590,7 @@ _SW_OR_RE = re.compile(
 # Filler brand names that may appear quoted/standalone after FILL keyword
 # e.g. "GRAPHITE FILL 'FLEXICARB'" → FLEXIBLE GRAPHITE
 _FILLER_BRAND_RE = re.compile(
-    r"['\"]?(FLEXICARB|FLEXI[\s\-]CARB|SIGRAFLEX|GRAFOIL|THERMICULITE|PAPYEX)\b['\"]?",
+    r"['\"]?(FLEXICARB|FLEXI[\s\-]CARB|SIGRAFLEX|GRAFOIL|GRAFIL|THERMICULITE|PAPYEX)\b['\"]?",
     re.IGNORECASE,
 )
 
@@ -629,7 +645,7 @@ _NON_RING_MATERIAL_RE = re.compile(
 )
 # Keyword-before-material inner ring: "INNER RING SS304" / "I/R SS316" / "IR 316L" / "INNERING RING SS316L"
 _SW_IR_AFTER_RE = re.compile(
-    r'\b(?:INNER(?:ING)?\s+RING|I/R|IR)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n&+]|$|\b(?:OUTER|O/R|CENTERING)\b))',
+    r'\b(?:INNER(?:ING)?\s+RING|I/R|IR|I\s+RING)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n&+]|$|\b(?:OUTER|O/R|CENTERING)\b))',
     re.IGNORECASE,
 )
 # Winding material: SS316/SS304/etc before "SPIRAL WOUND" or standalone
