@@ -964,7 +964,10 @@ _ISK_CORE_RE = re.compile(
 
 
 def _recover_isk_core(item: dict) -> None:
-    """If core material appears in raw description but is absent from special, append it."""
+    """If core material appears in raw description but is absent from special, append it.
+    Skipped when isk_core_material is already populated (regex extractor already handled it)."""
+    if item.get('isk_core_material'):
+        return  # dedicated field already populated — no need to duplicate into special
     raw = (item.get('raw_description') or '').strip()
     special = (item.get('special') or '').upper()
     m = _ISK_CORE_RE.search(raw)
@@ -1020,8 +1023,9 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
         except ValueError:
             pass
 
-    # If LLM failed to extract special, try regex extraction from raw description
-    if not item.get('special'):
+    # If LLM failed to extract special, try regex extraction from raw description.
+    # Skip when regex_extractor already populated the dedicated component fields.
+    if not item.get('special') and not item.get('isk_gasket_material'):
         extracted_special = _extract_isk_special_from_desc(item)
         if extracted_special:
             item['special'] = extracted_special
@@ -1029,6 +1033,11 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     # Normalize common ISK component abbreviations in special field
     if item.get('special'):
         item['special'] = _normalize_isk_special(item['special'])
+
+    # Default seal/gasket material to PTFE SPRING ENERGIZED SEAL if nothing extracted
+    if not item.get('isk_gasket_material') and not item.get('special'):
+        item['isk_gasket_material'] = 'PTFE SPRING ENERGIZED SEAL'
+        applied_defaults.append('ISK gasket material defaulted to PTFE SPRING ENERGIZED SEAL')
 
     # Recover core material the LLM may have dropped (e.g. "316 SS CORE" → appended to special)
     _recover_isk_core(item)

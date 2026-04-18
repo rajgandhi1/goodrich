@@ -123,8 +123,10 @@ def _fmt_rtj(item: dict) -> str:
 
 
 def _fmt_kamm(item: dict) -> str:
-    """SIZE: {size} X {rating} X {thk}MM THK,{moc},{standard}"""
-    moc = item.get('moc')
+    """SIZE : {size} X {rating} X {thk}MM THK,{core} KAMMPROFILE GASKET WITH {surface},{standard}"""
+    # Prefer dedicated KAMM fields; fall back to legacy moc field
+    core = (item.get('kamm_core_material') or item.get('moc') or '').strip().upper()
+    surface = (item.get('kamm_surface_material') or '').strip().upper()
     size = item.get('size')
     rating = item.get('rating')
     standard = item.get('standard')
@@ -133,22 +135,46 @@ def _fmt_kamm(item: dict) -> str:
     if item.get('size_type') == 'OD_ID':
         od = item.get('od_mm')
         id_ = item.get('id_mm')
-        if not (od and id_ and moc):
+        if not (od and id_):
             return ''
         special = (item.get('special') or '').strip()
         dims = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD X {_fmt_num(thk)}MM THK'
+        moc_str = _kamm_moc_str(core, surface)
+        parts = [dims]
         if special:
-            return f'{dims},{special},{moc}'
-        return f'{dims},{moc}'
+            parts.append(f',{special}')
+        if moc_str:
+            parts.append(f',{moc_str}')
+        if standard:
+            parts.append(f',{standard}')
+        return ''.join(parts)
 
-    if not (size and rating and moc):
+    if not (size and rating):
         return ''
     size_str = _fmt_size(size, 'KAMM')
     rating_str = _fmt_rating(rating)
-    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thk)}MM THK,{moc}']
+    moc_str = _kamm_moc_str(core, surface)
+    thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
+    parts = [f'SIZE : {size_str} X {rating_str}{thk_str}']
+    if moc_str:
+        parts.append(f',{moc_str}')
     if standard:
         parts.append(f',{standard}')
     return ''.join(parts)
+
+
+def _kamm_moc_str(core: str, surface: str) -> str:
+    """Build the material string for KAMM: 'SS316 KAMMPROFILE GASKET WITH GRAPHITE FILLER'.
+    If core already contains the fully-formatted string (filled by LLM), return it as-is."""
+    if core and 'KAMMPROFILE' in core:
+        return core  # LLM already produced the full formatted string
+    if core and surface:
+        return f'{core} KAMMPROFILE GASKET WITH {surface} FILLER'
+    if core:
+        return f'{core} KAMMPROFILE GASKET'
+    if surface:
+        return f'KAMMPROFILE GASKET WITH {surface} FILLER'
+    return 'KAMMPROFILE GASKET'
 
 
 def _fmt_dji(item: dict) -> str:
@@ -189,8 +215,8 @@ def _fmt_isk(item: dict) -> str:
     face_type = item.get('face_type') or ''
     standard = item.get('standard') or ''
     fire_safety = (item.get('isk_fire_safety') or '').strip().upper()
-    # Normalize hyphen variants: "NON-FIRE SAFE" → "NON FIRE SAFE"
-    fire_safety = fire_safety.replace('NON-FIRE', 'NON FIRE')
+    # Normalize to always use hyphen: "NON FIRE SAFE" → "NON-FIRE SAFE"
+    fire_safety = fire_safety.replace('NON FIRE SAFE', 'NON-FIRE SAFE')
     # Only include standard in output when explicitly stated by customer (not rules-defaulted),
     # except for STYLE-CS where the standard is always shown (important for large-bore ID)
     std_explicit = item.get('isk_standard_explicit', True)
@@ -204,18 +230,16 @@ def _fmt_isk(item: dict) -> str:
 
     base = f'SIZE: {size_str} X {rating_str}'
 
-    # STYLE-CS: "SIZE: S X R, INSULATING GASKET KIT, STYLE-CS, (SET: ...), face, standard"
+    # STYLE-CS: "SIZE : {size} X {rating} X 3MM THK ,ISK,STYLE-CS (SET:{content}) {standard} ( NON FIRE SAFE )"
+    # This is the GGPL format for TYPE-A insulating gasket kits.
     if isk_style == 'STYLE-CS':
-        out = f'{base}, INSULATING GASKET KIT, STYLE-CS'
-        if special:
-            set_str = special if special.upper().startswith('SET:') else f'SET: {special}'
-            out += f', ({set_str})'
-        # Always include standard for STYLE-CS (needed for large-bore series A/B identification)
-        tail_parts = list(filter(None, [face_type, standard]))
-        if fire_safety:
-            tail_parts.append(f'({fire_safety})')
-        if tail_parts:
-            out += ', ' + ', '.join(tail_parts)
+        size_str = _fmt_size(size, gtype)
+        rating_str = _fmt_rating(rating)
+        set_content = _style_cs_set(item)
+        out = f'SIZE : {size_str} X {rating_str} X 3MM THK ,ISK,STYLE-CS (SET:{set_content})'
+        if standard:
+            out += f' {standard}'
+        out += ' ( NON FIRE SAFE )'
         return out
 
     # STYLE-N and equivalent parenthesized styles (FCS, TYPE-D):
@@ -238,13 +262,32 @@ def _fmt_isk(item: dict) -> str:
             out += ', ' + ', '.join(tail_parts)
         return out
 
-    # TYPE-E / TYPE-F: "SIZE: S X R, INSULATING GASKET KIT, spec, TYPE E/F, face (fire_safety)"
+    # TYPE-E / TYPE-F
     if isk_style in ('TYPE-E', 'TYPE-F', 'TYPE E', 'TYPE F'):
-        display_style = isk_style.replace('-', ' ')
-        out = f'{base}, INSULATING GASKET KIT'
-        if special:
-            out += f', {special}'
-        out += f', {display_style}'
+        import re as _re
+        gasket_mat = (item.get('isk_gasket_material') or '').strip().upper()
+        core = (item.get('isk_core_material') or '').strip().upper()
+
+        # "WITH WASHER & SLEEVE" format: used when component fields are populated
+        # Ground truth: INSULATING GASKET KIT WITH WASHER & SLEEVE (G-10/11) WITH SS316 CORE, {special}
+        if gasket_mat or core:
+            out = f'{base}, INSULATING GASKET KIT WITH WASHER & SLEEVE'
+            if gasket_mat:
+                # Strip "GRE " prefix for parenthesized grade display: "GRE G-10/G-11" → "G-10/G-11"
+                display_grade = _re.sub(r'^GRE\s+', '', gasket_mat)
+                out += f' ({display_grade})'
+            if core:
+                out += f' WITH {core} CORE'
+            if special:
+                out += f', {special}'
+        else:
+            # No component fields — classic TYPE E/F label format
+            display_style = isk_style.replace('-', ' ')
+            out = f'{base}, INSULATING GASKET KIT'
+            if special:
+                out += f', {special}'
+            out += f', {display_style}'
+
         if face_type and fire_safety:
             tail_parts = [f'{face_type} ({fire_safety})']
         elif face_type:
@@ -259,16 +302,19 @@ def _fmt_isk(item: dict) -> str:
             out += ', ' + ', '.join(tail_parts)
         return out
 
-    # No style / other style: "SIZE: S X R, INSULATING GASKET KIT, spec, face (fire_safety)"
+    # No style / other style: "SIZE: S X R, INSULATING GASKET KIT, {components}, face (fire_safety)"
     out = f'{base}, INSULATING GASKET KIT'
     if isk_style:
         out += f', {isk_style}'
-    if special:
-        # Special starting with WITH/FOR connects directly (no comma): "INSULATING GASKET KIT WITH ..."
+    # Build component string from dedicated fields, fall back to special
+    components = _isk_components(item)
+    if components:
+        sep = ' ' if components.upper().startswith(('WITH ', 'FOR ')) else ', '
+        out += f'{sep}{components}'
+    elif special:
         sep = ' ' if special.upper().startswith(('WITH ', 'FOR ')) else ', '
         out += f'{sep}{special}'
     std_to_show = standard if std_explicit else ''
-    # Fire safety attaches to face_type with space (e.g. "RF (FIRE SAFE)"), not comma-separated
     if face_type and fire_safety:
         face_str = f'{face_type} ({fire_safety})'
         tail_parts = list(filter(None, [face_str, std_to_show]))
@@ -279,6 +325,79 @@ def _fmt_isk(item: dict) -> str:
     if tail_parts:
         out += ', ' + ', '.join(tail_parts)
     return out
+
+
+def _style_cs_set(item: dict) -> str:
+    """Build the SET content for STYLE-CS (TYPE-A) ISK kits.
+    Format: G11 GASKET WITH 316 STEEL CORE WITH PTFE SPRING ENERGISED SEAL, G11 WASHER & SLEEVES,ZINC PLATED CS WASHER
+    """
+    import re as _re
+    gasket_grade = _cs_grade(item.get('isk_gasket_material'))
+    core_grade   = _cs_core(item.get('isk_core_material'))
+    sleeve_grade = _cs_grade(item.get('isk_sleeve_material'))
+
+    out = ''
+    if gasket_grade:
+        out += f'{gasket_grade} GASKET '
+    if core_grade:
+        out += f'WITH {core_grade} STEEL CORE '
+    out += 'WITH PTFE SPRING ENERGISED SEAL'
+    if sleeve_grade:
+        out += f', {sleeve_grade} WASHER & SLEEVES'
+    out += ',ZINC PLATED CS WASHER'
+    return out
+
+
+def _cs_grade(mat: str | None) -> str:
+    """Normalise GRE grade for STYLE-CS SET: 'GRE G-11' → 'G11', 'GRE G10' → 'G10'."""
+    import re as _re
+    if not mat:
+        return ''
+    s = mat.strip().upper()
+    # Strip "GRE " prefix
+    s = _re.sub(r'^GRE\s+', '', s)
+    # Remove hyphens from grade: "G-11" → "G11"
+    s = _re.sub(r'G[\s\-](\d+)', r'G\1', s)
+    return s
+
+
+def _cs_core(mat: str | None) -> str:
+    """Normalise core material for STYLE-CS SET: 'SS316' → '316', 'SS316L' → '316L'."""
+    import re as _re
+    if not mat:
+        return ''
+    s = mat.strip().upper()
+    # Strip SS prefix: "SS316" → "316", "SS316L" → "316L"
+    s = _re.sub(r'^SS\s*', '', s)
+    return s
+
+
+def _isk_components(item: dict) -> str:
+    """
+    Build ISK component string from dedicated fields.
+    Returns e.g. 'GRE G11 GASKET + SS316 CORE + CS WASHERS + GRE G11 SLEEVES'
+    Falls back to empty string if no component fields are populated.
+    """
+    parts = []
+    gasket_mat = (item.get('isk_gasket_material') or '').strip().upper()
+    core = (item.get('isk_core_material') or '').strip().upper()
+    washers = (item.get('isk_washer_material') or '').strip().upper()
+    sleeves = (item.get('isk_sleeve_material') or '').strip().upper()
+
+    if gasket_mat:
+        # Don't add "GASKET" suffix if material already ends with SEAL/GASKET
+        if gasket_mat.endswith(('SEAL', 'GASKET')):
+            parts.append(gasket_mat)
+        else:
+            parts.append(f'{gasket_mat} GASKET')
+    if core:
+        parts.append(f'{core} CORE')
+    if washers:
+        parts.append(f'{washers} WASHERS')
+    if sleeves:
+        parts.append(f'{sleeves} SLEEVES')
+
+    return ' + '.join(parts)
 
 
 def _fmt_size(size: str, gtype: str) -> str:

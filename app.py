@@ -584,6 +584,12 @@ def _build_rows(items):
             'SW Filler':            item.get('sw_filler') or '',
             'SW Outer Ring':        item.get('sw_outer_ring') or '',
             'SW Inner Ring':        item.get('sw_inner_ring') or '',
+            'ISK Gasket Mat':       item.get('isk_gasket_material') or '',
+            'ISK Core':             item.get('isk_core_material') or '',
+            'ISK Sleeves':          item.get('isk_sleeve_material') or '',
+            'ISK Washers':          item.get('isk_washer_material') or '',
+            'KAMM Core':            item.get('kamm_core_material') or '',
+            'KAMM Surface':         item.get('kamm_surface_material') or '',
             'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
             'UoM':                  item.get('uom') or 'NOS',
             'Special':              item.get('special') or '',
@@ -635,6 +641,18 @@ def _editor_fragment(items, display_indices):
             'SW Filler':            st.column_config.TextColumn('SW Filler', width='small'),
             'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small'),
             'SW Inner Ring':        st.column_config.TextColumn('SW Inner Ring', width='small'),
+            'ISK Gasket Mat':       st.column_config.TextColumn('ISK Gasket Mat', width='small',
+                                        help='ISK gasket ring material e.g. GRE G10, PTFE, PEEK'),
+            'ISK Core':             st.column_config.TextColumn('ISK Core', width='small',
+                                        help='ISK metal core e.g. SS316, CS, DUPLEX'),
+            'ISK Sleeves':          st.column_config.TextColumn('ISK Sleeves', width='small',
+                                        help='ISK sleeve insulation material'),
+            'ISK Washers':          st.column_config.TextColumn('ISK Washers', width='small',
+                                        help='ISK washer/bolt material e.g. CS, SS316'),
+            'KAMM Core':            st.column_config.TextColumn('KAMM Core', width='small',
+                                        help='Kammprofile metal core e.g. SS316, ALLOY 625'),
+            'KAMM Surface':         st.column_config.TextColumn('KAMM Surface', width='small',
+                                        help='Kammprofile surface material e.g. GRAPHITE, PTFE'),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0),
             'UoM':                  st.column_config.SelectboxColumn('UoM', options=UOM_OPTIONS, width='small'),
             'Special':              st.column_config.TextColumn('Special', width='medium'),
@@ -677,10 +695,16 @@ def _editor_fragment(items, display_indices):
             else:
                 base['rtj_hardness_spec'] = None
                 base['rtj_hardness_bhn'] = None
-            base['sw_winding_material']= row['SW Winding'] or None
-            base['sw_filler']          = row['SW Filler'] or None
-            base['sw_outer_ring']      = row['SW Outer Ring'] or None
-            base['sw_inner_ring']      = row['SW Inner Ring'] or None
+            base['sw_winding_material']  = row['SW Winding'] or None
+            base['sw_filler']            = row['SW Filler'] or None
+            base['sw_outer_ring']        = row['SW Outer Ring'] or None
+            base['sw_inner_ring']        = row['SW Inner Ring'] or None
+            base['isk_gasket_material']  = row['ISK Gasket Mat'] or None
+            base['isk_core_material']    = row['ISK Core'] or None
+            base['isk_sleeve_material']  = row['ISK Sleeves'] or None
+            base['isk_washer_material']  = row['ISK Washers'] or None
+            base['kamm_core_material']   = row['KAMM Core'] or None
+            base['kamm_surface_material']= row['KAMM Surface'] or None
             if base.get('gasket_type') == 'SPIRAL_WOUND' and any([
                 row['SW Winding'], row['SW Filler'], row['SW Outer Ring'], row['SW Inner Ring']
             ]):
