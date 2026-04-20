@@ -1211,6 +1211,9 @@ def regex_extract(description: str) -> dict:
     Non-detected fields are None. confidence is 'HIGH', 'MEDIUM', or 'LOW'.
     """
     desc = description.strip()
+    # Normalize: insert space when THK/THCK is directly concatenated with the next word
+    # e.g. "4.5thkNON ASBESTOS" → "4.5thk NON ASBESTOS"
+    desc = re.sub(r'(?i)(thkc?k?)(?=[A-Za-z])', r'\1 ', desc)
     upper = desc.upper()
 
     # Initialize all fields to None
