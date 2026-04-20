@@ -576,6 +576,7 @@ def _build_rows(items):
             'Standard':             item.get('standard') or '',
             'MOC':                  item.get('moc') or '',
             'Face':                 item.get('face_type') or '',
+            'Series':               item.get('series') or '',
             'Thk (mm)':             item.get('thickness_mm') if item.get('thickness_mm') is not None else None,
             'Ring No':              item.get('ring_no') or '',
             'Groove':               item.get('rtj_groove_type') or '',
@@ -635,6 +636,8 @@ def _editor_fragment(items, display_indices):
                                         help='e.g. ASME B16.20, ASME B16.21, ASME B16.47 (SERIES-A), API 6A'),
             'MOC':                  st.column_config.TextColumn('MOC', width='large'),
             'Face':                 st.column_config.SelectboxColumn('Face', options=FACE_OPTIONS, width='small'),
+            'Series':               st.column_config.SelectboxColumn('Series', options=['', 'A', 'B'], width='small',
+                                        help='B16.47 only — Series A (ex-API 605) or Series B (ex-MSS SP-44)'),
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
             'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
@@ -685,6 +688,7 @@ def _editor_fragment(items, display_indices):
             base['standard']           = row['Standard'] or None
             base['moc']                = row['MOC'] or None
             base['face_type']          = row['Face'] or None
+            base['series']             = row['Series'] or None
             base['thickness_mm']       = row['Thk (mm)'] or None
             base['ring_no']            = row['Ring No'] or None
             base['rtj_groove_type']    = row['Groove'] or None
