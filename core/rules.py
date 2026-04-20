@@ -548,7 +548,12 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
 
     if not filler:
         filler = 'GRAPHITE'
-        applied_defaults.append('filler defaulted to GRAPHITE')
+        if inner_ring and outer_ring:
+            applied_defaults.append('filler defaulted to GRAPHITE (IR + OR present — industry standard)')
+        elif outer_ring:
+            applied_defaults.append('filler defaulted to GRAPHITE')
+        else:
+            applied_defaults.append('filler defaulted to GRAPHITE')
 
     size_val = _size_nps_value(item.get('size_norm'))
 
