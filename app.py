@@ -377,6 +377,126 @@ body:has(#gq-chat-panel.gqcp-open) [data-testid="stChatInput"] textarea {
     line-height: 1.5 !important;
     padding: 8px 4px !important;
 }
+
+/* ── Unit Converter floating widget ─────────────────────────────────── */
+#gq-conv-fab {
+    position: fixed !important;
+    bottom: 28px !important;
+    right: 100px !important;
+    width: 58px !important;
+    height: 58px !important;
+    border-radius: 50% !important;
+    background: linear-gradient(135deg, #1a6b4a, #0d4530) !important;
+    color: #fff !important;
+    font-size: 1.4rem !important;
+    border: none !important;
+    cursor: pointer !important;
+    box-shadow: 0 4px 20px rgba(26,107,74,0.55) !important;
+    z-index: 10001 !important;
+    transition: transform 0.18s, box-shadow 0.18s !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+#gq-conv-fab:hover {
+    transform: scale(1.1) !important;
+    box-shadow: 0 6px 26px rgba(26,107,74,0.7) !important;
+}
+#gq-conv-panel {
+    position: fixed !important;
+    bottom: 100px !important;
+    right: 100px !important;
+    width: 420px !important;
+    max-height: 520px !important;
+    background: #fff !important;
+    border-radius: 16px !important;
+    border: 1px solid #dde3f0 !important;
+    z-index: 10000 !important;
+    display: none !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.18) !important;
+}
+#gq-conv-panel.gqcv-open { display: flex !important; }
+#gq-conv-hdr {
+    background: linear-gradient(135deg, #1a6b4a, #0d4530);
+    color: #fff;
+    padding: 0.85rem 1.1rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+}
+.gq-conv-hdr-close {
+    margin-left: auto;
+    background: rgba(255,255,255,0.15) !important;
+    border: none !important;
+    color: #fff !important;
+    cursor: pointer !important;
+    width: 28px !important; height: 28px !important;
+    border-radius: 50% !important;
+    font-size: 1rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    transition: background 0.15s !important;
+}
+.gq-conv-hdr-close:hover { background: rgba(255,255,255,0.28) !important; }
+#gq-conv-body {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.8rem 1rem 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: #f4f7fd;
+    min-height: 0;
+}
+#gq-conv-body::-webkit-scrollbar { width: 5px; }
+#gq-conv-body::-webkit-scrollbar-thumb { background: #c8d3e8; border-radius: 4px; }
+#gq-conv-hint {
+    color: #7a9ab5; font-size: 0.82rem;
+    text-align: center; padding: 2rem 1rem; line-height: 1.6;
+}
+#gq-conv-footer {
+    flex-shrink: 0;
+    padding: 0.6rem 0.8rem;
+    background: #fff;
+    border-top: 1px solid #e4eaf5;
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+#gq-conv-input {
+    flex: 1;
+    border: 1.5px solid #cdd6ea !important;
+    border-radius: 20px !important;
+    padding: 0.45rem 0.9rem !important;
+    font-size: 0.9rem !important;
+    outline: none !important;
+    color: #111 !important;
+    background: #f0f4fa !important;
+}
+#gq-conv-input:focus { border-color: #1a6b4a !important; }
+#gq-conv-send {
+    background: #1a6b4a !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 34px !important; height: 34px !important;
+    font-size: 1rem !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+    transition: background 0.15s !important;
+}
+#gq-conv-send:hover { background: #0d4530 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -409,6 +529,8 @@ if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False  # unused for panel CSS; panel state managed by JS sessionStorage
 if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
+if 'conv_history' not in st.session_state:
+    st.session_state.conv_history = []  # list of {q, a} dicts for unit converter
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
@@ -1257,7 +1379,65 @@ def _build_chat_html():
 
 _api_ok = bool(_os.environ.get('OPENAI_API_KEY'))
 
+# ---------------------------------------------------------------------------
+# Unit converter panel
+# ---------------------------------------------------------------------------
+from core.unit_converter import convert as _uc_convert  # noqa: E402
+
+
+def _build_conv_html() -> str:
+    hist = st.session_state.conv_history[-30:]
+    if not hist:
+        return (
+            '<div id="gq-conv-hint">'
+            '<div style="font-size:1.8rem;margin-bottom:0.5rem">📐</div>'
+            'Type a conversion below:<br>'
+            '<span style="font-size:0.78rem;opacity:0.7">'
+            '4 inches to mm &nbsp;·&nbsp; DN 100 to NPS<br>'
+            '100 psi to bar &nbsp;·&nbsp; class 150 to PN<br>'
+            '200 °C to °F &nbsp;·&nbsp; 50 Nm to ft-lb'
+            '</span>'
+            '</div>'
+        )
+    out = []
+    for entry in hist:
+        q = (entry['q'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+        a = (entry['a'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+             .replace('\n', '<br>').replace('**', '<b>', 1))
+        # close every opened <b> tag
+        import re as _re2
+        a = _re2.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', entry['a']
+                     .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                     .replace('\n', '<br>'))
+        out.append(
+            f'<div style="background:#1a6b4a;color:#fff;border-radius:14px 14px 4px 14px;'
+            f'padding:0.5rem 0.85rem;font-size:0.88rem;max-width:85%;margin-left:auto">{q}</div>'
+        )
+        out.append(
+            f'<div style="background:#fff;border:1px solid #d1e8da;color:#0d2b1e;'
+            f'border-radius:14px 14px 14px 4px;padding:0.5rem 0.85rem;font-size:0.88rem;'
+            f'max-width:92%;box-shadow:0 1px 4px rgba(0,0,0,0.06)">{a}</div>'
+        )
+    return ''.join(out)
+
+
 st.markdown(f"""
+<button id="gq-conv-fab" title="Unit Converter">&#128208;</button>
+
+<div id="gq-conv-panel">
+  <div id="gq-conv-hdr">
+    <span style="font-size:1.1rem">📐</span>
+    <span>Unit Converter</span>
+    <button id="gq-conv-close" class="gq-conv-hdr-close">&#10005;</button>
+  </div>
+  <div id="gq-conv-body">{_build_conv_html()}</div>
+  <div id="gq-conv-footer">
+    <input id="gq-conv-input" type="text" placeholder="e.g. 4 inches to mm, DN 100 to NPS…"
+           autocomplete="off" />
+    <button id="gq-conv-send">&#9654;</button>
+  </div>
+</div>
+
 <button id="gq-fab" title="Gasket Assistant">&#128172;</button>
 
 <div id="gq-chat-panel">
@@ -1273,24 +1453,39 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# Attach click handlers via iframe (Streamlit CSP blocks inline onclick attrs)
-# Panel open/close state is stored in sessionStorage so it survives Streamlit reruns.
+# Attach click handlers for both panels
 st.html("""
 <script>
 (function attach() {
+  // ── Chat panel ──
   var fab = document.getElementById('gq-fab');
   var panel = document.getElementById('gq-chat-panel');
   var closeBtn = document.getElementById('gq-chat-close');
   var body = document.getElementById('gq-chat-body');
-  if (!fab || !panel) { setTimeout(attach, 100); return; }
 
-  // Restore open state from sessionStorage (survives Streamlit reruns)
+  // ── Converter panel ──
+  var cvFab = document.getElementById('gq-conv-fab');
+  var cvPanel = document.getElementById('gq-conv-panel');
+  var cvClose = document.getElementById('gq-conv-close');
+  var cvBody = document.getElementById('gq-conv-body');
+  var cvInput = document.getElementById('gq-conv-input');
+  var cvSend = document.getElementById('gq-conv-send');
+
+  if (!fab || !panel || !cvFab || !cvPanel) { setTimeout(attach, 100); return; }
+
+  // ── Restore open state ──
   if (sessionStorage.getItem('gq_chat_open') === '1') {
     panel.classList.add('gqcp-open');
     fab.innerHTML = '&#10005;';
     if (body) body.scrollTop = body.scrollHeight;
   }
+  if (sessionStorage.getItem('gq_conv_open') === '1') {
+    cvPanel.classList.add('gqcv-open');
+    cvFab.innerHTML = '&#10005;';
+    if (cvBody) cvBody.scrollTop = cvBody.scrollHeight;
+  }
 
+  // ── Chat FAB toggle ──
   fab.onclick = function() {
     var open = panel.classList.toggle('gqcp-open');
     fab.innerHTML = open ? '&#10005;' : '&#128172;';
@@ -1305,9 +1500,62 @@ st.html("""
     };
   }
   if (body) body.scrollTop = body.scrollHeight;
+
+  // ── Converter FAB toggle ──
+  cvFab.onclick = function() {
+    var open = cvPanel.classList.toggle('gqcv-open');
+    cvFab.innerHTML = open ? '&#10005;' : '&#128208;';
+    sessionStorage.setItem('gq_conv_open', open ? '1' : '0');
+    if (open && cvBody) { cvBody.scrollTop = cvBody.scrollHeight; cvInput && cvInput.focus(); }
+  };
+  if (cvClose) {
+    cvClose.onclick = function() {
+      cvPanel.classList.remove('gqcv-open');
+      cvFab.innerHTML = '&#128208;';
+      sessionStorage.setItem('gq_conv_open', '0');
+    };
+  }
+  if (cvBody) cvBody.scrollTop = cvBody.scrollHeight;
+
+  // ── Converter send: write query to a hidden Streamlit text element via URL param ──
+  function sendConv() {
+    var q = cvInput ? cvInput.value.trim() : '';
+    if (!q) return;
+    // Store in sessionStorage and trigger rerun via URL query param
+    sessionStorage.setItem('gq_conv_query', q);
+    cvInput.value = '';
+    // Trigger Streamlit rerun by updating the hidden input's value
+    var hiddenInput = window.parent.document.querySelector('input[data-testid="stTextInput"][aria-label="__conv_query__"]');
+    if (hiddenInput) {
+      var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      nativeInput.set.call(hiddenInput, q);
+      hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+  if (cvSend) cvSend.onclick = sendConv;
+  if (cvInput) cvInput.onkeydown = function(e) { if (e.key === 'Enter') sendConv(); };
+
+  // ── On load: restore any pending query from sessionStorage ──
+  var pending = sessionStorage.getItem('gq_conv_query');
+  if (pending) {
+    sessionStorage.removeItem('gq_conv_query');
+    var hiddenInput = window.parent.document.querySelector('input[data-testid="stTextInput"][aria-label="__conv_query__"]');
+    if (hiddenInput) {
+      var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      nativeInput.set.call(hiddenInput, pending);
+      hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
 })();
 </script>
 """, unsafe_allow_javascript=True)
+
+# ── Unit converter input (hidden visually, triggered by JS) ──
+_conv_q = st.text_input('__conv_query__', key='_conv_query_input', label_visibility='collapsed')
+if _conv_q:
+    _ans = _uc_convert(_conv_q)
+    st.session_state.conv_history.append({'q': _conv_q, 'a': _ans})
+    st.rerun()
 
 if _api_ok:
     _q = st.chat_input('Ask about gaskets…', key='float_chat')
