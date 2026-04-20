@@ -1284,6 +1284,8 @@ def apply_rules(item: dict) -> dict:
         crit = ['od_mm', 'id_mm', 'thickness_mm', 'moc']
     elif gasket_type in ('ISK', 'ISK_RTJ'):
         crit = ['size', 'rating']
+    elif gasket_type == 'SPIRAL_WOUND' and item.get('size_type') == 'OD_ID':
+        crit = ['od_mm', 'id_mm', 'moc']
     else:
         crit = CRITICAL_FIELDS  # ['size', 'rating', 'moc']
 

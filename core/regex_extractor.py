@@ -106,6 +106,16 @@ _ID_OD_RE = re.compile(
     r'OD[\s:\-=]*(\d+(?:\.\d+)?)',
     re.IGNORECASE,
 )
+# "346 GID x 372 GOD" — number BEFORE keyword (Gasket Inner/Outer Diameter)
+_GID_GOD_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*GID\b.*?(\d+(?:\.\d+)?)\s*(?:MM)?\s*GOD\b',
+    re.IGNORECASE,
+)
+_GOD_GID_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*GOD\b.*?(\d+(?:\.\d+)?)\s*(?:MM)?\s*GID\b',
+    re.IGNORECASE,
+)
+
 # Parenthesized: "343(OD) x 210(ID)" or "343 (OD) x 210 (ID)"
 _PAREN_OD_ID_RE = re.compile(
     r'(\d+(?:\.\d+)?)\s*\(\s*OD\s*\)\s*[XxX×,\s]+\s*'
@@ -186,6 +196,21 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
     if m:
         result['id_mm'] = float(m.group(1))
         result['od_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
+    # 1d. "346 GID x 372 GOD" — Gasket Inner/Outer Diameter notation
+    m = _GID_GOD_RE.search(upper)
+    if m:
+        result['id_mm'] = float(m.group(1))  # GID = inner diameter
+        result['od_mm'] = float(m.group(2))  # GOD = outer diameter
+        result['size_type'] = 'OD_ID'
+        return result
+
+    m = _GOD_GID_RE.search(upper)
+    if m:
+        result['od_mm'] = float(m.group(1))  # GOD = outer diameter
+        result['id_mm'] = float(m.group(2))  # GID = inner diameter
         result['size_type'] = 'OD_ID'
         return result
 
@@ -682,7 +707,7 @@ def _norm_ring_material(raw: str | None) -> str | None:
         return None
     key = raw.strip().upper()
     # Clean up common prefixes
-    key = re.sub(r'^(?:AND|WITH|W/)\s+', '', key).strip()
+    key = re.sub(r'^(?:AND|WITH|W/)(?:\s+|$)', '', key).strip()
     key = re.sub(r'\s+', ' ', key)
     return _SW_RING_ALIASES.get(key, key if len(key) > 1 else None)
 
@@ -692,7 +717,7 @@ def _norm_filler_material(raw: str | None) -> str | None:
     if not raw:
         return None
     key = raw.strip().upper()
-    key = re.sub(r'^(?:AND|WITH|W/)\s+', '', key).strip()
+    key = re.sub(r'^(?:AND|WITH|W/)(?:\s+|$)', '', key).strip()
     key = re.sub(r'\s+', ' ', key)
     return _SW_FILLER_ALIASES.get(key, key if len(key) > 1 else None)
 
@@ -854,9 +879,13 @@ def _extract_sw_fields(desc: str) -> dict:
                 result['sw_outer_ring'] = mat
 
     # "inner & outer ring" with shared material: "SS316 inner & outer ring"
+    # Also handles reversed order: "316 outer & inner ring"
+    _RING_MAT_PAT = (
+        r'(SS\s*\d{3}\w?|\b\d{3}\w{0,2}\b|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|CS|'
+        r'ALLOY\s*\d+|DUPLEX\s*SS?\d*)'
+    )
     shared_re = re.search(
-        r'(SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|CS|'
-        r'ALLOY\s*\d+|DUPLEX\s*SS?\d*)\s+INNER\s*[&+]\s*OUTER\s+RING',
+        _RING_MAT_PAT + r'\s+(?:INNER\s*[&+]\s*OUTER|OUTER\s*[&+]\s*INNER)\s+RING',
         upper,
     )
     if shared_re:

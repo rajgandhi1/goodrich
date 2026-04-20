@@ -43,7 +43,12 @@ def format_description(item: dict) -> str:
         size_part = f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM'
         if thickness:
             size_part += f' X {_fmt_num(thickness)}MM THK'
-        return ', '.join([size_part, moc])
+        od_id_parts = [size_part, moc]
+        if special:
+            od_id_parts.append(special)
+        if standard:
+            od_id_parts.append(standard)
+        return ', '.join(od_id_parts)
 
     size = item.get('size')
     rating = item.get('rating')

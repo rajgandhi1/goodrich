@@ -579,7 +579,7 @@ def _build_rows(items):
             'Thk (mm)':             item.get('thickness_mm') if item.get('thickness_mm') is not None else None,
             'Ring No':              item.get('ring_no') or '',
             'Groove':               item.get('rtj_groove_type') or '',
-            'BHN':                  item.get('rtj_hardness_spec') or item.get('rtj_hardness_bhn') or '',
+            'BHN':                  item.get('rtj_hardness_bhn') or None,
             'SW Winding':           item.get('sw_winding_material') or '',
             'SW Filler':            item.get('sw_filler') or '',
             'SW Outer Ring':        item.get('sw_outer_ring') or '',
@@ -638,7 +638,7 @@ def _editor_fragment(items, display_indices):
             'Thk (mm)':             st.column_config.NumberColumn('Thk (mm)', width='small', min_value=0),
             'Ring No':              st.column_config.TextColumn('Ring No', width='small', help='RTJ ring e.g. R-23'),
             'Groove':               st.column_config.SelectboxColumn('Groove', options=GROOVE_OPTIONS, width='small'),
-            'BHN':                  st.column_config.TextColumn('BHN', width='small', help='e.g. 90BHN HARDNESS'),
+            'BHN':                  st.column_config.NumberColumn('BHN', width='small', min_value=1, step=10, help='Enter number only — BHN HARDNESS appended automatically'),
             'SW Winding':           st.column_config.TextColumn('SW Winding', width='small'),
             'SW Filler':            st.column_config.TextColumn('SW Filler', width='small'),
             'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small'),
@@ -690,14 +690,12 @@ def _editor_fragment(items, display_indices):
             base['rtj_groove_type']    = row['Groove'] or None
             bhn_val = row['BHN'] or None
             if bhn_val:
-                base['rtj_hardness_spec'] = str(bhn_val)
-                try:
-                    base['rtj_hardness_bhn'] = int(float(str(bhn_val).split()[0]))
-                except (ValueError, IndexError):
-                    base['rtj_hardness_bhn'] = None
+                bhn_int = int(float(bhn_val))
+                base['rtj_hardness_bhn']  = bhn_int
+                base['rtj_hardness_spec'] = f'{bhn_int} BHN HARDNESS'
             else:
+                base['rtj_hardness_bhn']  = None
                 base['rtj_hardness_spec'] = None
-                base['rtj_hardness_bhn'] = None
             base['sw_winding_material']  = row['SW Winding'] or None
             base['sw_filler']            = row['SW Filler'] or None
             base['sw_outer_ring']        = row['SW Outer Ring'] or None
