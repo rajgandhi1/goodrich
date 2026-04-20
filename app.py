@@ -190,6 +190,15 @@ details { border-radius: 8px !important; }
 /* ── Progress bar ───────────────────────────────────────────── */
 [data-testid="stProgressBar"] > div > div { background: #2e4470 !important; border-radius: 8px !important; }
 
+/* ── Tabs — force navigation bar to scroll if labels overflow ── */
+[data-baseweb="tab-list"] {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none !important;
+}
+[data-baseweb="tab-list"]::-webkit-scrollbar { display: none !important; }
+[data-baseweb="tab"] { flex-shrink: 0 !important; white-space: nowrap !important; }
+
 /* ── Floating chat widget ───────────────────────────────────── */
 #gq-fab {
     position: fixed !important;
@@ -378,125 +387,6 @@ body:has(#gq-chat-panel.gqcp-open) [data-testid="stChatInput"] textarea {
     padding: 8px 4px !important;
 }
 
-/* ── Unit Converter floating widget ─────────────────────────────────── */
-#gq-conv-fab {
-    position: fixed !important;
-    bottom: 28px !important;
-    right: 100px !important;
-    width: 58px !important;
-    height: 58px !important;
-    border-radius: 50% !important;
-    background: linear-gradient(135deg, #1a6b4a, #0d4530) !important;
-    color: #fff !important;
-    font-size: 1.4rem !important;
-    border: none !important;
-    cursor: pointer !important;
-    box-shadow: 0 4px 20px rgba(26,107,74,0.55) !important;
-    z-index: 10001 !important;
-    transition: transform 0.18s, box-shadow 0.18s !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-#gq-conv-fab:hover {
-    transform: scale(1.1) !important;
-    box-shadow: 0 6px 26px rgba(26,107,74,0.7) !important;
-}
-#gq-conv-panel {
-    position: fixed !important;
-    bottom: 100px !important;
-    right: 100px !important;
-    width: 420px !important;
-    max-height: 520px !important;
-    background: #fff !important;
-    border-radius: 16px !important;
-    border: 1px solid #dde3f0 !important;
-    z-index: 10000 !important;
-    display: none !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.18) !important;
-}
-#gq-conv-panel.gqcv-open { display: flex !important; }
-#gq-conv-hdr {
-    background: linear-gradient(135deg, #1a6b4a, #0d4530);
-    color: #fff;
-    padding: 0.85rem 1.1rem;
-    font-weight: 600;
-    font-size: 0.95rem;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-shrink: 0;
-}
-.gq-conv-hdr-close {
-    margin-left: auto;
-    background: rgba(255,255,255,0.15) !important;
-    border: none !important;
-    color: #fff !important;
-    cursor: pointer !important;
-    width: 28px !important; height: 28px !important;
-    border-radius: 50% !important;
-    font-size: 1rem !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    line-height: 1 !important;
-    transition: background 0.15s !important;
-}
-.gq-conv-hdr-close:hover { background: rgba(255,255,255,0.28) !important; }
-#gq-conv-body {
-    flex: 1;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 0.8rem 1rem 0.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    background: #f4f7fd;
-    min-height: 0;
-}
-#gq-conv-body::-webkit-scrollbar { width: 5px; }
-#gq-conv-body::-webkit-scrollbar-thumb { background: #c8d3e8; border-radius: 4px; }
-#gq-conv-hint {
-    color: #7a9ab5; font-size: 0.82rem;
-    text-align: center; padding: 2rem 1rem; line-height: 1.6;
-}
-#gq-conv-footer {
-    flex-shrink: 0;
-    padding: 0.6rem 0.8rem;
-    background: #fff;
-    border-top: 1px solid #e4eaf5;
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-}
-#gq-conv-input {
-    flex: 1;
-    border: 1.5px solid #cdd6ea !important;
-    border-radius: 20px !important;
-    padding: 0.45rem 0.9rem !important;
-    font-size: 0.9rem !important;
-    outline: none !important;
-    color: #111 !important;
-    background: #f0f4fa !important;
-}
-#gq-conv-input:focus { border-color: #1a6b4a !important; }
-#gq-conv-send {
-    background: #1a6b4a !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 50% !important;
-    width: 34px !important; height: 34px !important;
-    font-size: 1rem !important;
-    cursor: pointer !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    flex-shrink: 0 !important;
-    transition: background 0.15s !important;
-}
-#gq-conv-send:hover { background: #0d4530 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -529,8 +419,6 @@ if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False  # unused for panel CSS; panel state managed by JS sessionStorage
 if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
-if 'conv_history' not in st.session_state:
-    st.session_state.conv_history = []  # list of {q, a} dicts for unit converter
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
@@ -906,7 +794,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab_email, tab_excel, tab_manual = st.tabs(['📧 Email / Text', '📊 Excel File', '✏️ Add Manually'])
+tab_email, tab_excel, tab_manual, tab_conv = st.tabs(['📧 Email', '📊 Excel', '✏️ Manual', '📐 Converter'])
 
 
 def _process_and_append(raw_items):
@@ -1048,6 +936,162 @@ with tab_manual:
             st.session_state.working_items = existing + [item]
             st.session_state._show_confirm = False
             st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Unit Converter tab
+# ---------------------------------------------------------------------------
+from core.unit_converter import (  # noqa: E402
+    DN_NPS_TABLE, DN_OPTIONS, NPS_OPTIONS, CLASS_PN, PN_CLASS,
+    inches_to_mm, mm_to_inches,
+    psi_to_bar, bar_to_psi, psi_to_mpa, mpa_to_psi, bar_to_mpa, mpa_to_bar,
+    kpa_to_psi, psi_to_kpa,
+    c_to_f, f_to_c, c_to_k, k_to_c,
+    nm_to_ftlb, ftlb_to_nm, nm_to_inlb, inlb_to_nm,
+    kn_to_kgf, kgf_to_kn, n_to_lbf, lbf_to_n,
+    dn_to_nps, nps_val_to_dn, fmt,
+)
+
+with tab_conv:
+    st.caption('Convert gasket-related units instantly — no API required.')
+
+    _cat = st.selectbox(
+        'Category',
+        ['Length (in ↔ mm)', 'Pipe Size (DN ↔ NPS)', 'Pressure', 'Rating (ASME Class ↔ PN)',
+         'Temperature', 'Torque', 'Force'],
+        label_visibility='collapsed',
+        key='uc_cat',
+    )
+
+    st.markdown('---')
+
+    # ── Length ──────────────────────────────────────────────────────────────
+    if _cat == 'Length (in ↔ mm)':
+        _lc1, _lc2 = st.columns(2)
+        with _lc1:
+            st.markdown('##### Inches → mm')
+            _in_val = st.number_input('Value (inches)', min_value=0.0, value=1.0, step=0.5, format='%.4f', key='uc_in')
+            st.metric('Result', f'{fmt(inches_to_mm(_in_val))} mm')
+        with _lc2:
+            st.markdown('##### mm → Inches')
+            _mm_val = st.number_input('Value (mm)', min_value=0.0, value=25.4, step=1.0, format='%.4f', key='uc_mm')
+            st.metric('Result', f'{fmt(mm_to_inches(_mm_val))}"')
+
+    # ── Pipe Size ────────────────────────────────────────────────────────────
+    elif _cat == 'Pipe Size (DN ↔ NPS)':
+        _pc1, _pc2 = st.columns(2)
+        with _pc1:
+            st.markdown('##### DN → NPS')
+            _dn_sel = st.selectbox('DN (mm)', DN_OPTIONS, key='uc_dn')
+            _dn_int = int(_dn_sel)
+            _nps_result = dn_to_nps(_dn_int)
+            st.metric('NPS', _nps_result or '—')
+        with _pc2:
+            st.markdown('##### NPS → DN')
+            _nps_sel = st.selectbox('NPS', NPS_OPTIONS, key='uc_nps')
+            # find the NPS decimal for this string
+            _nps_dec = next((val for _, nps_str, val in DN_NPS_TABLE if nps_str == _nps_sel), None)
+            _dn_result = nps_val_to_dn(_nps_dec) if _nps_dec else None
+            st.metric('DN (mm)', f'DN {_dn_result}' if _dn_result else '—')
+
+        st.markdown('##### Full DN / NPS Reference Table')
+        import pandas as _pd
+        _tbl = _pd.DataFrame(
+            [(dn, nps) for dn, nps, _ in DN_NPS_TABLE],
+            columns=['DN (mm)', 'NPS (inch)'],
+        )
+        st.dataframe(_tbl, use_container_width=False, hide_index=True, height=300)
+
+    # ── Pressure ─────────────────────────────────────────────────────────────
+    elif _cat == 'Pressure':
+        _pr_units = ['psi', 'bar', 'MPa', 'kPa']
+        _pr_c1, _pr_c2, _pr_c3 = st.columns(3)
+        _pr_val  = _pr_c1.number_input('Value', min_value=0.0, value=100.0, step=1.0, format='%.4f', key='uc_pr_val')
+        _pr_from = _pr_c2.selectbox('From', _pr_units, key='uc_pr_from')
+        _pr_to   = _pr_c3.selectbox('To',   _pr_units, key='uc_pr_to')
+
+        _PCONV = {
+            ('psi', 'bar'): psi_to_bar,  ('bar', 'psi'): bar_to_psi,
+            ('psi', 'MPa'): psi_to_mpa,  ('MPa', 'psi'): mpa_to_psi,
+            ('bar', 'MPa'): bar_to_mpa,  ('MPa', 'bar'): mpa_to_bar,
+            ('kPa', 'psi'): kpa_to_psi,  ('psi', 'kPa'): psi_to_kpa,
+            ('kPa', 'bar'): lambda v: psi_to_bar(kpa_to_psi(v)),
+            ('bar', 'kPa'): lambda v: psi_to_kpa(bar_to_psi(v)),
+            ('kPa', 'MPa'): lambda v: v / 1000, ('MPa', 'kPa'): lambda v: v * 1000,
+        }
+        if _pr_from == _pr_to:
+            st.metric('Result', f'{fmt(_pr_val)} {_pr_to}')
+        else:
+            _fn = _PCONV.get((_pr_from, _pr_to))
+            if _fn:
+                st.metric('Result', f'{fmt(_fn(_pr_val))} {_pr_to}')
+            else:
+                st.info('Conversion not supported directly — use an intermediate unit.')
+
+    # ── Rating ───────────────────────────────────────────────────────────────
+    elif _cat == 'Rating (ASME Class ↔ PN)':
+        _rc1, _rc2 = st.columns(2)
+        with _rc1:
+            st.markdown('##### ASME Class → PN')
+            _cls_sel = st.selectbox('ASME Class', list(CLASS_PN.keys()), key='uc_cls')
+            st.metric('Approx. PN', f'PN {CLASS_PN[_cls_sel]}')
+            st.caption('Approximate — exact value depends on material group & temperature.')
+        with _rc2:
+            st.markdown('##### PN → ASME Class')
+            _pn_sel = st.selectbox('PN', list(PN_CLASS.keys()), key='uc_pn')
+            st.metric('Approx. ASME Class', f'Class {PN_CLASS[_pn_sel]}')
+            st.caption('Approximate — exact value depends on material group & temperature.')
+
+    # ── Temperature ──────────────────────────────────────────────────────────
+    elif _cat == 'Temperature':
+        _tc1, _tc2, _tc3 = st.columns(3)
+        with _tc1:
+            st.markdown('##### °C → °F / K')
+            _tc_val = st.number_input('°C', value=200.0, step=5.0, format='%.2f', key='uc_tc')
+            st.metric('°F', f'{fmt(c_to_f(_tc_val))} °F')
+            st.metric('K',  f'{fmt(c_to_k(_tc_val))} K')
+        with _tc2:
+            st.markdown('##### °F → °C')
+            _tf_val = st.number_input('°F', value=392.0, step=5.0, format='%.2f', key='uc_tf')
+            st.metric('°C', f'{fmt(f_to_c(_tf_val))} °C')
+        with _tc3:
+            st.markdown('##### K → °C')
+            _tk_val = st.number_input('K', value=473.15, step=5.0, format='%.2f', key='uc_tk')
+            st.metric('°C', f'{fmt(k_to_c(_tk_val))} °C')
+
+    # ── Torque ───────────────────────────────────────────────────────────────
+    elif _cat == 'Torque':
+        _tqc1, _tqc2 = st.columns(2)
+        with _tqc1:
+            st.markdown('##### N·m → ft·lb / in·lb')
+            _tq_nm = st.number_input('N·m', min_value=0.0, value=100.0, step=1.0, format='%.4f', key='uc_nm')
+            st.metric('ft·lb', f'{fmt(nm_to_ftlb(_tq_nm))}')
+            st.metric('in·lb', f'{fmt(nm_to_inlb(_tq_nm))}')
+        with _tqc2:
+            st.markdown('##### ft·lb → N·m')
+            _tq_ftlb = st.number_input('ft·lb', min_value=0.0, value=73.76, step=1.0, format='%.4f', key='uc_ftlb')
+            st.metric('N·m', f'{fmt(ftlb_to_nm(_tq_ftlb))}')
+            st.markdown('##### in·lb → N·m')
+            _tq_inlb = st.number_input('in·lb', min_value=0.0, value=100.0, step=1.0, format='%.4f', key='uc_inlb')
+            st.metric('N·m', f'{fmt(inlb_to_nm(_tq_inlb))}')
+
+    # ── Force ────────────────────────────────────────────────────────────────
+    elif _cat == 'Force':
+        _fc1, _fc2 = st.columns(2)
+        with _fc1:
+            st.markdown('##### kN → kgf')
+            _f_kn = st.number_input('kN', min_value=0.0, value=10.0, step=0.5, format='%.4f', key='uc_kn')
+            st.metric('kgf', f'{fmt(kn_to_kgf(_f_kn))}')
+            st.markdown('##### N → lbf')
+            _f_n = st.number_input('N', min_value=0.0, value=100.0, step=1.0, format='%.4f', key='uc_n')
+            st.metric('lbf', f'{fmt(n_to_lbf(_f_n))}')
+        with _fc2:
+            st.markdown('##### kgf → kN')
+            _f_kgf = st.number_input('kgf', min_value=0.0, value=1000.0, step=10.0, format='%.4f', key='uc_kgf')
+            st.metric('kN', f'{fmt(kgf_to_kn(_f_kgf))}')
+            st.markdown('##### lbf → N')
+            _f_lbf = st.number_input('lbf', min_value=0.0, value=100.0, step=1.0, format='%.4f', key='uc_lbf')
+            st.metric('N', f'{fmt(lbf_to_n(_f_lbf))}')
 
 
 # ---------------------------------------------------------------------------
@@ -1379,65 +1423,7 @@ def _build_chat_html():
 
 _api_ok = bool(_os.environ.get('OPENAI_API_KEY'))
 
-# ---------------------------------------------------------------------------
-# Unit converter panel
-# ---------------------------------------------------------------------------
-from core.unit_converter import convert as _uc_convert  # noqa: E402
-
-
-def _build_conv_html() -> str:
-    hist = st.session_state.conv_history[-30:]
-    if not hist:
-        return (
-            '<div id="gq-conv-hint">'
-            '<div style="font-size:1.8rem;margin-bottom:0.5rem">📐</div>'
-            'Type a conversion below:<br>'
-            '<span style="font-size:0.78rem;opacity:0.7">'
-            '4 inches to mm &nbsp;·&nbsp; DN 100 to NPS<br>'
-            '100 psi to bar &nbsp;·&nbsp; class 150 to PN<br>'
-            '200 °C to °F &nbsp;·&nbsp; 50 Nm to ft-lb'
-            '</span>'
-            '</div>'
-        )
-    out = []
-    for entry in hist:
-        q = (entry['q'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
-        a = (entry['a'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-             .replace('\n', '<br>').replace('**', '<b>', 1))
-        # close every opened <b> tag
-        import re as _re2
-        a = _re2.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', entry['a']
-                     .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                     .replace('\n', '<br>'))
-        out.append(
-            f'<div style="background:#1a6b4a;color:#fff;border-radius:14px 14px 4px 14px;'
-            f'padding:0.5rem 0.85rem;font-size:0.88rem;max-width:85%;margin-left:auto">{q}</div>'
-        )
-        out.append(
-            f'<div style="background:#fff;border:1px solid #d1e8da;color:#0d2b1e;'
-            f'border-radius:14px 14px 14px 4px;padding:0.5rem 0.85rem;font-size:0.88rem;'
-            f'max-width:92%;box-shadow:0 1px 4px rgba(0,0,0,0.06)">{a}</div>'
-        )
-    return ''.join(out)
-
-
 st.markdown(f"""
-<button id="gq-conv-fab" title="Unit Converter">&#128208;</button>
-
-<div id="gq-conv-panel">
-  <div id="gq-conv-hdr">
-    <span style="font-size:1.1rem">📐</span>
-    <span>Unit Converter</span>
-    <button id="gq-conv-close" class="gq-conv-hdr-close">&#10005;</button>
-  </div>
-  <div id="gq-conv-body">{_build_conv_html()}</div>
-  <div id="gq-conv-footer">
-    <input id="gq-conv-input" type="text" placeholder="e.g. 4 inches to mm, DN 100 to NPS…"
-           autocomplete="off" />
-    <button id="gq-conv-send">&#9654;</button>
-  </div>
-</div>
-
 <button id="gq-fab" title="Gasket Assistant">&#128172;</button>
 
 <div id="gq-chat-panel">
@@ -1457,35 +1443,21 @@ st.markdown(f"""
 st.html("""
 <script>
 (function attach() {
-  // ── Chat panel ──
+  // -- Chat panel --
   var fab = document.getElementById('gq-fab');
   var panel = document.getElementById('gq-chat-panel');
   var closeBtn = document.getElementById('gq-chat-close');
   var body = document.getElementById('gq-chat-body');
 
-  // ── Converter panel ──
-  var cvFab = document.getElementById('gq-conv-fab');
-  var cvPanel = document.getElementById('gq-conv-panel');
-  var cvClose = document.getElementById('gq-conv-close');
-  var cvBody = document.getElementById('gq-conv-body');
-  var cvInput = document.getElementById('gq-conv-input');
-  var cvSend = document.getElementById('gq-conv-send');
+  if (!fab || !panel) { setTimeout(attach, 100); return; }
 
-  if (!fab || !panel || !cvFab || !cvPanel) { setTimeout(attach, 100); return; }
-
-  // ── Restore open state ──
+  // -- Restore open state --
   if (sessionStorage.getItem('gq_chat_open') === '1') {
     panel.classList.add('gqcp-open');
     fab.innerHTML = '&#10005;';
     if (body) body.scrollTop = body.scrollHeight;
   }
-  if (sessionStorage.getItem('gq_conv_open') === '1') {
-    cvPanel.classList.add('gqcv-open');
-    cvFab.innerHTML = '&#10005;';
-    if (cvBody) cvBody.scrollTop = cvBody.scrollHeight;
-  }
-
-  // ── Chat FAB toggle ──
+  // -- Chat FAB toggle --
   fab.onclick = function() {
     var open = panel.classList.toggle('gqcp-open');
     fab.innerHTML = open ? '&#10005;' : '&#128172;';
@@ -1500,62 +1472,9 @@ st.html("""
     };
   }
   if (body) body.scrollTop = body.scrollHeight;
-
-  // ── Converter FAB toggle ──
-  cvFab.onclick = function() {
-    var open = cvPanel.classList.toggle('gqcv-open');
-    cvFab.innerHTML = open ? '&#10005;' : '&#128208;';
-    sessionStorage.setItem('gq_conv_open', open ? '1' : '0');
-    if (open && cvBody) { cvBody.scrollTop = cvBody.scrollHeight; cvInput && cvInput.focus(); }
-  };
-  if (cvClose) {
-    cvClose.onclick = function() {
-      cvPanel.classList.remove('gqcv-open');
-      cvFab.innerHTML = '&#128208;';
-      sessionStorage.setItem('gq_conv_open', '0');
-    };
-  }
-  if (cvBody) cvBody.scrollTop = cvBody.scrollHeight;
-
-  // ── Converter send: write query to a hidden Streamlit text element via URL param ──
-  function sendConv() {
-    var q = cvInput ? cvInput.value.trim() : '';
-    if (!q) return;
-    // Store in sessionStorage and trigger rerun via URL query param
-    sessionStorage.setItem('gq_conv_query', q);
-    cvInput.value = '';
-    // Trigger Streamlit rerun by updating the hidden input's value
-    var hiddenInput = window.parent.document.querySelector('input[data-testid="stTextInput"][aria-label="__conv_query__"]');
-    if (hiddenInput) {
-      var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      nativeInput.set.call(hiddenInput, q);
-      hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
-  if (cvSend) cvSend.onclick = sendConv;
-  if (cvInput) cvInput.onkeydown = function(e) { if (e.key === 'Enter') sendConv(); };
-
-  // ── On load: restore any pending query from sessionStorage ──
-  var pending = sessionStorage.getItem('gq_conv_query');
-  if (pending) {
-    sessionStorage.removeItem('gq_conv_query');
-    var hiddenInput = window.parent.document.querySelector('input[data-testid="stTextInput"][aria-label="__conv_query__"]');
-    if (hiddenInput) {
-      var nativeInput = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      nativeInput.set.call(hiddenInput, pending);
-      hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
 })();
 </script>
 """, unsafe_allow_javascript=True)
-
-# ── Unit converter input (hidden visually, triggered by JS) ──
-_conv_q = st.text_input('__conv_query__', key='_conv_query_input', label_visibility='collapsed')
-if _conv_q:
-    _ans = _uc_convert(_conv_q)
-    st.session_state.conv_history.append({'q': _conv_q, 'a': _ans})
-    st.rerun()
 
 if _api_ok:
     _q = st.chat_input('Ask about gaskets…', key='float_chat')
