@@ -513,6 +513,7 @@ def _extract_thickness(desc: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 _FACE_RE = re.compile(r'\b(RF|FF)\b|\bRAISED\s+FACE\b|\bFULL\s+FACE\b', re.IGNORECASE)
+_SERIES_RE = re.compile(r'\bSERIES[\s\-]?([AB])\b', re.IGNORECASE)
 _STANDARD_RE = re.compile(
     r'ASME\s+B16\.\d+(?:\s*\(?\s*SERIES[\s\-]?[AB]\s*\)?)?|'
     r'EN\s+1514[\s\-]\d+|'
@@ -1227,7 +1228,7 @@ def regex_extract(description: str) -> dict:
         'sw_winding_material': None, 'sw_filler': None,
         'sw_inner_ring': None, 'sw_outer_ring': None,
         'rtj_groove_type': None, 'rtj_hardness_bhn': None,
-        'ring_no': None, 'confidence': 'LOW',
+        'ring_no': None, 'series': None, 'confidence': 'LOW',
     }
 
     # 1. Gasket type
@@ -1256,6 +1257,11 @@ def regex_extract(description: str) -> dict:
 
     # 7. Special requirements
     result['special'] = _extract_special(desc)
+
+    # 7b. Series A/B (standalone — also captured inside standard string by _STANDARD_RE)
+    m = _SERIES_RE.search(upper)
+    if m:
+        result['series'] = m.group(1).upper()
 
     # 8. Type-specific extraction
     if gasket_type == 'SPIRAL_WOUND':

@@ -524,11 +524,15 @@ _B1647_FLAG = (
 def _set_b1647_standard(item: dict, flags: list, applied_defaults: list) -> None:
     """Normalize B16.47 standard and flag if series A/B not specified."""
     std = (item.get('standard') or '').upper()
-    if 'SERIES A' in std or 'SERIES-A' in std:
+    # Also check the dedicated series field set by regex_extractor
+    series_field = (item.get('series') or '').upper()
+    if 'SERIES A' in std or 'SERIES-A' in std or series_field == 'A':
         item['standard'] = 'ASME B16.47 (SERIES-A)'
+        item['series'] = 'A'
         return
-    if 'SERIES B' in std or 'SERIES-B' in std:
+    if 'SERIES B' in std or 'SERIES-B' in std or series_field == 'B':
         item['standard'] = 'ASME B16.47 (SERIES-B)'
+        item['series'] = 'B'
         return
     item['standard'] = 'ASME B16.47'
     if _B1647_FLAG not in flags:
@@ -1263,9 +1267,9 @@ def apply_rules(item: dict) -> dict:
                 else:
                     item['standard'] = 'ASME B16.21'
 
-    # --- Normalize B16.47: flag if series not specified (handles LLM-extracted standards) ---
+    # --- Normalize B16.47: always call to normalize format and flag if series missing ---
     std = item.get('standard') or ''
-    if 'B16.47' in std and 'SERIES' not in std.upper():
+    if 'B16.47' in std:
         _set_b1647_standard(item, flags, applied_defaults)
 
     # --- Default: UoM ---
