@@ -20,7 +20,7 @@ from core.rules import (
 # ---------------------------------------------------------------------------
 
 _SW_RE = re.compile(
-    r'SPIRAL[\s\-]?WOUND|\bSPRL[\s\-]?WND\b|\bSPWD?\b|\bSPWG\b|'
+    r'SPIRAL[\s\-]?WOUND|\bSPRL[\s\-]?WND\b|\bSPWD?\b|\bSPWG\b|\bSWG\b|'
     r'\bGASW[\s:\-]|'
     r'\bS\.?W\.\s*GASKET|\bWND\b|'
     r'\bGASKETSSPIRAL\b|\bGASKETSPIRAL\b',
@@ -52,7 +52,7 @@ _ISK_RTJ_RE = re.compile(
 )
 
 
-_SW_RING_RE = re.compile(
+_SW_RING_KW_RE = re.compile(
     r'\bINNER\s+RING\b|\bOUTER\s+RING\b|\bCENTERING\s+RING\b|\bI/R\b|\bO/R\b|\bI\s+RING\b',
     re.IGNORECASE,
 )
@@ -81,7 +81,7 @@ def _detect_type(desc: str) -> str:
     if _RING_NO_RE.search(desc):
         return 'RTJ'
     # Inner/outer ring implies spiral wound (checked after RTJ to avoid false positives)
-    if _SW_RING_RE.search(desc):
+    if _SW_RING_KW_RE.search(desc):
         return 'SPIRAL_WOUND'
     return 'SOFT_CUT'
 
@@ -419,7 +419,6 @@ def _build_moc_pattern(aliases: dict) -> re.Pattern:
 
 _SOFTCUT_MOC_RE = _build_moc_pattern(_MOC_ALIASES)
 _RTJ_MOC_RE_PATTERN = _build_moc_pattern(_RTJ_MOC_ALIASES)
-_SW_RING_RE = _build_moc_pattern(_SW_RING_ALIASES)
 _SW_FILLER_RE_PATTERN = _build_moc_pattern(_SW_FILLER_ALIASES)
 
 
