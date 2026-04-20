@@ -30,6 +30,12 @@ _MOC_ALIASES = {
     'NON ASB': 'CNAF',
     'NAF': 'CNAF',
     'NON ASBESTOS': 'NON ASBESTOS',
+    # Hyphen forms — must be present so \bASBESTOS\b inside "NON-ASBESTOS" doesn't match CAF
+    'NON-ASBESTOS COMPRESSED FIBER': 'CNAF',
+    'NON-ASBESTOS FIBER': 'CNAF',
+    'NON-ASBESTOS FIBRE': 'CNAF',
+    'NON-ASBESTOS SHEET': 'NON ASBESTOS',
+    'NON-ASBESTOS': 'NON ASBESTOS',
     'CNAF': 'CNAF',
     # --- Rubber types ---
     'NEOPRENE': 'NEOPRENE',
