@@ -204,7 +204,7 @@ def _classify_structured_col(norm: str) -> str | None:
         return 'dn_size'
     if norm == 'class':
         return 'class_rating'
-    if norm == 'material':
+    if norm in ('material', 'moc'):
         return 'material'
     if norm in ('thickness', 'thk', 'thk (mm)', 'thick'):
         return 'thickness'
@@ -212,6 +212,12 @@ def _classify_structured_col(norm: str) -> str | None:
         return 'od_mm'
     if norm.startswith('(id)') or norm.startswith('id (') or norm.startswith('id mm') or norm == 'id':
         return 'id_mm'
+    # SIZE column (inches): "SIZE", "SIZE (INCH)", "SIZE\n(INCH)", "SIZE (MM)", "NPS"
+    if norm in ('size', 'nps') or norm.startswith('size (') or norm.startswith('size\n'):
+        return 'size_inch'
+    # RATING column: "RATING", "RATING ", "PRESSURE RATING", "CLASS/RATING"
+    if norm in ('rating', 'pressure rating', 'class/rating', 'rating (class)') or norm.startswith('rating'):
+        return 'rating'
     if norm in ('qty', 'quantity'):
         return 'quantity'
     if norm in ('uom', 'inv uom'):
@@ -237,7 +243,8 @@ def _detect_structured_sections(all_rows: list[tuple]) -> list[tuple]:
         has_material = 'material' in col_map
         has_dn_cls = 'dn_size' in col_map and 'class_rating' in col_map
         has_od_id = 'od_mm' in col_map and 'id_mm' in col_map
-        return has_material and (has_dn_cls or has_od_id)
+        has_size_rating = 'size_inch' in col_map and 'rating' in col_map
+        return has_material and (has_dn_cls or has_od_id or has_size_rating)
 
     for row_idx, row in enumerate(all_rows):
         # Try to interpret this row as a header
@@ -283,6 +290,8 @@ def _parse_structured_sheet(ws) -> list[dict]:
         thk_col = col_map.get('thickness')
         od_col = col_map.get('od_mm')
         id_col = col_map.get('id_mm')
+        size_col = col_map.get('size_inch')
+        rating_col = col_map.get('rating')
         qty_col = col_map.get('quantity')
         uom_col = col_map.get('uom')
         line_col = col_map.get('line_no')
@@ -317,6 +326,20 @@ def _parse_structured_sheet(ws) -> list[dict]:
                 thk = _cell_str(row, thk_col) if thk_col is not None else None
                 thk_part = f' X {thk}MM THK' if thk else ''
                 desc = f'OD {od}MM X ID {id_}MM{thk_part} GASKET MOC: {mat_val}'
+            elif size_col is not None and rating_col is not None:
+                size_raw = _cell_str(row, size_col)
+                rating_raw = _cell_str(row, rating_col)
+                if not size_raw or not rating_raw:
+                    continue
+                # Numeric inch value (e.g. 10 → 10", 1.5 → 1.5")
+                try:
+                    sv = float(size_raw)
+                    size_str = f'{int(sv)}"' if sv == int(sv) else f'{sv}"'
+                except ValueError:
+                    size_str = size_raw  # already a formatted string
+                thk = _cell_str(row, thk_col) if thk_col is not None else None
+                thk_part = f' {thk}MM THK' if thk else ''
+                desc = f'{size_str} {rating_raw}{thk_part} GASKET MOC: {mat_val}'
             else:
                 continue
 

@@ -835,11 +835,20 @@ def _extract_sw_fields(desc: str) -> dict:
             if m:
                 result['sw_winding_material'] = _norm_ring_material(m.group(1))
             else:
-                # Try first SS/alloy/UNS mention as winding material
+                # "with <material> graphite/PTFE" — winding before a filler keyword
+                m = re.search(
+                    r'\bWITH\s+([\w\s]+?)\s+(?:GRAPHITE|PTFE|FILLER|FILL)\b',
+                    upper,
+                )
+                if m:
+                    result['sw_winding_material'] = _norm_ring_material(m.group(1).strip())
+            if not result['sw_winding_material']:
+                # Try first SS/alloy/UNS/trade-name mention as winding material
                 m = re.search(
                     r'\b(SS[\s\-]*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
                     r'ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|'
                     r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+|'
+                    r'\d{3}\s*SMO|'
                     r'DUPLEX\s*SS?\d*|SUPER\s*DUPLEX)',
                     upper,
                 )
