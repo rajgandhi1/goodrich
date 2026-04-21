@@ -1040,12 +1040,17 @@ def _normalize_isk_special(special: str) -> str:
 def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
     gtype = item.get('gasket_type', 'ISK')
 
-    # TYPE-E = full face (FF) by definition; TYPE-F = raised face (RF) always
+    # TYPE-E = full face (FF) by definition; TYPE-F/D = raised face (RF) always
+    # VCS is equivalent to STYLE-CS (RF by default)
     isk_style_raw = (item.get('isk_style') or '').upper()
-    if 'TYPE-E' in isk_style_raw or isk_style_raw == 'TYPE E':
+    isk_type_raw  = (item.get('isk_type')  or '').upper()
+    _is_type = lambda t: t in isk_style_raw or t in isk_type_raw
+    if _is_type('TYPE-E') or isk_style_raw == 'TYPE E':
         item['face_type'] = 'FF'
-    elif 'TYPE-F' in isk_style_raw or isk_style_raw == 'TYPE F':
+    elif _is_type('TYPE-F') or isk_style_raw == 'TYPE F':
         item['face_type'] = 'RF'  # Type F = raised face = always RF
+    elif _is_type('TYPE-D') or isk_style_raw == 'TYPE D':
+        item['face_type'] = 'RF'  # Type D = raised face
 
     # Face type: extract from LLM or default RF
     if not item.get('face_type'):

@@ -236,23 +236,45 @@ def _fmt_isk(item: dict) -> str:
 
     base = f'SIZE: {size_str} X {rating_str}'
 
-    # STYLE-CS: "SIZE : {size} X {rating} X 3MM THK ,ISK,STYLE-CS (SET:{content}) {standard} ( NON FIRE SAFE )"
+    # VCS is the customer term for GGPL's STYLE-CS
+    if isk_style in ('VCS', 'STYLE-VCS'):
+        isk_style = 'STYLE-CS'
+
+    # STYLE-CS: "SIZE: {size} X {rating}, INSULATING GASKET KIT, STYLE-CS, (SET: {content}), {face}, {standard}"
     # This is the GGPL format for TYPE-A insulating gasket kits.
     if isk_style == 'STYLE-CS':
         size_str = _fmt_size(size, gtype)
         rating_str = _fmt_rating(rating)
-        set_content = _style_cs_set(item)
-        out = f'SIZE : {size_str} X {rating_str} X 3MM THK ,ISK,STYLE-CS (SET:{set_content})'
-        if standard:
-            out += f' {standard}'
-        out += ' ( NON FIRE SAFE )'
+        # Build SET content from component fields when available, else fall back to special
+        has_components = bool(
+            item.get('isk_gasket_material') or item.get('isk_core_material')
+            or item.get('isk_sleeve_material') or item.get('isk_insulating_washer')
+        )
+        set_content = _style_cs_set(item) if has_components else (special or '')
+        # If ISK type is TYPE-F, add the "(TYPE F - RF)" qualifier on the style label
+        isk_type = (item.get('isk_type') or '').upper()
+        style_label = 'STYLE-CS (TYPE F - RF)' if 'TYPE-F' in isk_type else 'STYLE-CS'
+        out = f'SIZE: {size_str} X {rating_str}, INSULATING GASKET KIT, {style_label}, (SET: {set_content})'
+        tail_parts = []
+        if face_type:
+            tail_parts.append(face_type)
+        if std_explicit and standard:
+            tail_parts.append(standard)
+        if fire_safety:
+            tail_parts.append(f'({fire_safety})')
+        if tail_parts:
+            out += ', ' + ', '.join(tail_parts)
         return out
 
     # STYLE-N and equivalent parenthesized styles (FCS, TYPE-D):
     # "SIZE: S X R, INSULATING GASKET KIT ({style}) spec, face (fire_safety)"
     if isk_style in ('STYLE-N', 'FCS', 'TYPE-D'):
         out = f'{base}, INSULATING GASKET KIT ({isk_style})'
-        if special:
+        # Build detailed component string when dedicated fields are available
+        components = _isk_style_n_components(item)
+        if components:
+            out += f' {components}'
+        elif special:
             out += f' {special}'
         tail_parts = []
         if face_type:
@@ -335,22 +357,41 @@ def _fmt_isk(item: dict) -> str:
 
 def _style_cs_set(item: dict) -> str:
     """Build the SET content for STYLE-CS (TYPE-A) ISK kits.
-    Format: G11 GASKET WITH 316 STEEL CORE WITH PTFE SPRING ENERGISED SEAL, G11 WASHER & SLEEVES,ZINC PLATED CS WASHER
+    Format: {gasket} GASKET WITH {core} CORE 3MM THK WITH {primary_seal},
+            {sleeve} SLEEVES, {insulating_washer} INSULATING WASHER 3MM THK,
+            METALLIC WASHER {metallic_washer} 3MM THK
+    Falls back to legacy compact format when component fields are not populated.
     """
-    import re as _re
-    gasket_grade = _cs_grade(item.get('isk_gasket_material'))
-    core_grade   = _cs_core(item.get('isk_core_material'))
-    sleeve_grade = _cs_grade(item.get('isk_sleeve_material'))
+    gasket_grade     = _cs_grade(item.get('isk_gasket_material'))
+    core_grade       = _cs_core(item.get('isk_core_material'))
+    sleeve_grade     = _cs_grade(item.get('isk_sleeve_material'))
+    primary_seal     = (item.get('isk_primary_seal') or '').strip().upper() or 'PTFE SPRING ENERGISED SEAL'
+    ins_washer       = _cs_grade(item.get('isk_insulating_washer'))
+    metallic_washer  = (item.get('isk_washer_material') or '').strip().upper() or 'ZINC PLATED CS WASHER'
 
+    # If we have both insulating washer AND sleeve as separate components, use detailed format
+    if ins_washer and sleeve_grade:
+        out = ''
+        if gasket_grade:
+            out += f'{gasket_grade} GASKET '
+        if core_grade:
+            out += f'WITH {core_grade} CORE 3MM THK '
+        out += f'WITH {primary_seal}'
+        out += f', {sleeve_grade} SLEEVES'
+        out += f', {ins_washer} INSULATING WASHER 3MM THK'
+        out += f', METALLIC WASHER {metallic_washer} 3MM THK'
+        return out
+
+    # Legacy compact format (sleeve doubles as insulating washer)
     out = ''
     if gasket_grade:
         out += f'{gasket_grade} GASKET '
     if core_grade:
         out += f'WITH {core_grade} STEEL CORE '
-    out += 'WITH PTFE SPRING ENERGISED SEAL'
+    out += f'WITH {primary_seal}'
     if sleeve_grade:
         out += f', {sleeve_grade} WASHER & SLEEVES'
-    out += ',ZINC PLATED CS WASHER'
+    out += f',{metallic_washer}'
     return out
 
 
@@ -376,6 +417,36 @@ def _cs_core(mat: str | None) -> str:
     # Strip SS prefix: "SS316" → "316", "SS316L" → "316L"
     s = _re.sub(r'^SS\s*', '', s)
     return s
+
+
+def _isk_style_n_components(item: dict) -> str:
+    """Build the detailed component string for STYLE-N ISK kits when fields are available.
+    Format: GRE G10 CORE 4MM THK, PRIMARY SEAL PTFE, SLEEVE GRE G10,
+            INSULATING WASHER G10, METALLIC WASHER ZINC PLATED CS WASHER 3MM THK
+    Returns empty string when no component fields are populated.
+    """
+    gasket_mat   = (item.get('isk_gasket_material') or '').strip().upper()
+    primary_seal = (item.get('isk_primary_seal') or '').strip().upper()
+    sleeve       = (item.get('isk_sleeve_material') or '').strip().upper()
+    ins_washer   = (item.get('isk_insulating_washer') or '').strip().upper()
+    metallic_w   = (item.get('isk_washer_material') or '').strip().upper()
+
+    # Only build component string when we have meaningful data
+    if not any([gasket_mat, primary_seal, sleeve, ins_washer, metallic_w]):
+        return ''
+
+    parts = []
+    if gasket_mat:
+        parts.append(f'{gasket_mat} CORE 4MM THK')
+    if primary_seal:
+        parts.append(f'PRIMARY SEAL {primary_seal}')
+    if sleeve:
+        parts.append(f'SLEEVE {sleeve}')
+    if ins_washer:
+        parts.append(f'INSULATING WASHER {ins_washer}')
+    if metallic_w:
+        parts.append(f'METALLIC WASHER {metallic_w} 3MM THK')
+    return ', '.join(parts)
 
 
 def _isk_components(item: dict) -> str:
@@ -423,14 +494,23 @@ def _fmt_size(size: str, gtype: str) -> str:
     """
     import re as _re
     s = size.strip()
-    # Already has inch symbol — strip any stray 'NPS' label, then convert fraction to decimal
+    # Already has inch symbol — strip any stray 'NPS' label, then normalise
     if '"' in s:
         s = _re.sub(r'\bNPS\b\s*', '', s, flags=_re.IGNORECASE).strip()
-        # Mixed fraction with space or hyphen: "1 1/4"" or "1-1/4"" → "1.25""
-        mf = _re.match(r'^(\d+)[\s\-]+(\d+)/(\d+)"$', s)
-        if mf:
-            val = int(mf.group(1)) + int(mf.group(2)) / int(mf.group(3))
-            return f'{_fmt_num(val)}"'
+        # ISK uses hyphenated fraction notation (e.g. 1-1/16", 2-1/16" for wellhead sizes):
+        #   "1 1/2"" → "1-1/2"" (normalise space to hyphen, then preserve)
+        #   "1-1/2"" → keep as-is
+        # All other types convert fractions to decimals (e.g. SPW, SOFT_CUT).
+        if gtype in ('ISK', 'ISK_RTJ'):
+            mf = _re.match(r'^(\d+)[\s\-]+(\d+)/(\d+)"$', s)
+            if mf:
+                return f'{mf.group(1)}-{mf.group(2)}/{mf.group(3)}"'
+        else:
+            # Mixed fraction with space or hyphen: "1 1/4"" or "1-1/4"" → "1.25""
+            mf = _re.match(r'^(\d+)[\s\-]+(\d+)/(\d+)"$', s)
+            if mf:
+                val = int(mf.group(1)) + int(mf.group(2)) / int(mf.group(3))
+                return f'{_fmt_num(val)}"'
         # Simple fraction: "3/4"" → "0.75""
         sf = _re.match(r'^(\d+)/(\d+)"$', s)
         if sf:

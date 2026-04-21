@@ -599,6 +599,9 @@ def _build_rows(items):
             'ISK Core':             item.get('isk_core_material') or '',
             'ISK Sleeves':          item.get('isk_sleeve_material') or '',
             'ISK Washers':          item.get('isk_washer_material') or '',
+            'ISK Primary Seal':     item.get('isk_primary_seal') or '',
+            'ISK Secondary Seal':   item.get('isk_secondary_seal') or '',
+            'ISK Ins Washer':       item.get('isk_insulating_washer') or '',
             'KAMM Core':            item.get('kamm_core_material') or '',
             'KAMM Surface':         item.get('kamm_surface_material') or '',
             'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
@@ -657,13 +660,19 @@ def _editor_fragment(items, display_indices):
             'SW Outer Ring':        st.column_config.TextColumn('SW Outer Ring', width='small'),
             'SW Inner Ring':        st.column_config.TextColumn('SW Inner Ring', width='small'),
             'ISK Gasket Mat':       st.column_config.TextColumn('ISK Gasket Mat', width='small',
-                                        help='ISK gasket ring material e.g. GRE G10, PTFE, PEEK'),
+                                        help='ISK laminated ring material e.g. GRE G10, Mica, G7, PTFE, PEEK'),
             'ISK Core':             st.column_config.TextColumn('ISK Core', width='small',
-                                        help='ISK metal core e.g. SS316, CS, DUPLEX'),
+                                        help='ISK metal core e.g. SS316, CS, UNS S32760, INC 625, DSS 31803'),
             'ISK Sleeves':          st.column_config.TextColumn('ISK Sleeves', width='small',
-                                        help='ISK sleeve insulation material'),
+                                        help='ISK sleeve material e.g. GRE G10, PTFE, Mylar'),
             'ISK Washers':          st.column_config.TextColumn('ISK Washers', width='small',
-                                        help='ISK washer/bolt material e.g. CS, SS316'),
+                                        help='Metallic washer e.g. Zinc Plated CS, SS316, MS'),
+            'ISK Primary Seal':     st.column_config.TextColumn('ISK Primary Seal', width='small',
+                                        help='Primary seal e.g. PTFE Spring Energised, Viton O-ring, EPDM O-ring'),
+            'ISK Secondary Seal':   st.column_config.TextColumn('ISK Secondary Seal', width='small',
+                                        help='Secondary seal e.g. Mica'),
+            'ISK Ins Washer':       st.column_config.TextColumn('ISK Ins Washer', width='small',
+                                        help='Insulating (non-metallic) washer grade e.g. G10, G11, Mica, Mylar'),
             'KAMM Core':            st.column_config.TextColumn('KAMM Core', width='small',
                                         help='Kammprofile metal core e.g. SS316, ALLOY 625'),
             'KAMM Surface':         st.column_config.TextColumn('KAMM Surface', width='small',
@@ -718,6 +727,9 @@ def _editor_fragment(items, display_indices):
             base['isk_core_material']    = row['ISK Core'] or None
             base['isk_sleeve_material']  = row['ISK Sleeves'] or None
             base['isk_washer_material']  = row['ISK Washers'] or None
+            base['isk_primary_seal']     = row['ISK Primary Seal'] or None
+            base['isk_secondary_seal']   = row['ISK Secondary Seal'] or None
+            base['isk_insulating_washer']= row['ISK Ins Washer'] or None
             base['kamm_core_material']   = row['KAMM Core'] or None
             base['kamm_surface_material']= row['KAMM Surface'] or None
             # For SPW/KAMM, always clear MOC so apply_rules rebuilds it from

@@ -23,7 +23,9 @@ _SW_RE = re.compile(
     r'SPIRAL[\s\-]?WOUND|\bSPRL[\s\-]?WND\b|\bSPWD?\b|\bSPWG\b|\bSWG\b|'
     r'\bGASW[\s:\-]|'
     r'\bS\.?W\.\s*GASKET|\bWND\b|'
-    r'\bGASKETSSPIRAL\b|\bGASKETSPIRAL\b',
+    r'\bGASKETSSPIRAL\b|\bGASKETSPIRAL\b|'
+    r'\bJOINT\s+SPIRALE?\b|'           # French: "JOINT SPIRALE" = spiral wound
+    r'\bSW\s+CR/IR\b|\bSW\s+IR\b',    # "SW CR/IR" / "SW IR" abbreviations
     re.IGNORECASE,
 )
 _RTJ_RE = re.compile(
@@ -987,7 +989,7 @@ def _extract_rtj_fields(desc: str) -> dict:
 # ---------------------------------------------------------------------------
 
 _ISK_STYLE_RE = re.compile(
-    r'\b(STYLE[\s\-]?(?:CS|N|FCS)|TYPE[\s\-]?[ADEFIK]|FCS|VCFS)\b',
+    r'\b(STYLE[\s\-]?(?:CS|VCS|N|FCS)|VCS|TYPE[\s\-]?[ADEFIK]|FCS|VCFS)\b',
     re.IGNORECASE,
 )
 _ISK_FS_RE = re.compile(
@@ -1001,26 +1003,54 @@ _ISK_GRE_RE = re.compile(
     r'|\b(?:GRADE\s+)?G(10|11)\b',
     re.IGNORECASE,
 )
-# Core metal: "WITH SS316 CORE", "SS316L CORE", "CS CORE"
-# Also reversed: "316 SS CORE", "304 SS CORE"
+# Core metal: expanded for UNS codes, duplex/DSS/SDSS, INC/Inconel/Incoloy, Titanium, Monel, etc.
 _ISK_CORE_RE = re.compile(
     r'(?:WITH\s+)?'
-    r'(SS\s*3(?:04|16L?|21)|CS|CARBON\s+STEEL|DUPLEX|SUPER\s+DUPLEX'
-    r'|INCONEL\s+\d+|ALLOY\s+\d+|HASTELLOY\s+\w+|UNS\s+\w+)'
+    r'(SS\s*3(?:04|16L?|17L?|21H?|10S?|47H?)|316LSS?|CS|CARBON\s+STEEL'
+    r'|SUPER\s+DUPLEX|DUPLEX|DSS|SDSS'
+    r'|INCONEL\s+\d+|INCOLOY\s+\d+|INC\s+\d+'
+    r'|ALLOY\s+\d+|HASTELLOY\s+[A-Z]\w*|MONEL\s+\d+'
+    r'|UNS\s+[A-Z\d]+|\d+MO|ALUMINI?UM'
+    r'|TITANIUM\s+GR\.?\s*\d+|9CR[\s\-]1MO'
+    r'|(?:SUPER\s+)?DUPLEX\s+\d+|DSS\s+\d+|SDSS\s+\w+)'
     r'\s+CORE\b'
     r'|(?:WITH\s+)?(3(?:04|16L?|21))\s+SS\s+CORE\b',
     re.IGNORECASE,
 )
-# Sleeve material: "GRE G-11 INSU SLEEVES", "PTFE SLEEVES"
+# Sleeve material: "GRE G-11 INSU SLEEVES", "PTFE SLEEVES", "MYLAR SLEEVES"
 _ISK_SLEEVE_RE = re.compile(
-    r'(GRE\s*\(?\s*G[\s\-]?\d+\s*\)?|G10|G11|PTFE)\s+'
+    r'(GRE\s*\(?\s*G[\s\-]?\d+\s*\)?|G10|G11|PTFE|MYLAR|PHENOLIC|MICA)\s+'
     r'(?:INSU(?:LATION|LATING)?\s+)?SLEEVES?',
     re.IGNORECASE,
 )
-# Washer/bolt material: "CS WASHERS", "SS316 BOLT SLEEVES & WASHERS"
+# Metallic washer: labelled "METALLIC WASHER ...", or common metallic washer patterns
 _ISK_WASHER_RE = re.compile(
-    r'(CS|SS\s*3(?:04|16L?|21)|CARBON\s+STEEL|STEEL)\s+'
-    r'(?:BOLT\s+)?(?:SLEEVES?\s+(?:&|AND)\s+)?WASHERS?',
+    r'\bMETALLIC\s+WASHER\s+([\w\s\-]+?(?:WASHER|CS|MS|SS|STEEL))\b'
+    r'|\b((?:ZINC\s+PLATED|XYLAN\s+COATED|ENP\s+PLATED|GALVANI[SZ]ED'
+    r'|ELECTROPLATED(?:\s+GALVANI[SZ]ED)?|XYLAN|MS\s+XYLAN)\s+(?:CS|MS|STEEL)\s+WASHER'
+    r'|SS\s*3(?:04|16L?|21)\s+WASHER|3(?:04|16L?|21)\s+WASHER|MS\s+WASHER|CS\s+WASHER|SS\s+WASHER)\b'
+    r'|(CS|SS\s*3(?:04|16L?|21)|CARBON\s+STEEL|STEEL)\s+(?:BOLT\s+)?(?:SLEEVES?\s+(?:&|AND)\s+)?WASHERS?',
+    re.IGNORECASE,
+)
+# Insulating (non-metallic) washer: "G10 INSULATING WASHER", "INSULATING WASHER G11"
+_ISK_INS_WASHER_RE = re.compile(
+    r'(G10|G11|G-10|G-11|MICA|G7|G3|MYLAR|PHENOLIC)\s+INSULATING\s+WASHER\b'
+    r'|\bINSULATING\s+WASHER\s+(G10|G11|G-10|G-11|MICA|G7|G3|MYLAR|PHENOLIC)\b',
+    re.IGNORECASE,
+)
+# Primary seal: Viton O-ring, PTFE spring-energised seal, Graphite seal, EPDM O-ring
+_ISK_PRIMARY_SEAL_RE = re.compile(
+    r'\bVITON\s*[\'"]?O[\'"]?\s*RING\b'
+    r'|\bPTFE\s+SPRING[\s\-]ENERGI[SZ]ED\s+(?:SEAL|RING)\b'
+    r'|\bGRAPHITE\s+SEAL\b'
+    r'|\bEPDM\s*[\'"]?O[\'"]?\s*RING\b'
+    r'|\bPRIMARY\s+SEAL[\s:\-]*\s*(PTFE|GRAPHITE|VITON|EPDM)\b',
+    re.IGNORECASE,
+)
+# Secondary seal: MICA secondary seal
+_ISK_SECONDARY_SEAL_RE = re.compile(
+    r'\b(MICA)\s+SECONDARY\s+SEAL\b'
+    r'|\bSECONDARY\s+SEAL[\s:\-\+]*\s*(MICA|GRAPHITE|PTFE)\b',
     re.IGNORECASE,
 )
 
@@ -1044,7 +1074,8 @@ def _normalise_gre(m_gre) -> str | None:
 
 def _extract_isk_fields(desc: str) -> dict:
     """Extract ISK/ISK_RTJ fields: style, fire safety, gasket material,
-    core material, sleeve material, washer material."""
+    core material, sleeve material, washer material, primary/secondary seal,
+    insulating washer."""
     result = {
         'isk_style': None,
         'isk_fire_safety': None,
@@ -1052,19 +1083,37 @@ def _extract_isk_fields(desc: str) -> dict:
         'isk_core_material': None,
         'isk_sleeve_material': None,
         'isk_washer_material': None,
+        'isk_primary_seal': None,
+        'isk_secondary_seal': None,
+        'isk_insulating_washer': None,
     }
     upper = desc.upper()
 
-    # Style (STYLE-CS, STYLE-N, TYPE-A, TYPE-E, TYPE-F, FCS/VCFS …)
-    m = _ISK_STYLE_RE.search(upper)
-    if m:
-        raw = m.group(1).upper().replace(' ', '-').replace('--', '-')
-        if 'VCFS' in raw or 'FCS' in raw:
-            raw = 'FCS'
-        # TYPE-A is the customer term for GGPL's STYLE-CS
-        elif raw in ('TYPE-A', 'TYPE A'):
+    # Style: prioritise explicit STYLE-xx over TYPE-xx so that "STYLE-CS (TYPE-F)" → STYLE-CS
+    m_style = re.search(r'\b(STYLE[\s\-]?(?:CS|VCS|N|FCS)|VCS|FCS|VCFS)\b', upper, re.IGNORECASE)
+    m_type  = re.search(r'\bTYPE[\s\-]?([AEFDI])\b', upper, re.IGNORECASE)
+    if m_style:
+        raw = m_style.group(1).upper().replace(' ', '-').replace('--', '-')
+        if raw in ('VCS', 'STYLE-VCS', 'TYPE-VCS'):
             raw = 'STYLE-CS'
+        elif raw in ('FCS', 'VCFS'):
+            raw = 'FCS'
         result['isk_style'] = raw
+        # Also capture TYPE-F/E/D alongside style for label use in formatter
+        if m_type:
+            t = m_type.group(1).upper()
+            if t == 'A':
+                result['isk_style'] = result['isk_style'] or 'STYLE-CS'
+            else:
+                result['isk_type'] = f'TYPE-{t}'
+    elif m_type:
+        raw_type = m_type.group(1).upper()
+        # TYPE-A = customer term for STYLE-CS
+        if raw_type == 'A':
+            result['isk_style'] = 'STYLE-CS'
+        else:
+            result['isk_style'] = f'TYPE-{raw_type}'
+        result['isk_type'] = result['isk_style']
 
     # Fire safety
     m = _ISK_FS_RE.search(upper)
@@ -1085,18 +1134,15 @@ def _extract_isk_fields(desc: str) -> dict:
     # Core material — group(1) = "SS316 CORE" style, group(2) = "316 SS CORE" reversed style
     m = _ISK_CORE_RE.search(desc)
     if m:
-        if m.group(1):
-            raw = re.sub(r'\s+', '', m.group(1).strip().upper())
-        else:
-            # Reversed: "316 SS CORE" → normalise to "SS316"
-            raw = 'SS' + m.group(2).strip().upper()
-        result['isk_core_material'] = raw
+        grp = m.group(1) or m.group(2)
+        if grp:
+            raw = re.sub(r'\s+', ' ', grp.strip().upper())
+            result['isk_core_material'] = raw
 
     # Sleeve material
     m = _ISK_SLEEVE_RE.search(desc)
     if m:
         raw = m.group(1).strip().upper()
-        # Check if it references a GRE grade
         m_gre2 = _ISK_GRE_RE.match(raw)
         if m_gre2:
             result['isk_sleeve_material'] = _normalise_gre(m_gre2)
@@ -1105,11 +1151,33 @@ def _extract_isk_fields(desc: str) -> dict:
         else:
             result['isk_sleeve_material'] = raw
 
-    # Washer material
+    # Metallic washer material — try METALLIC WASHER label first, then pattern-based
     m = _ISK_WASHER_RE.search(desc)
     if m:
-        raw = m.group(1).strip().upper()
-        result['isk_washer_material'] = re.sub(r'\s+', '', raw) if raw.startswith('SS') else raw
+        raw = (m.group(1) or m.group(2) or m.group(3) or '').strip().upper()
+        if raw:
+            result['isk_washer_material'] = raw
+
+    # Insulating (non-metallic) washer
+    m = _ISK_INS_WASHER_RE.search(desc)
+    if m:
+        raw = (m.group(1) or m.group(2) or '').strip().upper().replace('-', '')
+        if raw:
+            result['isk_insulating_washer'] = raw  # e.g. "G10", "G11", "MICA"
+
+    # Primary seal
+    m = _ISK_PRIMARY_SEAL_RE.search(desc)
+    if m:
+        raw = m.group(0).strip().upper()
+        # Normalise "PRIMARY SEAL: PTFE" → just the seal type
+        grp = m.group(1) if m.lastindex and m.group(1) else None
+        result['isk_primary_seal'] = grp.upper() if grp else raw
+
+    # Secondary seal
+    m = _ISK_SECONDARY_SEAL_RE.search(desc)
+    if m:
+        grp = m.group(1) or m.group(2)
+        result['isk_secondary_seal'] = grp.strip().upper() if grp else 'MICA'
 
     return result
 
@@ -1225,6 +1293,8 @@ def regex_extract(description: str) -> dict:
         'isk_style': None, 'isk_fire_safety': None,
         'isk_gasket_material': None, 'isk_core_material': None,
         'isk_sleeve_material': None, 'isk_washer_material': None,
+        'isk_primary_seal': None, 'isk_secondary_seal': None,
+        'isk_insulating_washer': None, 'isk_type': None,
         'dji_filler': None,
         'kamm_core_material': None, 'kamm_surface_material': None,
         'sw_winding_material': None, 'sw_filler': None,
