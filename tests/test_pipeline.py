@@ -734,15 +734,17 @@ def test_isk_rtj_formatter():
 
 
 def test_dji_formatter():
-    """Test DJI formatter — drawing pattern and corrugated type. No LLM needed."""
+    """Test DJI formatter — all patterns: drawing (with/without moc), corrugated,
+    ID-first mineral fiber, ID-first face type. No LLM needed."""
     from core.formatter import format_description
 
     def dji(od, id_, thk, moc, filler='GRAPHITE', special=''):
         return {'gasket_type': 'DJI', 'od_mm': od, 'id_mm': id_,
-                'thickness_mm': thk, 'moc': moc, 'dji_filler': filler, 'special': special}
+                'thickness_mm': thk, 'moc': moc, 'dji_filler': filler, 'special': special,
+                'dji_face_type': None, 'dji_id_first': False}
 
     cases = [
-        # Drawing-based cases (AS PER DRAWING pattern)
+        # Drawing-based cases (AS PER DRAWING pattern, OD-first)
         (dji(1430, 1404, 3,   'SOFT IRON',  'GRAPHITE',  'AS PER DRAWING'),
          'SIZE : 1430MM OD X 1404MM ID X 3MM THK, DOUBLE JACKETED, SOFT IRON WITH GRAPHITE FILLER (AS PER DRAWING)'),
         (dji(1310, 1272, 3,   'SOFT IRON',  'GRAPHITE',  'AS PER DRAWING'),
@@ -755,9 +757,24 @@ def test_dji_formatter():
          'SIZE : 610MM OD X 578MM ID X 3MM THK, DOUBLE JACKETED, SOFT IRON WITH GRAPHITE FILLER (AS PER DRAWING)'),
         (dji(508,  476,  3,   'SOFT IRON',  'GRAPHITE',  'AS PER DRAWING'),
          'SIZE : 508MM OD X 476MM ID X 3MM THK, DOUBLE JACKETED, SOFT IRON WITH GRAPHITE FILLER (AS PER DRAWING)'),
-        # Corrugated type (no drawing reference)
+        # Corrugated type (no drawing reference, OD-first)
         (dji(367,  341,  3.2, 'SS304L', 'CORRUGATED TYPE GRAPHITE', ''),
          'SIZE : 367MM OD X 341MM ID X 3.2MM THK, SS304L DOUBLE JACKETED GASKET WITH CORRUGATED TYPE GRAPHITE FILLER'),
+        # Drawing with no moc — filler-only (ASBESTOS FREE material, no explicit jacket)
+        ({'gasket_type': 'DJI', 'od_mm': 958, 'id_mm': 858, 'thickness_mm': 3, 'moc': None,
+          'dji_filler': 'ASBESTOS FREE', 'special': 'AS PER DRAWING',
+          'dji_face_type': None, 'dji_id_first': False},
+         'SIZE : 958MM OD X 858MM ID X 3MM THK, DOUBLE JACKETED WITH ASBESTOS FREE (AS PER DRAWING)'),
+        # ID-first format — TYPE 3 / mineral fiber configuration (heat exchanger pattern)
+        ({'gasket_type': 'DJI', 'od_mm': 300, 'id_mm': 280, 'thickness_mm': 10, 'moc': 'SOFT IRON',
+          'dji_filler': 'MINERAL FIBER', 'special': '',
+          'dji_face_type': None, 'dji_id_first': True},
+         'SIZE : 280MM ID X 300MM OD X 10MM THK, DOUBLE JACKETED,SOFT IRON + MINERAL FIBER FILLER'),
+        # ID-first with RF face type (TEFLON jacket / RUBBER filler → roles swapped in GGPL output)
+        ({'gasket_type': 'DJI', 'od_mm': 153, 'id_mm': 54, 'thickness_mm': 3, 'moc': 'TEFLON',
+          'dji_filler': 'RUBBER', 'special': '',
+          'dji_face_type': 'RF', 'dji_id_first': True},
+         'SIZE : 54MM ID X 153MM OD X 3MM THK, RUBBER DOUBLE JACKETED GASKET WITH TEFLON FILLER ,RF'),
     ]
 
     for i, (item, expected) in enumerate(cases):
@@ -768,6 +785,67 @@ def test_dji_formatter():
             f'\n  Got:      {result}'
         )
     print(f'  All {len(cases)} DJI formatter cases passed ✓')
+
+
+def test_dji_regex_extraction():
+    """Test regex extraction of new DJI fields: rib, face type, filler normalization,
+    structured JACKET/FILLER MATERIAL labels, and ID-first/TYPE 3 detection."""
+    from core.regex_extractor import regex_extract
+
+    # Case 1: WITH RIB detection
+    r1 = regex_extract('DOUBLE JACKETED GASKET 2" 150# SS316L GRAPHITE WITH RIB ASME B16.20')
+    assert r1['gasket_type'] == 'DJI', f'Expected DJI, got {r1["gasket_type"]}'
+    assert r1['dji_rib'] == 'WITH RIB', f'Expected WITH RIB, got {r1["dji_rib"]}'
+
+    # Case 2: FG → GRAPHITE normalization + WITHOUT RIB + COPPER jacket
+    r2 = regex_extract('DOUBLE JACKET GASKET OD110MM ID101MM 1.5MM THK COPPER FG WITHOUT RIB')
+    assert r2['gasket_type'] == 'DJI', f'Expected DJI, got {r2["gasket_type"]}'
+    assert r2['dji_filler'] == 'GRAPHITE', f'Expected GRAPHITE (from FG), got {r2["dji_filler"]}'
+    assert r2['dji_rib'] == 'WITHOUT RIB', f'Expected WITHOUT RIB, got {r2["dji_rib"]}'
+    assert r2['moc'] == 'COPPER', f'Expected COPPER, got {r2["moc"]}'
+
+    # Case 3: Structured JACKET MATERIAL / FILLER MATERIAL labels
+    r3 = regex_extract(
+        'DOUBLE JACKETED GASKET; JACKET MATERIAL: TEFLON, FILLER MATERIAL: RUBBER, '
+        'ID 54MM OD 153MM THK 3.0 MM'
+    )
+    assert r3['gasket_type'] == 'DJI', f'Expected DJI, got {r3["gasket_type"]}'
+    assert r3['moc'] == 'TEFLON', f'Expected TEFLON, got {r3["moc"]}'
+    assert r3['dji_filler'] == 'RUBBER', f'Expected RUBBER, got {r3["dji_filler"]}'
+
+    # Case 4: ID-first keyword order → dji_id_first = True
+    r4 = regex_extract(
+        'DOUBLE JACKETED GASKET ID 280MM OD 300MM THK 3.2MM SOFT IRON AND GRAPHITE'
+    )
+    assert r4['gasket_type'] == 'DJI', f'Expected DJI, got {r4["gasket_type"]}'
+    assert r4['dji_id_first'] is True, f'Expected True (ID before OD), got {r4["dji_id_first"]}'
+    assert r4['moc'] == 'SOFT IRON', f'Expected SOFT IRON, got {r4["moc"]}'
+    assert r4['dji_filler'] == 'GRAPHITE', f'Expected GRAPHITE, got {r4["dji_filler"]}'
+
+    # Case 5: TYPE 3 marker → dji_id_first = True; FILLER: label extraction
+    r5 = regex_extract(
+        'DOUBLE JACKETED GASKET OD 300MM ID 280MM THK 10MM TYPE 3 SOFT IRON FILLER: MINERAL FIBER'
+    )
+    assert r5['gasket_type'] == 'DJI', f'Expected DJI, got {r5["gasket_type"]}'
+    assert r5['dji_id_first'] is True, f'Expected True (TYPE 3), got {r5["dji_id_first"]}'
+    assert r5['dji_filler'] == 'MINERAL FIBER', f'Expected MINERAL FIBER, got {r5["dji_filler"]}'
+
+    # Case 6: RF face type extraction for DJI
+    r6 = regex_extract(
+        'DOUBLE JACKETED GASKET ID 54MM OD 153MM THK 3.0MM RUBBER WITH TEFLON FILLER RF'
+    )
+    assert r6['gasket_type'] == 'DJI', f'Expected DJI, got {r6["gasket_type"]}'
+    assert r6['dji_face_type'] == 'RF', f'Expected RF, got {r6["dji_face_type"]}'
+
+    # Case 7: MINERAL FIBER via FILLER: colon-label format
+    r7 = regex_extract(
+        'DOUBLE JACKETED; OD 300MM ID 280MM 10MM THK; SOFT IRON + FILLER: MINERAL FIBER'
+    )
+    assert r7['gasket_type'] == 'DJI', f'Expected DJI, got {r7["gasket_type"]}'
+    assert r7['dji_filler'] == 'MINERAL FIBER', f'Expected MINERAL FIBER, got {r7["dji_filler"]}'
+    assert r7['moc'] == 'SOFT IRON', f'Expected SOFT IRON, got {r7["moc"]}'
+
+    print('  All 7 DJI regex extraction cases passed ✓')
 
 
 def test_spw_nps_class_format():
@@ -984,6 +1062,7 @@ if __name__ == '__main__':
         test_isk_formatter,
         test_isk_rtj_formatter,
         test_dji_formatter,
+        test_dji_regex_extraction,
         test_excel_wabag,
         test_lt_excel,
     ]

@@ -1243,33 +1243,108 @@ def _extract_kamm_specific_fields(desc: str) -> dict:
 # DJI field extraction
 # ---------------------------------------------------------------------------
 
+# DJI rib feature: WITH RIB / WITHOUT RIB
+_DJI_RIB_RE = re.compile(r'\b(WITH(?:OUT)?\s+RIB)\b', re.IGNORECASE)
+# DJI filler — context-based (AND/WITH prefix or FILLER: label)
 _DJI_FILLER_RE = re.compile(
-    r'\b(?:AND|WITH)\s+(GRAPHITE|ASBESTOS\s+FREE|CERAMIC)\b',
+    r'(?:\b(?:AND|WITH)\s+|\bFILLER\s*:\s*)'
+    r'(GRAPHITE|FG|FLEXIBLE\s+GRAPHITE|ASBESTOS\s+FREE|NON[\s\-]?ASB(?:ESTOS)?|ASBESTOS|'
+    r'MINERAL\s+FIBER|ARAMID(?:E)?\s+FIBER|ARAMID(?:E)?|ARA\b|CERAFELT|PTFE|TEFLON|RUBBER|CERAMIC)',
     re.IGNORECASE,
 )
+# DJI filler structured label: "FILLER MATERIAL: RUBBER"
+_DJI_FILLER_LABEL_RE = re.compile(
+    r'\bFILLER\s+MATERIAL\s*:\s*([\w]+(?:\s+[\w]+)?)',
+    re.IGNORECASE,
+)
+# DJI jacket material (expanded)
 _DJI_JACKET_RE = re.compile(
-    r'\b(COPPER|SS\s*316L?|SOFT\s+IRON|ARMCO\s+IRON)\b',
+    r'\b(COPPER|SS\s*316L?|SS\s*304L?|SS\s*321H?|SOFT\s+IRON|ARMCO\s+IRON|'
+    r'SOFT\s+STEEL|MONEL\s+\d+|MONEL\b|TITANIUM\s+GR\.?\s*\d+|TITANIUM\b|'
+    r'BRASS|BRONZE|TEFLON|RUBBER)\b',
     re.IGNORECASE,
 )
+# DJI jacket structured label: "JACKET MATERIAL: TEFLON"
+_DJI_JACKET_LABEL_RE = re.compile(
+    r'\bJACKET\s+MATERIAL\s*:\s*([\w]+(?:\s+[\w]+)?)',
+    re.IGNORECASE,
+)
+# DJI filler — standalone unambiguous terms (no AND/WITH prefix required)
+# These terms cannot be jacket materials, so no ambiguity risk
+_DJI_BARE_FILLER_RE = re.compile(
+    r'\b(FG|FLEXIBLE\s+GRAPHITE|MINERAL\s+FIBER|ARAMID(?:E)?(?:\s+FIBER)?|ARA\b|CERAFELT|CERAMIC)\b',
+    re.IGNORECASE,
+)
+
+
+def _norm_dji_filler(raw: str) -> str:
+    """Normalize DJI filler material to GGPL standard name."""
+    raw = raw.strip().upper()
+    if raw in ('FG', 'FLEXIBLE GRAPHITE'):
+        return 'GRAPHITE'
+    if 'NON' in raw and 'ASB' in raw:
+        return 'ASBESTOS FREE'
+    if raw in ('ARA', 'ARAMIDE', 'ARAMID'):
+        return 'ARAMIDE FIBER'
+    if raw in ('ARAMID FIBER',):
+        return 'ARAMIDE FIBER'
+    return raw
 
 
 def _extract_dji_fields(desc: str) -> dict:
-    """Extract DJI-specific fields."""
-    result = {'dji_filler': None, 'moc': None}
+    """Extract DJI-specific fields: jacket material (moc), filler, rib, face type, dimension order."""
+    result = {
+        'dji_filler': None, 'moc': None,
+        'dji_rib': None, 'dji_face_type': None, 'dji_id_first': False,
+    }
     upper = desc.upper()
 
-    m = _DJI_FILLER_RE.search(upper)
+    # Rib feature
+    m = _DJI_RIB_RE.search(upper)
     if m:
-        result['dji_filler'] = m.group(1).strip()
+        result['dji_rib'] = m.group(1).strip().upper()
 
-    m = _DJI_JACKET_RE.search(upper)
+    # Face type (RF/FF) — for round-lip or other face-typed DJI configurations
+    m = _FACE_RE.search(upper)
     if m:
-        raw = m.group(1).strip()
-        result['moc'] = _SW_RING_ALIASES.get(raw, raw)
+        val = m.group(0).strip().upper()
+        if 'FULL' in val:
+            result['dji_face_type'] = 'FF'
+        elif 'RAISED' in val:
+            result['dji_face_type'] = 'RF'
+        else:
+            result['dji_face_type'] = val  # 'RF' or 'FF'
 
-    # Check for drawing reference
-    if re.search(r'\bDRAWING\b|\bDRG\b', upper):
-        result['dji_filler'] = result.get('dji_filler') or None
+    # Filler — structured "FILLER MATERIAL: X" label takes priority over context-based
+    m = _DJI_FILLER_LABEL_RE.search(desc)
+    if m:
+        result['dji_filler'] = _norm_dji_filler(m.group(1))
+    else:
+        m = _DJI_FILLER_RE.search(upper)
+        if m:
+            result['dji_filler'] = _norm_dji_filler(m.group(1))
+        else:
+            # Standalone unambiguous filler terms (e.g. bare "FG" without AND/WITH prefix)
+            m = _DJI_BARE_FILLER_RE.search(upper)
+            if m:
+                result['dji_filler'] = _norm_dji_filler(m.group(1))
+
+    # Jacket material — structured "JACKET MATERIAL: X" label takes priority
+    m = _DJI_JACKET_LABEL_RE.search(desc)
+    if m:
+        result['moc'] = m.group(1).strip().upper()
+    else:
+        m = _DJI_JACKET_RE.search(upper)
+        if m:
+            raw = m.group(1).strip().upper()
+            result['moc'] = _SW_RING_ALIASES.get(raw, raw)
+
+    # ID-first format detection:
+    # 1. Input text has ID keyword before OD keyword
+    # 2. "TYPE 3" DJI configuration (heat exchanger style — forces ID-first output)
+    if (_ID_OD_RE.search(upper) or _PAREN_ID_OD_RE.search(upper)
+            or re.search(r'\bTYPE\s*3\b', upper)):
+        result['dji_id_first'] = True
 
     return result
 
@@ -1353,6 +1428,7 @@ def regex_extract(description: str) -> dict:
         'isk_primary_seal': None, 'isk_secondary_seal': None,
         'isk_insulating_washer': None, 'isk_type': None,
         'dji_filler': None,
+        'dji_rib': None, 'dji_face_type': None, 'dji_id_first': False,
         'kamm_core_material': None, 'kamm_surface_material': None,
         'kamm_covering_layer': None, 'kamm_rib': None,
         'kamm_core_thk': None, 'kamm_integral_outer_ring': False,
@@ -1410,11 +1486,15 @@ def regex_extract(description: str) -> dict:
 
     elif gasket_type == 'DJI':
         dji = _extract_dji_fields(desc)
-        # Only update fields that DJI extractor found
         if dji.get('moc'):
             result['moc'] = dji['moc']
         if dji.get('dji_filler'):
             result['dji_filler'] = dji['dji_filler']
+        if dji.get('dji_rib'):
+            result['dji_rib'] = dji['dji_rib']
+        if dji.get('dji_face_type'):
+            result['dji_face_type'] = dji['dji_face_type']
+        result['dji_id_first'] = dji.get('dji_id_first', False)
 
     elif gasket_type == 'KAMM':
         # Extract KAMM core (metal) and surface (graphite/PTFE) materials

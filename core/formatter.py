@@ -254,28 +254,74 @@ def _kamm_moc_str(core: str, surface: str) -> str:
 
 
 def _fmt_dji(item: dict) -> str:
+    """Build GGPL description for Double Jacket Interface (DJI) gaskets.
+
+    Supports four format variants (selected automatically):
+      1. Face-type format (ID-first): when dji_face_type is set
+            SIZE : {id}MM ID X {od}MM OD X {thk}MM THK, {filler} DOUBLE JACKETED GASKET WITH {moc} FILLER ,{face}
+            Note: filler (inner sealing material) is listed first; moc (jacket) is labeled 'FILLER'.
+      2. Drawing pattern (OD-first): when special contains DRAWING
+            a. With moc:   SIZE : {od}MM OD X {id}MM ID X {thk}MM THK, DOUBLE JACKETED, {moc} WITH {filler} FILLER (AS PER DRAWING)
+            b. No moc:     SIZE : {od}MM OD X {id}MM ID X {thk}MM THK, DOUBLE JACKETED WITH {filler} (AS PER DRAWING)
+      3. Corrugated type (OD-first): when filler contains CORRUGATED
+            SIZE : {od}MM OD X {id}MM ID X {thk}MM THK, {moc} DOUBLE JACKETED GASKET WITH {filler} FILLER
+      4. ID-first format: when dji_id_first is True (ID before OD in input, or TYPE 3 config)
+            SIZE : {id}MM ID X {od}MM OD X {thk}MM THK, DOUBLE JACKETED,{moc} + {filler} FILLER
+      5. Standard piping (OD-first, default):
+            SIZE : {od}MM OD X {id}MM ID X {thk}MM THK, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED
+    """
     od = item.get('od_mm')
     id_ = item.get('id_mm')
+    if not (od and id_):
+        return ''
     thk = item.get('thickness_mm')
     moc = item.get('moc')
-    if not (od and id_ and moc):
-        return ''
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
     filler = (item.get('dji_filler') or 'GRAPHITE').strip().upper()
     special = (item.get('special') or '').upper()
-    dims = f'SIZE : {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
+    dji_face = (item.get('dji_face_type') or '').strip().upper() or None
+    dji_id_first = item.get('dji_id_first', False)
 
+    # 1. Face-type format (ID-first): filler = inner sealing element (body in output),
+    #    moc = jacket material (labeled 'FILLER' in GGPL output per convention)
+    if dji_face:
+        dims = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD{thk_str}'
+        primary = filler   # inner sealing material → body MOC in output
+        jacket  = moc or ''  # jacket material → 'FILLER' label in output
+        if primary and jacket:
+            return f'{dims}, {primary} DOUBLE JACKETED GASKET WITH {jacket} FILLER ,{dji_face}'
+        elif primary:
+            return f'{dims}, {primary} DOUBLE JACKETED GASKET ,{dji_face}'
+        return f'{dims}, DOUBLE JACKETED GASKET ,{dji_face}'
+
+    dims_od = f'SIZE : {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
+    dims_id = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD{thk_str}'
+
+    # 2. Drawing pattern (OD-first)
     if 'AS PER DRAWING' in special or 'DRAWING' in special:
-        # Industrial / heat-exchanger pattern: DOUBLE JACKETED, {moc} WITH {filler} FILLER (AS PER DRAWING)
-        filler_str = f'{filler} FILLER' if filler == 'GRAPHITE' else filler
-        return f'{dims}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)'
-    elif 'CORRUGATED' in filler:
-        # Corrugated type pattern: {moc} DOUBLE JACKETED GASKET WITH {filler} FILLER
+        if moc:
+            filler_str = f'{filler} FILLER' if filler == 'GRAPHITE' else filler
+            return f'{dims_od}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)'
+        else:
+            return f'{dims_od}, DOUBLE JACKETED WITH {filler} (AS PER DRAWING)'
+
+    # 3. Corrugated type (OD-first)
+    if 'CORRUGATED' in filler:
+        if not moc:
+            return ''
         filler_str = filler if filler.endswith('FILLER') else f'{filler} FILLER'
-        return f'{dims}, {moc} DOUBLE JACKETED GASKET WITH {filler_str}'
-    else:
-        # Standard piping pattern: DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED
-        return f'{dims}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED'
+        return f'{dims_od}, {moc} DOUBLE JACKETED GASKET WITH {filler_str}'
+
+    # 4. ID-first format (TYPE 3 / ID-first input)
+    if dji_id_first:
+        if not moc:
+            return ''
+        return f'{dims_id}, DOUBLE JACKETED,{moc} + {filler} FILLER'
+
+    # 5. Standard piping pattern (OD-first)
+    if not moc:
+        return ''
+    return f'{dims_od}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED'
 
 
 def _fmt_isk(item: dict) -> str:

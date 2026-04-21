@@ -607,6 +607,9 @@ def _build_rows(items):
             'KAMM Covering':        item.get('kamm_covering_layer') or '',
             'KAMM Rib':             item.get('kamm_rib') or '',
             'KAMM Core Thk':        item.get('kamm_core_thk') or '',
+            'DJI Filler':           item.get('dji_filler') or '',
+            'DJI Rib':              item.get('dji_rib') or '',
+            'DJI Face':             item.get('dji_face_type') or '',
             'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
             'UoM':                  item.get('uom') or 'NOS',
             'Special':              item.get('special') or '',
@@ -686,6 +689,12 @@ def _editor_fragment(items, display_indices):
                                         help='Rib feature: WITH RIB / WITHOUT RIB'),
             'KAMM Core Thk':        st.column_config.TextColumn('KAMM Core Thk', width='small',
                                         help='Core thickness in mm (for OD/ID format annotation)'),
+            'DJI Filler':           st.column_config.TextColumn('DJI Filler', width='small',
+                                        help='DJI inner filler e.g. GRAPHITE, ASBESTOS FREE, MINERAL FIBER, PTFE'),
+            'DJI Rib':              st.column_config.TextColumn('DJI Rib', width='small',
+                                        help='Rib feature: WITH RIB / WITHOUT RIB'),
+            'DJI Face':             st.column_config.SelectboxColumn('DJI Face', options=['', 'RF', 'FF'], width='small',
+                                        help='Face type for special DJI types (round-lip, TEFLON jacket etc.)'),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0),
             'UoM':                  st.column_config.SelectboxColumn('UoM', options=UOM_OPTIONS, width='small'),
             'Special':              st.column_config.TextColumn('Special', width='medium'),
@@ -744,6 +753,9 @@ def _editor_fragment(items, display_indices):
             base['kamm_covering_layer']  = row['KAMM Covering'] or None
             base['kamm_rib']             = row['KAMM Rib'] or None
             core_thk_val = row.get('KAMM Core Thk')
+            base['dji_filler']           = row['DJI Filler'] or None
+            base['dji_rib']              = row['DJI Rib'] or None
+            base['dji_face_type']        = row['DJI Face'] or None
             base['kamm_core_thk'] = float(core_thk_val) if core_thk_val else None
             # For SPW/KAMM, always clear MOC so apply_rules rebuilds it from
             # the current component fields (winding, filler, inner/outer ring).

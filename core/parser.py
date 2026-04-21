@@ -119,6 +119,7 @@ def _looks_like_gasket(text: str) -> bool:
                   'spw', 'wnd', 'sw gasket', 'kammprofile', 'camprofile', 'insulating gasket',
                   'isk', 'soft iron', 'softiron', 'octagonal', 'oval ring',
                   'nbr', 'nitrile', 'sbr', 'silicone', 'butyl', 'aramid', 'thermiculite',
+
                   'expanded graphite', 'cork', 'leather', 'ceramic fiber', 'hnbr',
                   'outer ring', 'inner ring', 'centering ring', 'gid', 'god']
     has_kw = any(k in text_lower for k in gasket_kws)
