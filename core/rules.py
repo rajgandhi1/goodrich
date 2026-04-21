@@ -1306,6 +1306,9 @@ def apply_rules(item: dict) -> dict:
         crit = ['size', 'rating']
     elif gasket_type == 'SPIRAL_WOUND' and item.get('size_type') == 'OD_ID':
         crit = ['od_mm', 'id_mm', 'moc']
+    elif item.get('size_type') == 'OD_ID':
+        # Any gasket type with OD/ID dimensions — size (NPS) and rating are not applicable
+        crit = ['od_mm', 'id_mm', 'moc']
     else:
         crit = CRITICAL_FIELDS  # ['size', 'rating', 'moc']
 

@@ -111,6 +111,50 @@ def test_lt_excel():
     print(f'  Parsed {len(items)} items from L&T Excel ✓')
 
 
+def test_structured_enquiry_test4():
+    """test 4.xlsx — structured column format (no combined description column).
+
+    Section 1: MATERIAL + DN + CLASS + THICKNESS columns (fill-down for MATERIAL)
+    Section 2: MATERIAL + (OD) + (ID) + THK columns (OD/ID gaskets)
+
+    Materials: Goretex → EXPANDED PTFE, Garlock 3504 → CNAF, Gylon Blue → PTFE,
+               Expanded PTFE Sheet → EXPANDED PTFE, Perioxide Cured EPDM → EPDM
+
+    Checks:
+    - Structured column parser builds synthetic descriptions
+    - Fill-down for MATERIAL column works
+    - Both DN/CLASS and OD/ID sections are parsed
+    - All items produce non-empty GGPL descriptions (no 'missing' status)
+    """
+    path = os.path.join(os.path.dirname(__file__), '..', 'reference', 'STRUCTURED_ENQUIRY_TEST4.xlsx')
+    with open(path, 'rb') as f:
+        items = parse_excel_file(f.read())
+
+    assert len(items) == 28, f'Expected 28 items, got {len(items)}'
+    print(f'  Parsed {len(items)} items from STRUCTURED_ENQUIRY_TEST4.xlsx ✓')
+
+    extracted = extract_batch(items)
+    processed = [apply_rules(e) for e in extracted]
+    for item in processed:
+        item['ggpl_description'] = format_description(item)
+
+    # All items should produce a non-empty GGPL description
+    empty = [p for p in processed if not p.get('ggpl_description')]
+    assert not empty, f'{len(empty)} items have empty GGPL description'
+
+    # No item should be missing (all critical fields resolvable from structured data)
+    missing = [p for p in processed if p['status'] == STATUS_MISSING]
+    assert not missing, f'{len(missing)} items unexpectedly missing: {[m.get("raw_description") for m in missing]}'
+
+    # MOC spot checks — material names are kept verbatim (as given in enquiry)
+    mocs = {p.get('moc', '').upper(): p['moc'] for p in processed if p.get('moc')}
+    assert 'GORETEX' in mocs, f'Expected GORETEX in MOC values, got {list(mocs.keys())}'
+    assert 'GARLOCK 3504' in mocs, f'Expected GARLOCK 3504 in MOC values, got {list(mocs.keys())}'
+    assert 'GYLON BLUE' in mocs, f'Expected GYLON BLUE in MOC values, got {list(mocs.keys())}'
+
+    print(f'  All {len(processed)} items produce GGPL descriptions with no missing fields ✓')
+
+
 def test_sw_enquiry_test3():
     """test 3.xlsx — multi-sheet SW enquiry with encoded descriptions and MOC column.
 
@@ -1107,6 +1151,7 @@ if __name__ == '__main__':
         test_dji_regex_extraction,
         test_excel_wabag,
         test_lt_excel,
+        test_structured_enquiry_test4,
         test_sw_enquiry_test3,
     ]
     passed = 0

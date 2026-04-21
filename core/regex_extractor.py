@@ -449,8 +449,21 @@ _RTJ_MOC_RE_PATTERN = _build_moc_pattern(_RTJ_MOC_ALIASES)
 _SW_FILLER_RE_PATTERN = _build_moc_pattern(_SW_FILLER_ALIASES)
 
 
+_MOC_LABEL_RE = re.compile(r'\bMOC\s*:\s*(.+?)(?:\s*(?:,|$))', re.IGNORECASE)
+
+
 def _extract_softcut_moc(desc: str) -> str | None:
-    """Extract MOC for soft cut gaskets using alias matching."""
+    """Extract MOC for soft cut gaskets.
+
+    Checks for an explicit 'MOC: <text>' label first (used by the structured
+    column parser to pass material names verbatim).  Falls back to alias-based
+    pattern matching.
+    """
+    lbl = _MOC_LABEL_RE.search(desc)
+    if lbl:
+        raw = lbl.group(1).strip().upper()
+        # Normalize through aliases if known; otherwise keep verbatim
+        return _MOC_ALIASES.get(raw, raw)
     m = _SOFTCUT_MOC_RE.search(desc.upper())
     if m:
         raw = m.group(1).strip()

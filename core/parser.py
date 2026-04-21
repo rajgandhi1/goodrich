@@ -152,36 +152,187 @@ def parse_excel_file(file_bytes: bytes) -> list[dict]:
 
 
 def _parse_sheet(ws) -> list[dict]:
-    """Detect header row and extract line items from a worksheet."""
+    """Detect header row and extract line items from a worksheet.
+
+    Tries description-based detection first; falls back to structured
+    column detection (MATERIAL + DN/CLASS or OD/ID per column).
+    """
+    # --- Description-based format ---
     header_row, col_map = _detect_header(ws)
-    if not col_map.get('description'):
+    if col_map.get('description'):
+        items = []
+        desc_col = col_map['description']
+        qty_col = col_map.get('quantity')
+        uom_col = col_map.get('uom')
+        line_col = col_map.get('line_no')
+        moc_col = col_map.get('moc')
+
+        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+            desc = _cell_str(row, desc_col)
+            if not desc or not _looks_like_gasket(desc):
+                continue
+            # Append MOC column content to description so the extractor can use it
+            if moc_col is not None:
+                moc_val = _cell_str(row, moc_col)
+                if moc_val and moc_val.upper() != desc.upper():
+                    desc = desc + ' MOC: ' + moc_val
+            qty = _cell_float(row, qty_col) if qty_col is not None else None
+            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
+            line_no = _cell_float(row, line_col) if line_col is not None else None
+            items.append({
+                'line_no': int(line_no) if line_no else None,
+                'description': desc,
+                'quantity': qty,
+                'uom': uom,
+            })
+        return items
+
+    # --- Structured column format (no combined description column) ---
+    return _parse_structured_sheet(ws)
+
+
+def _norm_header_cell(cell) -> str:
+    """Normalize a header cell: lowercase, collapse whitespace incl. non-breaking spaces."""
+    if cell is None:
+        return ''
+    return re.sub(r'[\xa0\s]+', ' ', str(cell)).strip().lower()
+
+
+def _classify_structured_col(norm: str) -> str | None:
+    """Return the column type for a normalized header cell, or None if unrecognised."""
+    if norm in ('dn', 'nb'):
+        return 'dn_size'
+    if norm == 'class':
+        return 'class_rating'
+    if norm == 'material':
+        return 'material'
+    if norm in ('thickness', 'thk', 'thk (mm)', 'thick'):
+        return 'thickness'
+    if norm.startswith('(od)') or norm.startswith('od (') or norm.startswith('od mm') or norm == 'od':
+        return 'od_mm'
+    if norm.startswith('(id)') or norm.startswith('id (') or norm.startswith('id mm') or norm == 'id':
+        return 'id_mm'
+    if norm in ('qty', 'quantity'):
+        return 'quantity'
+    if norm in ('uom', 'inv uom'):
+        return 'uom'
+    if 'sl.no' in norm or 'sr.no' in norm or norm == 'sno' or norm == 'sl no' or norm == 'sr no':
+        return 'line_no'
+    return None
+
+
+def _detect_structured_sections(all_rows: list[tuple]) -> list[tuple]:
+    """Find all structured-format header blocks in a sheet.
+
+    Returns a list of (header_row_idx_0based, col_map, data_rows) tuples where
+    col_map maps field names to 0-based column indices and data_rows are the
+    value tuples between this header and the next.
+    """
+    sections = []
+    current_header_idx = None
+    current_col_map = None
+    current_data: list[tuple] = []
+
+    def _is_structured_header(col_map: dict) -> bool:
+        has_material = 'material' in col_map
+        has_dn_cls = 'dn_size' in col_map and 'class_rating' in col_map
+        has_od_id = 'od_mm' in col_map and 'id_mm' in col_map
+        return has_material and (has_dn_cls or has_od_id)
+
+    for row_idx, row in enumerate(all_rows):
+        # Try to interpret this row as a header
+        col_map = {}
+        for col_idx, cell in enumerate(row):
+            norm = _norm_header_cell(cell)
+            if not norm:
+                continue
+            col_type = _classify_structured_col(norm)
+            if col_type and col_type not in col_map:
+                col_map[col_type] = col_idx
+
+        if _is_structured_header(col_map):
+            # Save previous section if any
+            if current_col_map is not None and current_data:
+                sections.append((current_header_idx, current_col_map, current_data))
+            current_header_idx = row_idx
+            current_col_map = col_map
+            current_data = []
+        elif current_col_map is not None:
+            # Accumulate data rows (skip fully-empty rows)
+            if any(c is not None for c in row):
+                current_data.append(row)
+
+    if current_col_map is not None and current_data:
+        sections.append((current_header_idx, current_col_map, current_data))
+
+    return sections
+
+
+def _parse_structured_sheet(ws) -> list[dict]:
+    """Parse a sheet that uses one column per field (no combined description column)."""
+    all_rows = list(ws.iter_rows(values_only=True))
+    sections = _detect_structured_sections(all_rows)
+    if not sections:
         return []
 
     items = []
-    desc_col = col_map['description']
-    qty_col = col_map.get('quantity')
-    uom_col = col_map.get('uom')
-    line_col = col_map.get('line_no')
-    moc_col = col_map.get('moc')
+    for _hdr_idx, col_map, data_rows in sections:
+        mat_col = col_map.get('material')
+        dn_col = col_map.get('dn_size')
+        cls_col = col_map.get('class_rating')
+        thk_col = col_map.get('thickness')
+        od_col = col_map.get('od_mm')
+        id_col = col_map.get('id_mm')
+        qty_col = col_map.get('quantity')
+        uom_col = col_map.get('uom')
+        line_col = col_map.get('line_no')
 
-    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
-        desc = _cell_str(row, desc_col)
-        if not desc or not _looks_like_gasket(desc):
-            continue
-        # Append MOC column content to description so the extractor can use it
-        if moc_col is not None:
-            moc_val = _cell_str(row, moc_col)
-            if moc_val and moc_val.upper() != desc.upper():
-                desc = desc + ' MOC: ' + moc_val
-        qty = _cell_float(row, qty_col) if qty_col is not None else None
-        uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
-        line_no = _cell_float(row, line_col) if line_col is not None else None
-        items.append({
-            'line_no': int(line_no) if line_no else None,
-            'description': desc,
-            'quantity': qty,
-            'uom': uom,
-        })
+        last_material = None
+
+        for row in data_rows:
+            # Fill-down for MATERIAL column
+            mat_val = _cell_str(row, mat_col) if mat_col is not None else None
+            if mat_val:
+                last_material = mat_val
+            else:
+                mat_val = last_material
+
+            if not mat_val:
+                continue
+
+            # Build synthetic description
+            if dn_col is not None and cls_col is not None:
+                dn = _cell_str(row, dn_col)
+                cls = _cell_str(row, cls_col)
+                if not dn or not cls:
+                    continue
+                thk = _cell_str(row, thk_col) if thk_col is not None else None
+                thk_part = f' {thk}MM THK' if thk else ''
+                desc = f'{dn} NB {cls}#{thk_part} GASKET MOC: {mat_val}'
+            elif od_col is not None and id_col is not None:
+                od = _cell_str(row, od_col)
+                id_ = _cell_str(row, id_col)
+                if not od or not id_:
+                    continue
+                thk = _cell_str(row, thk_col) if thk_col is not None else None
+                thk_part = f' X {thk}MM THK' if thk else ''
+                desc = f'OD {od}MM X ID {id_}MM{thk_part} GASKET MOC: {mat_val}'
+            else:
+                continue
+
+            if not _looks_like_gasket(desc):
+                continue
+
+            qty = _cell_float(row, qty_col) if qty_col is not None else None
+            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
+            line_no = _cell_float(row, line_col) if line_col is not None else None
+            items.append({
+                'line_no': int(line_no) if line_no else None,
+                'description': desc,
+                'quantity': qty,
+                'uom': uom,
+            })
+
     return items
 
 
