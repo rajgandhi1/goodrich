@@ -459,6 +459,112 @@ def test_kamm_formatter():
     print(f'  All {len(cases)} KAMM formatter cases passed ✓')
 
 
+def test_kamm_new_formats():
+    """New KAMM format variants from CSV ground truth:
+    - OD/ID with core thickness annotation and integral/named outer ring
+    - NPS with GROOOVED METAL GASKET format (integral / named outer ring)
+    - Covering layers: GRAPHITE, PTFE, MICA
+    """
+    def oid_new(od, id_, thk, core, covering, integral=False, outer_ring=None, core_thk=None, standard=None):
+        return {
+            'gasket_type': 'KAMM', 'size_type': 'OD_ID',
+            'od_mm': od, 'id_mm': id_, 'thickness_mm': thk,
+            'kamm_core_material': core, 'kamm_surface_material': covering,
+            'kamm_integral_outer_ring': integral, 'sw_outer_ring': outer_ring,
+            'kamm_core_thk': core_thk, 'standard': standard,
+            'moc': None, 'special': None,
+        }
+
+    def nps_new(size, rating, thk, core, covering, integral=False, outer_ring=None, inner_ring=None, standard='ASME B16.20'):
+        return {
+            'gasket_type': 'KAMM', 'size': size, 'rating': rating, 'thickness_mm': thk,
+            'kamm_core_material': core, 'kamm_surface_material': covering,
+            'kamm_integral_outer_ring': integral,
+            'sw_outer_ring': outer_ring, 'sw_inner_ring': inner_ring,
+            'standard': standard, 'size_type': 'NPS', 'moc': None,
+        }
+
+    cases = [
+        # --- OD/ID with core thickness annotation (CSV ground truth rows 1-2) ---
+        (oid_new(988, 956, 4.5, 'SS316L', 'GRAPHITE', core_thk=3.3),
+         'SIZE : OD 988MM X ID 956MM X 4.5MM THK (3.3MM CORE THK) KAMMPROFILE SS316L GRAPHITE LAYER ON BOTH SIDES'),
+
+        # --- OD/ID with integral outer ring + core thickness (CSV ground truth row 3) ---
+        (oid_new(1216, 1184, 4, 'SS347', 'GRAPHITE', integral=True, core_thk=3),
+         'SIZE : OD 1216MM X ID 1184MM X 4MM THK (3MM CORE THK) KAMMPROFILE SS347 GRAPHITE LAYER ON BOTH SIDES + INTEGRAL OUTER RING'),
+
+        # --- OD/ID with PTFE covering layer (CSV ground truth row 11) ---
+        (oid_new(1035, 1009, 5, 'SS316L', 'PTFE', core_thk=4),
+         'SIZE : OD 1035MM X ID 1009MM X 5MM THK (4MM CORE THK) KAMMPROFILE SS316L PTFE LAYER ON BOTH SIDES'),
+
+        # --- OD/ID with integral outer ring only (no core_thk) ---
+        (oid_new(982, 956, 3, 'SS316', 'GRAPHITE', integral=True),
+         'SIZE : OD 982MM X ID 956MM X 3MM THK KAMMPROFILE SS316 GRAPHITE LAYER ON BOTH SIDES + INTEGRAL OUTER RING'),
+
+        # --- OD/ID with MICA covering layer ---
+        (oid_new(500, 450, 4, 'SS316L', 'MICA', core_thk=3),
+         'SIZE : OD 500MM X ID 450MM X 4MM THK (3MM CORE THK) KAMMPROFILE SS316L MICA LAYER ON BOTH SIDES'),
+
+        # --- NPS with integral outer ring → GROOOVED METAL format (CSV ground truth row 6) ---
+        (nps_new('24"', '300#', 4.5, 'SS316', 'GRAPHITE', integral=True),
+         'SIZE : 24" X 300# X 4.5MM THK, KAMMPROFILE SS316 GROOOVED METAL GASKET WITH GRAPHITE COVERING LAYER ON BOTH SIDES, INTEGRAL OUTER RING, ASME B16.20'),
+
+        # --- NPS with named outer ring (CSV ground truth row 7 pattern) ---
+        (nps_new('34"', '300#', 4.5, 'SS316', 'GRAPHITE', outer_ring='SS316', standard='ASME B16.47 (SERIES-B)'),
+         'SIZE : 34" X 300# X 4.5MM THK, KAMMPROFILE SS316 GROOOVED METAL GASKET WITH GRAPHITE COVERING LAYER ON BOTH SIDES, SS316 OUTER RING, ASME B16.47 (SERIES-B)'),
+
+        # --- NPS PTFE covering with named outer ring ---
+        (nps_new('8"', '600#', 4.5, 'SS316L', 'PTFE', outer_ring='SS316L'),
+         'SIZE : 8" X 600# X 4.5MM THK, KAMMPROFILE SS316L GROOOVED METAL GASKET WITH PTFE COVERING LAYER ON BOTH SIDES, SS316L OUTER RING, ASME B16.20'),
+    ]
+
+    for i, (item, expected) in enumerate(cases):
+        result = format_description(item)
+        assert result == expected, (
+            f'\nCase {i+1} failed:'
+            f'\n  Expected: {expected}'
+            f'\n  Got:      {result}'
+        )
+    print(f'  All {len(cases)} new KAMM format cases passed ✓')
+
+
+def test_kamm_regex_extraction():
+    """Test regex extraction of new KAMM fields: covering layer, rib, core_thk, integral ring."""
+    from core.regex_extractor import regex_extract
+
+    # Case 1: FG covering layer → normalized to GRAPHITE; WITH RIB
+    r1 = regex_extract('KAMMPROFILE 0.5" 150# SS316 FG WITH RIB ASME B16.20')
+    assert r1['gasket_type'] == 'KAMM', f'Expected KAMM, got {r1["gasket_type"]}'
+    assert r1['kamm_covering_layer'] == 'GRAPHITE', f'Expected GRAPHITE, got {r1["kamm_covering_layer"]}'
+    assert r1['kamm_rib'] == 'WITH RIB', f'Expected WITH RIB, got {r1["kamm_rib"]}'
+
+    # Case 2: Core thickness annotation
+    r2 = regex_extract('KAMMPROFILE OD 988MM ID 956MM 4.5MM THK SS316L GRAPHITE (3.3MM CORE THK)')
+    assert r2['gasket_type'] == 'KAMM', f'Expected KAMM, got {r2["gasket_type"]}'
+    assert r2['kamm_core_thk'] == 3.3, f'Expected 3.3, got {r2["kamm_core_thk"]}'
+    assert r2['kamm_covering_layer'] == 'GRAPHITE'
+
+    # Case 3: INTEGRAL OUTER RING detection
+    r3 = regex_extract('24" 300# KAMMPROFILE SS316 GRAPHITE WITH INTEGRAL OUTER RING ASME B16.20')
+    assert r3['gasket_type'] == 'KAMM', f'Expected KAMM, got {r3["gasket_type"]}'
+    assert r3['kamm_integral_outer_ring'] is True, f'Expected True, got {r3["kamm_integral_outer_ring"]}'
+
+    # Case 4: PTFE covering, WITHOUT RIB
+    r4 = regex_extract('KAMMPROFILE 6" 150# SS316L PTFE WITHOUT RIB')
+    assert r4['kamm_covering_layer'] == 'PTFE', f'Expected PTFE, got {r4["kamm_covering_layer"]}'
+    assert r4['kamm_rib'] == 'WITHOUT RIB', f'Expected WITHOUT RIB, got {r4["kamm_rib"]}'
+
+    # Case 5: NON ASB covering
+    r5 = regex_extract('KAMMPROFILE 4" 300# SS316 NON ASB')
+    assert r5['kamm_covering_layer'] == 'NON ASBESTOS', f'Expected NON ASBESTOS, got {r5["kamm_covering_layer"]}'
+
+    # Case 6: INTEGRAL CENTERING RING → also treated as integral
+    r6 = regex_extract('KAMMPROFILE OD 1216MM ID 1184MM 4MM THK SS347 GRAPHITE INTEGRAL CENTERING RING')
+    assert r6['kamm_integral_outer_ring'] is True, f'Expected True, got {r6["kamm_integral_outer_ring"]}'
+
+    print('  All 6 KAMM regex extraction cases passed ✓')
+
+
 def test_softcut_large_bore_rules():
     """Test that apply_rules triggers B16.47 flag for ≥26\" and defaults B16.21 for smaller."""
     # Large bore (48") — B16.47 triggered, series A/B unknown → STATUS_MISSING
@@ -873,6 +979,8 @@ if __name__ == '__main__':
         test_spw_matl_labels,
         test_rtj_formatter,
         test_kamm_formatter,
+        test_kamm_new_formats,
+        test_kamm_regex_extraction,
         test_isk_formatter,
         test_isk_rtj_formatter,
         test_dji_formatter,

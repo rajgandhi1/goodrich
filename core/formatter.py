@@ -128,15 +128,48 @@ def _fmt_rtj(item: dict) -> str:
     return ' ,'.join(parts)
 
 
+def _kamm_covering_name(surface: str) -> str:
+    """Normalize KAMM covering layer to a simple name for output.
+    FLEXIBLE GRAPHITE → GRAPHITE; all others pass through (PTFE, MICA, etc.).
+    """
+    if not surface:
+        return 'GRAPHITE'
+    s = surface.strip().upper()
+    if 'GRAPHITE' in s:
+        return 'GRAPHITE'
+    return s  # PTFE, MICA, NON ASBESTOS, etc.
+
+
 def _fmt_kamm(item: dict) -> str:
-    """SIZE : {size} X {rating} X {thk}MM THK,{core} KAMMPROFILE GASKET WITH {surface},{standard}"""
+    """Build GGPL description for Kammprofile gaskets.
+
+    Supports three format variants (selected automatically):
+      1. New OD/ID format  — when kamm_core_thk or kamm_integral_outer_ring is set:
+            SIZE : OD {od}MM X ID {id}MM X {thk}MM THK ({core_thk}MM CORE THK)
+                   KAMMPROFILE {core} {covering} LAYER ON BOTH SIDES [+ ring_desc]
+      2. Legacy OD/ID format — when pre-formatted moc string is supplied:
+            SIZE : {id}MM ID X {od}MM OD X {thk}MM THK,{moc_str}
+      3. NPS with GROOOVED METAL — when integral_outer_ring or named outer_ring detected:
+            SIZE : {size} X {rating} X {thk}MM THK, KAMMPROFILE {core} GROOOVED METAL GASKET
+                   WITH {covering} COVERING LAYER ON BOTH SIDES, {ring_desc}, {standard}
+      4. NPS legacy — pre-formatted moc string:
+            SIZE : {size} X {rating} X {thk}MM THK,{moc_str},{standard}
+    """
     # Prefer dedicated KAMM fields; fall back to legacy moc field
-    core = (item.get('kamm_core_material') or item.get('moc') or '').strip().upper()
-    surface = (item.get('kamm_surface_material') or '').strip().upper()
+    kamm_core = (item.get('kamm_core_material') or '').strip().upper()
+    core = kamm_core or (item.get('moc') or '').strip().upper()
+    surface = (item.get('kamm_surface_material') or item.get('kamm_covering_layer') or '').strip().upper()
     size = item.get('size')
     rating = item.get('rating')
     standard = item.get('standard')
     thk = item.get('thickness_mm')
+    core_thk = item.get('kamm_core_thk')
+    integral = item.get('kamm_integral_outer_ring')
+    is_integral = integral is True or (isinstance(integral, str) and integral.strip().upper() == 'INTEGRAL')
+    outer_ring = (item.get('sw_outer_ring') or '').strip().upper() or None
+    inner_ring = (item.get('sw_inner_ring') or '').strip().upper() or None
+
+    covering = _kamm_covering_name(surface)
 
     if item.get('size_type') == 'OD_ID':
         od = item.get('od_mm')
@@ -144,8 +177,25 @@ def _fmt_kamm(item: dict) -> str:
         if not (od and id_):
             return ''
         special = (item.get('special') or '').strip()
-        dims = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD X {_fmt_num(thk)}MM THK'
+
+        # New OD/ID format: kamm_core_thk is set, OR integral ring is requested,
+        # AND core is a plain material code (not a pre-formatted moc string).
+        use_new_format = (core_thk is not None or is_integral) and 'KAMMPROFILE' not in core
+        if use_new_format:
+            core_thk_str = f' ({_fmt_num(core_thk)}MM CORE THK)' if core_thk is not None else ''
+            dims = f'SIZE : OD {_fmt_num(od)}MM X ID {_fmt_num(id_)}MM X {_fmt_num(thk)}MM THK{core_thk_str}'
+            body = f' KAMMPROFILE {core} {covering} LAYER ON BOTH SIDES' if core else f' KAMMPROFILE {covering} LAYER ON BOTH SIDES'
+            if is_integral:
+                ring_suffix = ' + INTEGRAL OUTER RING'
+            elif outer_ring:
+                ring_suffix = f' + {outer_ring} OUTER RING'
+            else:
+                ring_suffix = ''
+            return f'{dims}{body}{ring_suffix}'
+
+        # Legacy OD/ID format: pre-formatted moc string or no new fields
         moc_str = _kamm_moc_str(core, surface)
+        dims = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD X {_fmt_num(thk)}MM THK'
         parts = [dims]
         if special:
             parts.append(f',{special}')
@@ -155,12 +205,32 @@ def _fmt_kamm(item: dict) -> str:
             parts.append(f',{standard}')
         return ''.join(parts)
 
+    # --- NPS format ---
     if not (size and rating):
         return ''
     size_str = _fmt_size(size, 'KAMM')
     rating_str = _fmt_rating(rating)
-    moc_str = _kamm_moc_str(core, surface)
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
+
+    # GROOOVED METAL GASKET format: integral outer ring OR named outer ring (non-pre-formatted)
+    use_grooved = (is_integral or outer_ring) and kamm_core and 'KAMMPROFILE' not in kamm_core
+    if use_grooved:
+        moc_part = f'KAMMPROFILE {kamm_core} GROOOVED METAL GASKET WITH {covering} COVERING LAYER ON BOTH SIDES'
+        if inner_ring and outer_ring:
+            ring_part = f'{inner_ring} INNER RING & {outer_ring} OUTER RING'
+        elif is_integral and outer_ring:
+            ring_part = f'INTEGRAL {outer_ring} OUTER RING'
+        elif is_integral:
+            ring_part = 'INTEGRAL OUTER RING'
+        else:
+            ring_part = f'{outer_ring} OUTER RING'
+        parts = [f'SIZE : {size_str} X {rating_str}{thk_str}', moc_part, ring_part]
+        if standard:
+            parts.append(standard)
+        return ', '.join(parts)
+
+    # Legacy NPS format: pre-formatted moc string
+    moc_str = _kamm_moc_str(core, surface)
     parts = [f'SIZE : {size_str} X {rating_str}{thk_str}']
     if moc_str:
         parts.append(f',{moc_str}')

@@ -37,6 +37,21 @@ _RTJ_RE = re.compile(
     re.IGNORECASE,
 )
 _KAMM_RE = re.compile(r'KAMMPROFILE|\bKAMM\b|\bCAM[\s\-]?PROFILE\b|\bSKAG\b', re.IGNORECASE)
+
+# KAMM covering layer: FG (Flexible Graphite), GRAPHITE, PTFE, MICA, NON ASB
+_KAMM_COVERING_RE = re.compile(
+    r'\b(FG|FLEXIBLE\s+GRAPHITE|GRAPHITE|PTFE|MICA|NON[\s\-]?ASB(?:ESTOS)?)\b',
+    re.IGNORECASE,
+)
+# KAMM rib feature: WITH RIB / WITHOUT RIB
+_KAMM_RIB_RE = re.compile(r'\b(WITH(?:OUT)?\s+RIB)\b', re.IGNORECASE)
+# KAMM core thickness annotation: "(3.3MM CORE THK)" or "(3MM CORE THK)"
+_KAMM_CORE_THK_RE = re.compile(r'\(\s*(\d+(?:\.\d+)?)\s*(?:MM\s+)?CORE\s+THK\s*\)', re.IGNORECASE)
+# KAMM integral outer / centering ring keyword
+_KAMM_INTEGRAL_RING_RE = re.compile(
+    r'\bINTEGRAL\s+(?:\w+\s+)?(?:OUTER\s+RING|CENTERING\s+RING)\b',
+    re.IGNORECASE,
+)
 _DJI_RE = re.compile(
     r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bCOPPER\s+JACKET\b',
     re.IGNORECASE,
@@ -1183,6 +1198,48 @@ def _extract_isk_fields(desc: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# KAMM field extraction
+# ---------------------------------------------------------------------------
+
+def _extract_kamm_specific_fields(desc: str) -> dict:
+    """Extract KAMM-specific fields: covering layer, rib, core thickness, integral ring."""
+    result = {
+        'kamm_covering_layer': None,
+        'kamm_rib': None,
+        'kamm_core_thk': None,
+        'kamm_integral_outer_ring': False,
+    }
+    upper = desc.upper()
+
+    # Covering layer (FG → GRAPHITE, FLEXIBLE GRAPHITE → GRAPHITE, etc.)
+    m = _KAMM_COVERING_RE.search(upper)
+    if m:
+        raw = m.group(1).strip().upper()
+        if raw in ('FG', 'FLEXIBLE GRAPHITE'):
+            result['kamm_covering_layer'] = 'GRAPHITE'
+        elif 'NON' in raw:
+            result['kamm_covering_layer'] = 'NON ASBESTOS'
+        else:
+            result['kamm_covering_layer'] = raw  # GRAPHITE, PTFE, MICA
+
+    # Rib feature
+    m = _KAMM_RIB_RE.search(upper)
+    if m:
+        result['kamm_rib'] = m.group(1).upper()
+
+    # Core thickness annotation, e.g. "(3.3MM CORE THK)"
+    m = _KAMM_CORE_THK_RE.search(desc)
+    if m:
+        result['kamm_core_thk'] = float(m.group(1))
+
+    # Integral outer / centering ring
+    if _KAMM_INTEGRAL_RING_RE.search(upper):
+        result['kamm_integral_outer_ring'] = True
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # DJI field extraction
 # ---------------------------------------------------------------------------
 
@@ -1297,6 +1354,8 @@ def regex_extract(description: str) -> dict:
         'isk_insulating_washer': None, 'isk_type': None,
         'dji_filler': None,
         'kamm_core_material': None, 'kamm_surface_material': None,
+        'kamm_covering_layer': None, 'kamm_rib': None,
+        'kamm_core_thk': None, 'kamm_integral_outer_ring': False,
         'sw_winding_material': None, 'sw_filler': None,
         'sw_inner_ring': None, 'sw_outer_ring': None,
         'rtj_groove_type': None, 'rtj_hardness_bhn': None,
@@ -1366,7 +1425,14 @@ def regex_extract(description: str) -> dict:
             result['kamm_surface_material'] = sw['sw_filler']
         if not result['kamm_core_material']:
             result['kamm_core_material'] = _extract_softcut_moc(desc)
+        # Propagate outer/inner ring info (used by rules.py and formatter)
+        for ring_field in ('sw_outer_ring', 'sw_inner_ring'):
+            if sw.get(ring_field):
+                result[ring_field] = sw[ring_field]
         result['moc'] = result['kamm_core_material']  # keep moc populated for rules.py
+        # KAMM-specific fields: covering layer, rib, core thickness, integral ring
+        kamm_specific = _extract_kamm_specific_fields(desc)
+        result.update(kamm_specific)
 
     else:
         # SOFT_CUT

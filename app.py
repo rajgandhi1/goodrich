@@ -604,6 +604,9 @@ def _build_rows(items):
             'ISK Ins Washer':       item.get('isk_insulating_washer') or '',
             'KAMM Core':            item.get('kamm_core_material') or '',
             'KAMM Surface':         item.get('kamm_surface_material') or '',
+            'KAMM Covering':        item.get('kamm_covering_layer') or '',
+            'KAMM Rib':             item.get('kamm_rib') or '',
+            'KAMM Core Thk':        item.get('kamm_core_thk') or '',
             'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
             'UoM':                  item.get('uom') or 'NOS',
             'Special':              item.get('special') or '',
@@ -677,6 +680,12 @@ def _editor_fragment(items, display_indices):
                                         help='Kammprofile metal core e.g. SS316, ALLOY 625'),
             'KAMM Surface':         st.column_config.TextColumn('KAMM Surface', width='small',
                                         help='Kammprofile surface material e.g. GRAPHITE, PTFE'),
+            'KAMM Covering':        st.column_config.TextColumn('KAMM Covering', width='small',
+                                        help='Kammprofile covering layer: GRAPHITE, PTFE, MICA, NON ASBESTOS'),
+            'KAMM Rib':             st.column_config.TextColumn('KAMM Rib', width='small',
+                                        help='Rib feature: WITH RIB / WITHOUT RIB'),
+            'KAMM Core Thk':        st.column_config.TextColumn('KAMM Core Thk', width='small',
+                                        help='Core thickness in mm (for OD/ID format annotation)'),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0),
             'UoM':                  st.column_config.SelectboxColumn('UoM', options=UOM_OPTIONS, width='small'),
             'Special':              st.column_config.TextColumn('Special', width='medium'),
@@ -732,6 +741,10 @@ def _editor_fragment(items, display_indices):
             base['isk_insulating_washer']= row['ISK Ins Washer'] or None
             base['kamm_core_material']   = row['KAMM Core'] or None
             base['kamm_surface_material']= row['KAMM Surface'] or None
+            base['kamm_covering_layer']  = row['KAMM Covering'] or None
+            base['kamm_rib']             = row['KAMM Rib'] or None
+            core_thk_val = row.get('KAMM Core Thk')
+            base['kamm_core_thk'] = float(core_thk_val) if core_thk_val else None
             # For SPW/KAMM, always clear MOC so apply_rules rebuilds it from
             # the current component fields (winding, filler, inner/outer ring).
             if base.get('gasket_type') in ('SPIRAL_WOUND', 'KAMM'):
