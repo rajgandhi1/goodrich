@@ -162,11 +162,17 @@ def _parse_sheet(ws) -> list[dict]:
     qty_col = col_map.get('quantity')
     uom_col = col_map.get('uom')
     line_col = col_map.get('line_no')
+    moc_col = col_map.get('moc')
 
     for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
         desc = _cell_str(row, desc_col)
         if not desc or not _looks_like_gasket(desc):
             continue
+        # Append MOC column content to description so the extractor can use it
+        if moc_col is not None:
+            moc_val = _cell_str(row, moc_col)
+            if moc_val and moc_val.upper() != desc.upper():
+                desc = desc + ' MOC: ' + moc_val
         qty = _cell_float(row, qty_col) if qty_col is not None else None
         uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
         line_no = _cell_float(row, line_col) if line_col is not None else None
@@ -185,6 +191,7 @@ _HEADER_PATTERNS = {
     'quantity':    ['qty', 'quantity', 'balance to order', 'balance', 'required qty', 'count'],
     'uom':         ['uom', 'inv uom'],
     'line_no':     ['sl.no', 'sl no', 'sr. no', 'sr no', 'sr no.', 'sno', 'serial'],
+    'moc':         ['moc'],
 }
 
 

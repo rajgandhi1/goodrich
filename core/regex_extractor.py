@@ -25,7 +25,8 @@ _SW_RE = re.compile(
     r'\bS\.?W\.\s*GASKET|\bWND\b|'
     r'\bGASKETSSPIRAL\b|\bGASKETSPIRAL\b|'
     r'\bJOINT\s+SPIRALE?\b|'           # French: "JOINT SPIRALE" = spiral wound
-    r'\bSW\s+CR/IR\b|\bSW\s+IR\b',    # "SW CR/IR" / "SW IR" abbreviations
+    r'\bSW\s+CR/IR\b|\bSW\s+IR\b|'    # "SW CR/IR" / "SW IR" abbreviations
+    r'\-SW\-',                          # Encoded format: "GASKET RD-SW-RF-100NB-CL150"
     re.IGNORECASE,
 )
 _RTJ_RE = re.compile(
@@ -351,6 +352,10 @@ _RATING_HASH_RE = re.compile(
 _RATING_CL_RE = re.compile(
     rf'\bCL(?:ASS)?[\s.]*({_ASME_CLASSES})\b', re.IGNORECASE
 )
+# "150CL" — number-first class notation (e.g. "GASKET-SW-150NB-150CL-16.20")
+_RATING_NUM_CL_RE = re.compile(
+    rf'\b({_ASME_CLASSES})CL\b', re.IGNORECASE
+)
 # Packed "CL30012"" — class rating glued to size with trailing inch mark (e.g. CL30012")
 _RATING_CL_PACKED_RE = re.compile(
     rf'\bCL({_ASME_CLASSES})(\d+(?:\.\d+)?)"', re.IGNORECASE
@@ -391,6 +396,11 @@ def _extract_rating(desc: str) -> str | None:
 
     # CL/CLASS prefix
     m = _RATING_CL_RE.search(upper)
+    if m:
+        return f'{m.group(1)}#'
+
+    # Number-first CL notation: "150CL", "300CL"
+    m = _RATING_NUM_CL_RE.search(upper)
     if m:
         return f'{m.group(1)}#'
 
@@ -632,7 +642,7 @@ _SW_OR_RE = re.compile(
 # Filler brand names that may appear quoted/standalone after FILL keyword
 # e.g. "GRAPHITE FILL 'FLEXICARB'" → FLEXIBLE GRAPHITE
 _FILLER_BRAND_RE = re.compile(
-    r"['\"]?(FLEXICARB|FLEXI[\s\-]CARB|SIGRAFLEX|GRAFOIL|GRAFIL|THERMICULITE|PAPYEX)\b['\"]?",
+    r"['\"]?(FLEXICARB|FLEXI[\s\-]CARB|SIGRAFLEX|GRAFOIL|GRAFIL|GRAPHOIL|THERMICULITE|PAPYEX)\b['\"]?",
     re.IGNORECASE,
 )
 
@@ -814,7 +824,7 @@ def _extract_sw_fields(desc: str) -> dict:
             else:
                 # Try first SS/alloy/UNS mention as winding material
                 m = re.search(
-                    r'\b(SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
+                    r'\b(SS[\s\-]*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
                     r'ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|'
                     r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+|'
                     r'DUPLEX\s*SS?\d*|SUPER\s*DUPLEX)',

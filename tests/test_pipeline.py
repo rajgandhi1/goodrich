@@ -111,6 +111,48 @@ def test_lt_excel():
     print(f'  Parsed {len(items)} items from L&T Excel ✓')
 
 
+def test_sw_enquiry_test3():
+    """test 3.xlsx — multi-sheet SW enquiry with encoded descriptions and MOC column.
+
+    Sheet1/2: MOC = "Graphoil with SS-316 Foils" (short form — outer/inner ring missing → status missing)
+    Sheet3:   MOC = "SP. WINDING + INNER RING: SS316, FILLER: GRAPHITE, CS OUTER RING, ..." → fully extracted
+
+    Checks:
+    - Parser reads MOC column and appends to description
+    - '-SW-' in encoded name recognized as SPIRAL_WOUND
+    - Sheet3 items reach status ready/check with a non-empty GGPL description
+    """
+    path = os.path.join(os.path.dirname(__file__), '..', 'reference', 'SW_ENQUIRY_TEST3.xlsx')
+    with open(path, 'rb') as f:
+        items = parse_excel_file(f.read())
+
+    assert len(items) > 0, 'Expected items from SW_ENQUIRY_TEST3.xlsx'
+    print(f'  Parsed {len(items)} items from SW_ENQUIRY_TEST3.xlsx ✓')
+
+    # Most items are spiral wound; Sheet3 also contains RTJ items (GASKET-OCT-RJ-...)
+    extracted = extract_batch(items)
+    sw_count = sum(1 for e in extracted if e['gasket_type'] == 'SPIRAL_WOUND')
+    rtj_count = sum(1 for e in extracted if e['gasket_type'] == 'RTJ')
+    assert sw_count >= 70, f'Expected ≥70 SPIRAL_WOUND items, got {sw_count}'
+    assert rtj_count >= 6, f'Expected ≥6 RTJ items, got {rtj_count}'
+    print(f'  {sw_count} SPIRAL_WOUND + {rtj_count} RTJ items correctly identified ✓')
+
+    # Sheet3 items have full MOC text — they should reach ready or check status
+    processed = [apply_rules(e) for e in extracted]
+    for item in processed:
+        item['ggpl_description'] = format_description(item)
+
+    # Items with inner+outer ring info (Sheet3) should have non-empty GGPL descriptions
+    # and not be "missing" due to gasket type or size
+    sheet3_items = [p for p in processed if p.get('sw_inner_ring') and p.get('sw_outer_ring')]
+    assert len(sheet3_items) > 0, 'Expected Sheet3 items with full ring info'
+    for item in sheet3_items:
+        assert item['ggpl_description'], f'Expected GGPL description for {item.get("raw_description")}'
+        assert item['status'] != STATUS_MISSING or item.get('quantity') is None, \
+            f'Sheet3 fully-specified item should not be missing: {item}'
+    print(f'  {len(sheet3_items)} Sheet3 fully-specified items produce GGPL descriptions ✓')
+
+
 def test_softcut_formatter():
     """Test soft-cut formatter output for a range of sizes, face types, and thicknesses.
     All fields are pre-set — no LLM needed.
@@ -1065,6 +1107,7 @@ if __name__ == '__main__':
         test_dji_regex_extraction,
         test_excel_wabag,
         test_lt_excel,
+        test_sw_enquiry_test3,
     ]
     passed = 0
     for t in tests:
