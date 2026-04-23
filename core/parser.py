@@ -168,12 +168,25 @@ Return ONLY valid JSON (no markdown, no explanation) matching this schema exactl
   }}
 }}
 
-Definitions:
-- "description_column": one column holds the complete gasket description as free text.
-- "structured_columns": separate columns hold size, rating, material etc. (no single description column).
-- Set a column index only when you are confident it maps to that field.
-- Return null for any column you cannot find.
-- The header_row may be in rows 1–15; data starts the row after.
+IMPORTANT — choose format_type carefully:
+
+"structured_columns" — use this when the sheet has SEPARATE columns for individual fields
+such as SIZE (numeric inches like 2, 4, 10 or DN values), RATING (like 150#, 300#, PN10),
+MATERIAL/MOC (the gasket material), and QTY. Column headers like "SIZE", "NB", "DN", "NPS",
+"RATING", "CLASS", "MATERIAL", "MOC", "QTY" are strong signals for this format.
+MOC is often only filled in the FIRST data row (fill-down applies to remaining rows).
+
+"description_column" — use this ONLY when one single column contains the COMPLETE gasket
+specification written as a full phrase or sentence, e.g.:
+  "6 inch 150# CNAF RF Gasket"
+  "Spiral wound graphite SS316 gasket 10\" 300#"
+Do NOT use this just because the MOC column contains a descriptive material name.
+
+Rules:
+- If you see separate SIZE and RATING columns → always use "structured_columns".
+- Only set "description" (column index) when format_type is "description_column".
+- Set a column index only when you are confident it maps to that field; null otherwise.
+- The header_row may be in rows 1–15; data rows start immediately after.
 """
 
 
@@ -351,7 +364,11 @@ def _parse_sheet(ws, openai_client=None) -> list[dict]:
     if openai_client is not None:
         layout = _ai_detect_sheet_layout(ws, openai_client)
         if layout:
-            items = _extract_items_from_ai_layout(ws, layout)
+            try:
+                items = _extract_items_from_ai_layout(ws, layout)
+            except Exception as exc:
+                logger.warning('AI item extraction failed, falling back to rule-based: %s', exc)
+                items = []
             if items:
                 return items
             # AI detected a layout but found no items — fall through to rule-based
