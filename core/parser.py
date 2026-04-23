@@ -5,7 +5,11 @@ Parses customer enquiry inputs (email text or Excel) into a uniform list of raw 
 """
 import re
 import io
+import json
+import logging
 import openpyxl
+
+logger = logging.getLogger(__name__)
 
 
 def parse_email_text(text: str) -> list[dict]:
@@ -136,13 +140,199 @@ def _normalize_uom(uom: str) -> str:
     return 'NOS'
 
 
-def parse_excel_file(file_bytes: bytes) -> list[dict]:
-    """Parse an uploaded Excel file into raw line items."""
+_AI_LAYOUT_PROMPT = """\
+You are analysing a customer Excel sheet that contains gasket procurement enquiries.
+
+Below are the first rows of one worksheet (each object has "row" = 1-based row index and "cells" = list of cell values left-to-right, empty string for blank cells).
+
+{preview_json}
+
+Your task: identify the layout so downstream code can extract every gasket line item.
+
+Return ONLY valid JSON (no markdown, no explanation) matching this schema exactly:
+{{
+  "header_row": <1-based integer row that contains column headers, or null if no header>,
+  "format_type": "description_column" | "structured_columns",
+  "columns": {{
+    "description": <0-based column index of the full-text gasket description, or null>,
+    "size":        <0-based column index for nominal size (NB/DN/NPS/inch), or null>,
+    "rating":      <0-based column index for pressure rating/class, or null>,
+    "moc":         <0-based column index for material / MOC, or null>,
+    "thickness":   <0-based column index for thickness (mm), or null>,
+    "od_mm":       <0-based column index for OD in mm, or null>,
+    "id_mm":       <0-based column index for ID in mm, or null>,
+    "face_type":   <0-based column index for face type (RF/FF), or null>,
+    "quantity":    <0-based column index for quantity / qty, or null>,
+    "uom":         <0-based column index for unit of measure, or null>,
+    "line_no":     <0-based column index for serial / item number, or null>
+  }}
+}}
+
+Definitions:
+- "description_column": one column holds the complete gasket description as free text.
+- "structured_columns": separate columns hold size, rating, material etc. (no single description column).
+- Set a column index only when you are confident it maps to that field.
+- Return null for any column you cannot find.
+- The header_row may be in rows 1–15; data starts the row after.
+"""
+
+
+def _ai_detect_sheet_layout(ws, openai_client) -> dict | None:
+    """Send the first 20 rows to the LLM and return the column layout dict, or None on failure."""
+    preview_rows = []
+    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True), 1):
+        cells = [str(c) if c is not None else '' for c in row]
+        if any(s.strip() for s in cells):
+            preview_rows.append({'row': row_idx, 'cells': cells})
+
+    if not preview_rows:
+        return None
+
+    prompt = _AI_LAYOUT_PROMPT.format(preview_json=json.dumps(preview_rows, ensure_ascii=False))
+    try:
+        response = openai_client.chat.completions.create(
+            model='gpt-4o-mini',
+            temperature=0,
+            response_format={'type': 'json_object'},
+            messages=[{'role': 'user', 'content': prompt}],
+            timeout=30,
+        )
+        raw = response.choices[0].message.content or ''
+        layout = json.loads(raw)
+        # Basic sanity: must have 'columns' dict
+        if not isinstance(layout.get('columns'), dict):
+            return None
+        logger.info('AI sheet layout detected: %s', layout)
+        return layout
+    except Exception as exc:
+        logger.warning('AI sheet layout detection failed: %s', exc)
+        return None
+
+
+def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
+    """Given an AI-detected layout, extract all gasket line items from the worksheet."""
+    header_row = layout.get('header_row') or 1
+    fmt = layout.get('format_type', 'description_column')
+    cols = layout.get('columns', {})
+
+    def ci(field):
+        """Return 0-based column index for a field, or None."""
+        v = cols.get(field)
+        return int(v) if v is not None else None
+
+    items = []
+
+    if fmt == 'description_column':
+        desc_col = ci('description')
+        if desc_col is None:
+            return []
+        qty_col = ci('quantity')
+        uom_col = ci('uom')
+        line_col = ci('line_no')
+        moc_col = ci('moc')
+
+        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+            desc = _cell_str(row, desc_col)
+            if not desc or not _looks_like_gasket(desc):
+                continue
+            if moc_col is not None:
+                moc_val = _cell_str(row, moc_col)
+                if moc_val and moc_val.upper() != desc.upper():
+                    desc = desc + ' MOC: ' + moc_val
+            qty = _cell_float(row, qty_col) if qty_col is not None else None
+            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
+            line_no = _cell_float(row, line_col) if line_col is not None else None
+            items.append({
+                'line_no': int(line_no) if line_no else None,
+                'description': desc,
+                'quantity': qty,
+                'uom': uom,
+            })
+
+    else:  # structured_columns
+        size_col = ci('size')
+        rating_col = ci('rating')
+        moc_col = ci('moc')
+        thk_col = ci('thickness')
+        od_col = ci('od_mm')
+        id_col = ci('id_mm')
+        face_col = ci('face_type')
+        qty_col = ci('quantity')
+        uom_col = ci('uom')
+        line_col = ci('line_no')
+
+        last_moc = None
+
+        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+            # Fill-down MOC
+            mat_val = _cell_str(row, moc_col) if moc_col is not None else None
+            if mat_val:
+                last_moc = mat_val
+            else:
+                mat_val = last_moc
+
+            # Build synthetic description
+            desc_parts = []
+
+            if od_col is not None and id_col is not None:
+                od = _cell_str(row, od_col)
+                id_ = _cell_str(row, id_col)
+                if od and id_:
+                    thk = _cell_str(row, thk_col) if thk_col is not None else None
+                    thk_part = f' X {thk}MM THK' if thk else ''
+                    desc_parts.append(f'OD {od}MM X ID {id_}MM{thk_part}')
+            elif size_col is not None:
+                size_raw = _cell_str(row, size_col)
+                if size_raw:
+                    try:
+                        sv = float(size_raw)
+                        size_str = f'{int(sv)}"' if sv == int(sv) else f'{sv}"'
+                    except ValueError:
+                        size_str = size_raw
+                    rating_raw = _cell_str(row, rating_col) if rating_col is not None else None
+                    thk = _cell_str(row, thk_col) if thk_col is not None else None
+                    thk_part = f' {thk}MM THK' if thk else ''
+                    rating_part = f' {rating_raw}' if rating_raw else ''
+                    desc_parts.append(f'{size_str}{rating_part}{thk_part}')
+
+            if not desc_parts:
+                continue
+
+            if mat_val:
+                desc_parts.append(f'MOC: {mat_val}')
+            if face_col is not None:
+                face_val = _cell_str(row, face_col)
+                if face_val:
+                    desc_parts.append(face_val)
+
+            desc = ' '.join(desc_parts) + ' GASKET'
+            if not _looks_like_gasket(desc):
+                continue
+
+            qty = _cell_float(row, qty_col) if qty_col is not None else None
+            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
+            line_no = _cell_float(row, line_col) if line_col is not None else None
+            items.append({
+                'line_no': int(line_no) if line_no else None,
+                'description': desc,
+                'quantity': qty,
+                'uom': uom,
+            })
+
+    return items
+
+
+def parse_excel_file(file_bytes: bytes, openai_client=None) -> list[dict]:
+    """Parse an uploaded Excel file into raw line items.
+
+    If openai_client is provided, uses AI to detect column layout for each sheet
+    (robust against any column naming). Falls back to rule-based detection otherwise.
+    """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     items = []
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        sheet_items = _parse_sheet(ws)
+        sheet_items = _parse_sheet(ws, openai_client=openai_client)
         if sheet_items:
             items.extend(sheet_items)
     for i, item in enumerate(items, 1):
@@ -151,13 +341,22 @@ def parse_excel_file(file_bytes: bytes) -> list[dict]:
     return items
 
 
-def _parse_sheet(ws) -> list[dict]:
+def _parse_sheet(ws, openai_client=None) -> list[dict]:
     """Detect header row and extract line items from a worksheet.
 
-    Tries description-based detection first; falls back to structured
-    column detection (MATERIAL + DN/CLASS or OD/ID per column).
+    With openai_client: uses AI to identify column layout — works for any format.
+    Without openai_client: falls back to keyword-based detection.
     """
-    # --- Description-based format ---
+    # --- AI-powered layout detection (preferred) ---
+    if openai_client is not None:
+        layout = _ai_detect_sheet_layout(ws, openai_client)
+        if layout:
+            items = _extract_items_from_ai_layout(ws, layout)
+            if items:
+                return items
+            # AI detected a layout but found no items — fall through to rule-based
+
+    # --- Rule-based fallback: description-based format ---
     header_row, col_map = _detect_header(ws)
     if col_map.get('description'):
         items = []
@@ -187,7 +386,7 @@ def _parse_sheet(ws) -> list[dict]:
             })
         return items
 
-    # --- Structured column format (no combined description column) ---
+    # --- Rule-based fallback: structured column format ---
     return _parse_structured_sheet(ws)
 
 
@@ -283,7 +482,7 @@ def _parse_structured_sheet(ws) -> list[dict]:
         return []
 
     items = []
-    for _hdr_idx, col_map, data_rows in sections:
+    for _, col_map, data_rows in sections:
         mat_col = col_map.get('material')
         dn_col = col_map.get('dn_size')
         cls_col = col_map.get('class_rating')

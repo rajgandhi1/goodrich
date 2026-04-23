@@ -925,7 +925,14 @@ with tab_excel:
     st.caption(_wl_hint)
     if st.button('⚡  Process & Add to List', type='primary', key='process_excel_btn'):
         if uploaded_file:
-            raw_items = parse_excel_file(uploaded_file.read())
+            _excel_client = None
+            if _os.environ.get('OPENAI_API_KEY'):
+                try:
+                    from openai import OpenAI as _OAI_XL
+                    _excel_client = _OAI_XL(api_key=_os.environ['OPENAI_API_KEY'])
+                except Exception:
+                    pass
+            raw_items = parse_excel_file(uploaded_file.read(), openai_client=_excel_client)
             if _process_and_append(raw_items):
                 st.rerun()
         else:
