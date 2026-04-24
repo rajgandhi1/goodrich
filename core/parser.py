@@ -45,6 +45,8 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
         # 2. The previous line ended with a comma, OR ended with RING/MATERIAL/OUTER/INNER
         #    (cut mid-phrase), OR the current line starts with a field-label ("WORD:") pattern
         starts_with_number = bool(re.match(r'^\d', line))
+        # Lines starting with a gasket size-prefix keyword are always new items
+        is_new_item_prefix = bool(re.match(r'^(?:NPS|NB|DN|SIZE)\s*:', line, re.IGNORECASE))
         prev_ends_mid = (
             prev.endswith(',')
             or re.search(r'\b(?:OUTER\s*RING|INNER\s*RING|OUTER|RING|MATERIAL)\s*$', prev, re.IGNORECASE)
@@ -59,7 +61,8 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
         curr_is_standard_ref = bool(re.match(
             r'^(?:ASME|ANSI|API|ISO|EN|DIN|BS|ASTM|NACE|IBR|AWS)\b', line, re.IGNORECASE
         ))
-        if not starts_with_number and (prev_ends_mid or prev_ends_std_prefix or curr_is_field_continuation or curr_is_standard_ref):
+        if (not starts_with_number and not is_new_item_prefix
+                and (prev_ends_mid or prev_ends_std_prefix or curr_is_field_continuation or curr_is_standard_ref)):
             merged[-1] = prev + ' ' + line
         else:
             merged.append(line)
