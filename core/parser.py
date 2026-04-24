@@ -154,37 +154,39 @@ Return ONLY valid JSON (no markdown, no explanation) matching this schema exactl
   "header_row": <1-based integer row that contains column headers, or null if no header>,
   "format_type": "description_column" | "structured_columns",
   "columns": {{
-    "description": <0-based column index of the full-text gasket description, or null>,
-    "size":        <0-based column index for nominal size (NB/DN/NPS/inch), or null>,
-    "rating":      <0-based column index for pressure rating/class, or null>,
-    "moc":         <0-based column index for material / MOC, or null>,
-    "thickness":   <0-based column index for thickness (mm), or null>,
-    "od_mm":       <0-based column index for OD in mm, or null>,
-    "id_mm":       <0-based column index for ID in mm, or null>,
-    "face_type":   <0-based column index for face type (RF/FF), or null>,
-    "quantity":    <0-based column index for quantity / qty, or null>,
-    "uom":         <0-based column index for unit of measure, or null>,
-    "line_no":     <0-based column index for serial / item number, or null>
+    "description":    <0-based column index of the full-text gasket description, or null>,
+    "component_name": <0-based column index whose DATA values indicate the gasket TYPE (e.g. "Gasket SPW", "Spiral Wound Gasket", "RTJ Ring", "Soft Cut Gasket") — short type-label cells, not full specs; or null>,
+    "size":           <0-based column index for nominal size (NB/DN/NPS/inch), or null>,
+    "rating":         <0-based column index for pressure rating/class, or null>,
+    "moc":            <0-based column index for material / MOC, or null>,
+    "thickness":      <0-based column index for thickness (mm), or null>,
+    "od_mm":          <0-based column index for OD in mm, or null>,
+    "id_mm":          <0-based column index for ID in mm, or null>,
+    "face_type":      <0-based column index for face type (RF/FF), or null>,
+    "quantity":       <0-based column index for quantity / qty, or null>,
+    "uom":            <0-based column index for unit of measure, or null>,
+    "line_no":        <0-based column index for serial / item number, or null>
   }}
 }}
 
-IMPORTANT — choose format_type carefully:
+IMPORTANT — choose format_type by looking at the ACTUAL DATA VALUES, not just column headers:
 
-"structured_columns" — use this when the sheet has SEPARATE columns for individual fields
-such as SIZE (numeric inches like 2, 4, 10 or DN values), RATING (like 150#, 300#, PN10),
-MATERIAL/MOC (the gasket material), and QTY. Column headers like "SIZE", "NB", "DN", "NPS",
-"RATING", "CLASS", "MATERIAL", "MOC", "QTY" are strong signals for this format.
-MOC is often only filled in the FIRST data row (fill-down applies to remaining rows).
-
-"description_column" — use this ONLY when one single column contains the COMPLETE gasket
-specification written as a full phrase or sentence, e.g.:
+"description_column" — use this when a column's DATA contains long, complete gasket
+specifications (full phrases with size + rating + material + type together), e.g.:
   "6 inch 150# CNAF RF Gasket"
-  "Spiral wound graphite SS316 gasket 10\" 300#"
-Do NOT use this just because the MOC column contains a descriptive material name.
+  "Spiral wound graphite SS316 gasket 10\\" 300#"
+  "8in, Gasket Spiral Wound, 4.5mm Thk, CL150, WD-SS316, IR-Graphite, OR-CS, ASME B16.20"
+Map that column as "description". Also map quantity, uom, line_no from their columns.
+Even if other columns (size, moc, qty) also exist, prefer "description_column" when one
+column already contains the complete specification.
 
-Rules:
-- If you see separate SIZE and RATING columns → always use "structured_columns".
-- Only set "description" (column index) when format_type is "description_column".
+"structured_columns" — use this ONLY when NO column contains the full spec in one cell,
+and separate columns each carry one field (size in one col, rating in another, moc in another).
+
+Key rules:
+- Look at the actual cell values in data rows to decide: long comma-separated text → description_column.
+- Short type-label values (like "Gasket SPW", "Spiral Wound", "RTJ") → map as "component_name"
+  (not "description") so the gasket type is preserved even in structured_columns mode.
 - Set a column index only when you are confident it maps to that field; null otherwise.
 - The header_row may be in rows 1–15; data rows start immediately after.
 """
@@ -273,19 +275,32 @@ def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
         qty_col = ci('quantity')
         uom_col = ci('uom')
         line_col = ci('line_no')
+        comp_col = ci('component_name')
 
         last_moc = None
+        last_comp = None
 
         for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
-            # Fill-down MOC
+            # Fill-down MOC and component_name (often repeated only in first row)
             mat_val = _cell_str(row, moc_col) if moc_col is not None else None
             if mat_val:
                 last_moc = mat_val
             else:
                 mat_val = last_moc
 
+            comp_val = _cell_str(row, comp_col) if comp_col is not None else None
+            if comp_val:
+                last_comp = comp_val
+            else:
+                comp_val = last_comp
+
             # Build synthetic description
             desc_parts = []
+
+            # Prepend component type label (e.g. "Gasket SPW") so gasket type
+            # is preserved for the extractor — this is the most important field
+            if comp_val:
+                desc_parts.append(comp_val)
 
             if od_col is not None and id_col is not None:
                 od = _cell_str(row, od_col)
@@ -308,7 +323,9 @@ def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
                     rating_part = f' {rating_raw}' if rating_raw else ''
                     desc_parts.append(f'{size_str}{rating_part}{thk_part}')
 
-            if not desc_parts:
+            # Need at least a size/dimension — comp_val alone is not enough
+            has_dimension = len(desc_parts) > (1 if comp_val else 0)
+            if not has_dimension:
                 continue
 
             if mat_val:
@@ -318,7 +335,10 @@ def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
                 if face_val:
                     desc_parts.append(face_val)
 
-            desc = ' '.join(desc_parts) + ' GASKET'
+            desc = ' '.join(desc_parts)
+            # Append GASKET suffix only if no gasket-type keyword already present
+            if 'gasket' not in desc.lower():
+                desc += ' GASKET'
             if not _looks_like_gasket(desc):
                 continue
 
