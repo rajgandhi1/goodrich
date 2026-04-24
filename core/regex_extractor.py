@@ -179,6 +179,10 @@ _API_FRAC_RE = re.compile(r'\b(\d+)\.(\d+)/(\d+)["\s]', re.IGNORECASE)
 _BARE_FRAC_INCH_RE = re.compile(
     r'(?:^|,)\s*((?:0|1)\.\d{2,4})\s*(?:,|$)'
 )
+# Bare mm size: "150mm", "150 MM" — treated as nominal bore (DN/NB equivalent).
+# Guard: value must be >= 15 to avoid matching typical gasket thicknesses (1.5–12mm).
+# Only used as a last resort after all other size patterns fail.
+_BARE_MM_SIZE_RE = re.compile(r'\b(\d{2,4})\s*MM\b', re.IGNORECASE)
 
 
 def _extract_size(desc: str, gasket_type: str) -> dict:
@@ -335,6 +339,21 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         if 0.125 <= val <= 1.875:
             result['size'] = f'{val}"'
             result['size_type'] = 'NPS'
+            return result
+
+    # 10. Bare mm value — last resort after all inch/NPS patterns fail.
+    # e.g. "150mm", "150 MM" → "150 NB" (normalize_size will convert to NPS).
+    # Guard ≥ 15 to avoid grabbing gasket thickness values (usually 1.5–12mm).
+    # Also skip if a THK/THICK/T context word is nearby.
+    m = _BARE_MM_SIZE_RE.search(upper)
+    if m:
+        val = int(m.group(1))
+        # Reject if the mm token is preceded/followed by thickness keywords
+        span_start = max(0, m.start() - 10)
+        context = upper[span_start: m.end() + 10]
+        if val >= 15 and not re.search(r'\b(THK|THICK|THICKNESS|T\s*=)\b', context):
+            result['size'] = f'{val} NB'
+            result['size_type'] = 'NB'
             return result
 
     return result

@@ -1162,6 +1162,23 @@ def apply_rules(item: dict) -> dict:
     size_norm = normalize_size(raw_size) if raw_size else None
     item['size_norm'] = size_norm
 
+    # Flag when a metric mm value was rounded to the nearest standard NPS
+    if raw_size and size_norm:
+        import re as _re_sz
+        _s = str(raw_size).strip().upper().replace(' ', '')
+        # Matches bare mm or NB-mm values (e.g. "150MM", "127NB", "127MM")
+        _mm_match = _re_sz.match(r'^(\d+(?:\.\d+)?)(?:MM|NB)$', _s)
+        if _mm_match:
+            from data.reference_data import NB_TO_NPS as _NB_TO_NPS
+            _mm_val = float(_mm_match.group(1))
+            _nb_int = int(round(_mm_val))
+            if _nb_int not in _NB_TO_NPS:
+                # Nearest-neighbour was used — add a check flag
+                _nearest = min(_NB_TO_NPS.keys(), key=lambda k: abs(k - _nb_int))
+                flags.append(
+                    f'Size {_nb_int}mm not a standard NB — rounded to {_nearest}mm ({size_norm})'
+                )
+
     # --- Normalize rating ---
     raw_rating = item.get('rating')
     rating_norm = normalize_rating(raw_rating) if raw_rating else None

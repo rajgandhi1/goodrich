@@ -35,13 +35,27 @@ def normalize_size(raw: str) -> str | None:
         s = s.replace(' ', '')
         # Remove units
         s = s.replace('NPS', '').replace('DN', '').replace('"', '').replace("'", '').replace('INCH', '').strip()
-        # NB lookup
+
+        # Explicit mm suffix (e.g. "150MM", "125MM") — treat as nominal bore with nearest-NB lookup
+        mm_match = _re.match(r'^(\d+(?:\.\d+)?)MM$', s)
+        if mm_match:
+            return _nb_mm_to_nps(float(mm_match.group(1)))
+
+        # NB lookup: strip NB token, then try exact NB_TO_NPS match.
+        # Also handles "DN 150" (DN stripped above → "150") and bare numbers after stripping.
+        # Explicit NB label → also try nearest-neighbour fallback.
+        has_nb_label = 'NB' in s
+        nb_str = s.replace('NB', '').strip()
         try:
-            nb = int(float(s.replace('NB', '').strip()))
+            nb = int(float(nb_str))
             if nb in NB_TO_NPS:
                 return NB_TO_NPS[nb]
+            if has_nb_label:
+                # Non-standard NB value — round to nearest
+                return _nb_mm_to_nps(float(nb_str))
         except ValueError:
             pass
+
         # Simple fraction handling
         fractions = {'1/2': '0.50', '3/4': '0.75', '1/4': '0.25', '3/8': '0.375'}
         for frac, dec in fractions.items():
@@ -62,6 +76,23 @@ def normalize_size(raw: str) -> str | None:
         54.0: '54"',
     }
     return size_map.get(round(val, 2))
+
+
+def _nb_mm_to_nps(mm_val: float) -> str | None:
+    """Convert a nominal bore mm value to the nearest NPS inch string.
+
+    Returns the NB_TO_NPS entry for an exact match, or the closest standard
+    NB value when the input doesn't match exactly (e.g. 127mm → 125 NB → 5").
+    Returns None if mm_val is outside a sensible NB range (< 6 or > 1200).
+    """
+    if mm_val < 6 or mm_val > 1200:
+        return None
+    nb = int(round(mm_val))
+    if nb in NB_TO_NPS:
+        return NB_TO_NPS[nb]
+    # Nearest-neighbour: find the NB key with the smallest absolute difference
+    nearest = min(NB_TO_NPS.keys(), key=lambda k: abs(k - nb))
+    return NB_TO_NPS[nearest]
 
 
 def normalize_rating(raw: str) -> str | None:
