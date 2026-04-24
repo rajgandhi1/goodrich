@@ -735,7 +735,7 @@ _SW_IR_AFTER_RE = re.compile(
 # Winding material: SS316/SS304/etc before "SPIRAL WOUND" or standalone
 # Allow optional comma between material and SPIRAL keyword (e.g. "UNS N06625, Spiral wound")
 _SW_WINDING_BEFORE_RE = re.compile(
-    r'[,\s](SS\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|'
+    r'[,\s](SS\s*\d{3}\w?|AISI\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|'
     r'HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|DUPLEX|SUPER\s*DUPLEX|'
     r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+)[,\s]+'
     r'(?:SPIRAL|SPRL|SPW)',
@@ -862,9 +862,9 @@ def _extract_sw_fields(desc: str) -> dict:
                 if m:
                     result['sw_winding_material'] = _norm_ring_material(m.group(1).strip())
             if not result['sw_winding_material']:
-                # Try first SS/alloy/UNS/trade-name mention as winding material
+                # Try first SS/AISI/alloy/UNS/trade-name mention as winding material
                 m = re.search(
-                    r'\b(SS[\s\-]*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
+                    r'\b(SS[\s\-]*\d{3}\w?|AISI\s*\d{3}\w?|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|'
                     r'ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|MONEL\s*\d{3}|'
                     r'UNS\s*[SNR]\d+|TITANIUM\s*GR\.?\d+|'
                     r'\d{3}\s*SMO|'
