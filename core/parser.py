@@ -54,7 +54,12 @@ def _merge_continuation_lines(lines: list[str]) -> list[str]:
             re.search(r'\b(?:ANSI|ASME|API|ISO|EN|DIN|BS|ASTM|NACE|IBR|AWS)\s*$', prev, re.IGNORECASE)
         )
         curr_is_field_continuation = bool(re.match(r'^[A-Z][A-Z\s]+:\s*\S', line))
-        if not starts_with_number and (prev_ends_mid or prev_ends_std_prefix or curr_is_field_continuation):
+        # Current line is a standard reference line (e.g. "ASME B16.20: Metallic Gaskets for Pipe Flanges")
+        # that belongs to the preceding description, not a new line item
+        curr_is_standard_ref = bool(re.match(
+            r'^(?:ASME|ANSI|API|ISO|EN|DIN|BS|ASTM|NACE|IBR|AWS)\b', line, re.IGNORECASE
+        ))
+        if not starts_with_number and (prev_ends_mid or prev_ends_std_prefix or curr_is_field_continuation or curr_is_standard_ref):
             merged[-1] = prev + ' ' + line
         else:
             merged.append(line)
