@@ -686,6 +686,32 @@ def test_softcut_large_bore_rules():
     print('  Large bore B16.47 flag ✓  Small bore B16.21 default ✓')
 
 
+def test_metric_nominal_size_rounds_down_to_inches():
+    item_exact = {
+        'gasket_type': 'SOFT_CUT',
+        'size': '20mm',
+        'rating': '150#',
+        'moc': 'CNAF',
+        'quantity': 1,
+        'uom': 'NOS',
+    }
+    result_exact = apply_rules(item_exact)
+    assert result_exact['size_norm'] == '0.75"'
+    assert format_description(result_exact).startswith('SIZE : 0.75" X 150#')
+
+    item_round_down = {
+        'gasket_type': 'SOFT_CUT',
+        'size': '24mm',
+        'rating': '150#',
+        'moc': 'CNAF',
+        'quantity': 1,
+        'uom': 'NOS',
+    }
+    result_round_down = apply_rules(item_round_down)
+    assert result_round_down['size_norm'] == '0.75"'
+    assert any('rounded down to 20mm' in f for f in result_round_down['flags'])
+
+
 def test_isk_formatter():
     """Test ISK formatter output — STYLE-CS, STYLE-N, FCS, TYPE-D, no-style. No LLM needed."""
     _SET_PGS = ('G10 GASKET WITH UNS S32760 CORE 3MM THK WITH PTFE SPRING ENERGISED SEAL, '
@@ -1256,6 +1282,7 @@ if __name__ == '__main__':
         test_description_format,
         test_softcut_formatter,
         test_softcut_large_bore_rules,
+        test_metric_nominal_size_rounds_down_to_inches,
         test_spw_formatter,
         test_spw_nps_class_format,
         test_spw_compact_formats,

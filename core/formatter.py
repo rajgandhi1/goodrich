@@ -636,12 +636,6 @@ def _fmt_size(size: str, gtype: str) -> str:
             val = int(sf.group(1)) / int(sf.group(2))
             return f'{_fmt_num(val)}"'
         # Sub-1" decimal → standard fractional name: "0.875"" → "7/8""
-        dec = _re.match(r'^(0\.\d+)"$', s)
-        if dec:
-            val = float(dec.group(1))
-            frac = _NPS_DECIMAL_TO_FRAC.get(round(val, 3))
-            if frac:
-                return f'{frac}"'
         return s
     # Metric OD/ID strings — pass through unchanged
     if 'MM' in s.upper():

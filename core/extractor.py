@@ -116,7 +116,7 @@ _SINGLE_ITEM_SYSTEM_PROMPT = f"""You are a gasket specification extraction assis
 {_FIELD_SCHEMA}
 
 Rules:
-- size: NPS/inch as-is (e.g. "6\\""). NB → "X NB". DN → "DN X". OD×ID → "OD NNNmm x ID NNNmm".
+- size: NPS/inch as-is (e.g. "6\\""). Nominal metric sizes in mm/NB must be converted down to the same-or-next-lower NPS inch size (20mm -> 0.75"). OD×ID remains OD NNNmm x ID NNNmm.
 - rating: "150#"/"300#"/"PN 10"/"PN 16". Valid ASME: 150/300/600/900/1500/2500/3000.
 - Normalize materials: 304SS→SS304, 316SS→SS316, CARBON STEEL/CS/MS→CS, SOFT IRON→SOFTIRON.
 - SPIRAL_WOUND: use sw_* fields, moc=null. RTJ: use moc+rtj_* fields, standard=ASME B16.20.

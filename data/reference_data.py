@@ -79,9 +79,9 @@ def normalize_size(raw: str) -> str | None:
 
 
 def _nb_mm_to_nps(mm_val: float) -> str | None:
-    """Convert a nominal bore mm value to the nearest NPS inch string.
+    """Convert a nominal bore mm value to the same-or-next-lower NPS inch string.
 
-    Returns the NB_TO_NPS entry for an exact match, or the closest standard
+    Returns the NB_TO_NPS entry for an exact match, or the next lower standard
     NB value when the input doesn't match exactly (e.g. 127mm → 125 NB → 5").
     Returns None if mm_val is outside a sensible NB range (< 6 or > 1200).
     """
@@ -90,9 +90,10 @@ def _nb_mm_to_nps(mm_val: float) -> str | None:
     nb = int(round(mm_val))
     if nb in NB_TO_NPS:
         return NB_TO_NPS[nb]
-    # Nearest-neighbour: find the NB key with the smallest absolute difference
-    nearest = min(NB_TO_NPS.keys(), key=lambda k: abs(k - nb))
-    return NB_TO_NPS[nearest]
+    lower_sizes = [k for k in NB_TO_NPS if k <= mm_val]
+    if not lower_sizes:
+        return None
+    return NB_TO_NPS[max(lower_sizes)]
 
 
 def normalize_rating(raw: str) -> str | None:

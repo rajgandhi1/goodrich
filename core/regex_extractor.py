@@ -54,7 +54,7 @@ _KAMM_INTEGRAL_RING_RE = re.compile(
     re.IGNORECASE,
 )
 _DJI_RE = re.compile(
-    r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bCOPPER\s+JACKET\b',
+    r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bCOPPER\s+JACKET\b|\bDJ\b',
     re.IGNORECASE,
 )
 _ISK_RE = re.compile(
@@ -78,10 +78,10 @@ _SW_RING_KW_RE = re.compile(
 
 def _detect_type(desc: str) -> str:
     """Detect gasket type from keywords. Returns type string."""
-    if _SW_RE.search(desc):
-        return 'SPIRAL_WOUND'
     if _KAMM_RE.search(desc):
         return 'KAMM'
+    if _SW_RE.search(desc):
+        return 'SPIRAL_WOUND'
     if _DJI_RE.search(desc):
         return 'DJI'
     # ISK_RTJ before ISK before RTJ
@@ -146,6 +146,16 @@ _PAREN_ID_OD_RE = re.compile(
     re.IGNORECASE,
 )
 # Bare NxN (DJI copper jacket pattern): "101X110 X1,5" — smaller=ID, larger=OD
+_NUM_OD_ID_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*OD\b\s*[XxXÃ—,\s]+'
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*ID\b',
+    re.IGNORECASE,
+)
+_NUM_ID_OD_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*ID\b\s*[XxXÃ—,\s]+'
+    r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*OD\b',
+    re.IGNORECASE,
+)
 _BARE_DIMS_RE = re.compile(
     r'(?:GASKET|JACKET)\s*(\d+(?:\.\d+)?)\s*[XxX×]\s*(\d+(?:\.\d+)?)\s*[XxX×]\s*(\d+(?:[.,]\d+)?)',
     re.IGNORECASE,
@@ -159,9 +169,10 @@ _NPS_EXPLICIT_RE = re.compile(r'\bNPS[\s:]*(\d+(?:\.\d+)?)\b', re.IGNORECASE)
 # NPS suffix: "2 NPS" or "30 NPS" (number before NPS keyword)
 _NPS_SUFFIX_RE = re.compile(r'\b(\d+(?:\.\d+)?)\s+NPS\b', re.IGNORECASE)
 # Inch with quote: 6" or 1.5" or 1-1/2"
-_INCH_QUOTE_RE = re.compile(r'\b(\d+(?:\.\d+)?(?:\s*[-]\s*\d+/\d+)?)\s*"', re.IGNORECASE)
+_INCH_QUOTE_RE = re.compile(r'(?<!/)\b(\d+(?:\.\d+)?(?:\s*[-]\s*\d+/\d+)?)\s*"', re.IGNORECASE)
 # "X INCH" or "X IN "
 _INCH_WORD_RE = re.compile(r'\b(\d+(?:\.\d+)?)\s*(?:INCH(?:ES)?|IN)\b', re.IGNORECASE)
+_FRAC_QUOTE_RE = re.compile(r'(?<!\()\b(\d+)\s*/\s*(\d+)\s*"', re.IGNORECASE)
 # Packed format: "4CL 150" or "1CL 300" — size glued to CL
 _PACKED_SIZE_CL_RE = re.compile(
     rf'^(\d{{1,3}})(?:CL\s*(?:{_ASME_CLASSES}))', re.IGNORECASE
@@ -169,6 +180,10 @@ _PACKED_SIZE_CL_RE = re.compile(
 # Packed format: "24GASKET" — size glued to GASKET keyword
 _PACKED_SIZE_GASKET_RE = re.compile(
     r'^(\d{1,3})(?:GASKET)', re.IGNORECASE
+)
+_BARE_NPS_BEFORE_RATING_RE = re.compile(
+    rf'^\s*(\d+(?:\.\d+)?)\s*[,;]\s*(?:CL(?:ASS)?\s*)?(?:{_ASME_CLASSES})\s*(?:#|LBS?\b|,|$)',
+    re.IGNORECASE,
 )
 # Mixed fraction: "1 1/2" or "1-1/2"
 _MIXED_FRAC_RE = re.compile(r'\b(\d+)\s*[-\s]\s*(\d+)/(\d+)\s*["\s]', re.IGNORECASE)
@@ -222,6 +237,20 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         return result
 
     # 1d. "346 GID x 372 GOD" — Gasket Inner/Outer Diameter notation
+    m = _NUM_OD_ID_RE.search(upper)
+    if m:
+        result['od_mm'] = float(m.group(1))
+        result['id_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
+    m = _NUM_ID_OD_RE.search(upper)
+    if m:
+        result['id_mm'] = float(m.group(1))
+        result['od_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
     m = _GID_GOD_RE.search(upper)
     if m:
         result['id_mm'] = float(m.group(1))  # GID = inner diameter
@@ -295,7 +324,14 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         result['size_type'] = 'NPS'
         return result
 
-    # 6. Inch with quote mark
+    # 6. Fractional inch with quote mark
+    m = _FRAC_QUOTE_RE.search(desc)
+    if m:
+        result['size'] = f'{int(m.group(1)) / int(m.group(2))}"'
+        result['size_type'] = 'NPS'
+        return result
+
+    # 6b. Inch with quote mark
     m = _INCH_QUOTE_RE.search(desc)
     if m:
         val = m.group(1).strip()
@@ -333,6 +369,12 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
         return result
 
     # 9. Bare fractional decimal (no " suffix) between commas — e.g. ",0.875," in row data
+    m = _BARE_NPS_BEFORE_RATING_RE.search(desc)
+    if m:
+        result['size'] = f'{m.group(1)}"'
+        result['size_type'] = 'NPS'
+        return result
+
     m = _BARE_FRAC_INCH_RE.search(desc)
     if m:
         val = float(m.group(1))
@@ -483,10 +525,16 @@ def _extract_softcut_moc(desc: str) -> str | None:
         raw = lbl.group(1).strip().upper()
         # Normalize through aliases if known; otherwise keep verbatim
         return _MOC_ALIASES.get(raw, raw)
+    if re.search(r'\bREINFORCED\s+CHLOROPR?ENE\s+RUBBER\b', desc, re.IGNORECASE):
+        return 'REINFORCED CHLOROPENE RUBBER'
+    if re.search(r'\bCOMP\.?\s+NON[\s\-]?ASB\.?\s+SYNTHETIC\s+FIBER\b|\bCOMPRESSED\s+NON[\s\-]?ASBESTOS\s+SYNTHETIC\s+FIBER\b', desc, re.IGNORECASE):
+        return 'COMPRESSED NON ASBESTOS SYNTHETIC FIBER'
     m = _SOFTCUT_MOC_RE.search(desc.upper())
     if m:
         raw = m.group(1).strip()
         return _MOC_ALIASES.get(raw, raw)
+    if re.search(r'\bRUBBER\b', desc, re.IGNORECASE):
+        return 'RUBBER'
     return None
 
 
@@ -509,6 +557,11 @@ _THK_MM_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*(?:MM\s+)?(?:THK|THICK(?:NESS)?)',
 _THK_BARE_MM_RE = re.compile(r'[XxX×]\s*(\d+(?:\.\d+)?)\s*MM\b', re.IGNORECASE)
 # "THK 3" or "THK-3" or "THK: 3" or "THCK, 2.0"
 # "THCK:0.175 IN" — thickness in inches (label:value IN suffix); convert to mm
+_THK_BARE_MM_WITH_CONTEXT_RE = re.compile(
+    r'\b(\d+(?:[.,]\d+)?)\s*MM\b(?=\s*(?:THK|THCK|THICK|THICKNESS|NOM\s+THK)\b)',
+    re.IGNORECASE,
+)
+_THK_TRAILING_DECIMAL_MM_RE = re.compile(r'\b(\d+[.,]\d+)\s*MM\s*[\).,;]*\s*$', re.IGNORECASE)
 _THK_INCH_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:=\-,]*(\d+(?:[.,]\d+)?)\s*IN(?:CH(?:ES)?)?\b', re.IGNORECASE)
 _THK_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:=\-,]*(\d+(?:[.,]\d+)?)', re.IGNORECASE)
 # "3T" or "3T X" — common in DJI: "3T X 1285 OD"
@@ -533,9 +586,19 @@ def _extract_thickness(desc: str) -> float | None:
 
     m = _THK_MM_RE.search(desc)
     if m:
-        return float(m.group(1).replace(',', '.'))
+        before = desc[max(0, m.start() - 4):m.start()].upper()
+        if not re.search(r'(?:ID|OD)\s*=?\s*$', before):
+            return float(m.group(1).replace(',', '.'))
 
     # Thickness stated in inches — convert to mm and return
+    m = _THK_PREFIX_RE.search(desc)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
+    m = _THK_BARE_MM_WITH_CONTEXT_RE.search(desc)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
     m = _THK_INCH_PREFIX_RE.search(desc)
     if m:
         val_in = float(m.group(1).replace(',', '.'))
@@ -543,6 +606,10 @@ def _extract_thickness(desc: str) -> float | None:
         return round(round(mm / 0.5) * 0.5, 1)  # round to nearest 0.5mm (standard SPW thickness)
 
     m = _THK_PREFIX_RE.search(desc)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
+    m = _THK_TRAILING_DECIMAL_MM_RE.search(desc)
     if m:
         return float(m.group(1).replace(',', '.'))
 
@@ -662,7 +729,7 @@ _SW_FILLER_WITH_RE = re.compile(
 # Also handles "INNERING RING" (customer typo) and "INNER CENTERING RING" (shared inner+outer ring)
 _SW_IR_RE = re.compile(
     r'([\w\s]+?)\s+(?:INNER(?:ING)?\s+RING|I/R|\bIR\b|\bI\s+RING\b)\b'
-    r'|\b(?:INNER(?:ING)?\s+RING|I/R|IR|I\s+RING)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
+    r'|\b(?:INNER(?:ING)?\s+RING|I/R|IR|INR|I\s+RING)\s+(SS\s*\d{3}\w?|\d{3}\w?|CS|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|DUPLEX\w*)',
     re.IGNORECASE,
 )
 # Outer ring: "CS OUTER RING" / "CS O/R" / "CS CENTERING RING" / "CS CR" / "CR CS"
@@ -729,7 +796,7 @@ _NON_RING_MATERIAL_RE = re.compile(
 )
 # Keyword-before-material inner ring: "INNER RING SS304" / "I/R SS316" / "IR 316L" / "INNERING RING SS316L"
 _SW_IR_AFTER_RE = re.compile(
-    r'\b(?:INNER(?:ING)?\s+RING|I/R|IR|I\s+RING)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n&+]|$|\b(?:OUTER|O/R|CENTERING)\b))',
+    r'\b(?:INNER(?:ING)?\s+RING|I/R|IR|INR|I\s+RING)\s+([\w]+(?:\s+[\w]+){0,2}?)(?=\s*(?:[,()\[\n&+]|$|\b(?:OUTER|O/R|CENTERING)\b))',
     re.IGNORECASE,
 )
 # Winding material: SS316/SS304/etc before "SPIRAL WOUND" or standalone
@@ -759,29 +826,29 @@ _SW_INOUT_RE = re.compile(
     re.IGNORECASE,
 )
 _SW_MAT_TOKEN = (
-    r'SS\s*\d{0,3}\w?|AISI\s*\d{3}\w?|TYPE\s*\d{3}\w?|\d{3}\w?\s*SS|'
+    r'SS\s*\d{0,3}\w?|STAINLESS\s+STEEL\s*\(SS[\s\-]*\d{3}\w?\)|AISI\s*\d{3}\w?|TYPE\s*\d{3}\w?|\d{3}\w?\s*SS|'
     r'\d{3}\w?|CS|CARBON\s+STEEL|C\.?S\.?|LTCS|MS|MILD\s+STEEL|'
     r'INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|'
     r'MONEL\s*\d{3}|DUPLEX\w*|SUPER\s*DUPLEX|UNS\s*[SNR]\d+'
 )
 _SW_INNER_OUTER_SLASH_RE = re.compile(
-    rf'\b(?:INNER|IR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\s*/\s*'
+    rf'\b(?:INNER|IR|INR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\s*/\s*'
     rf'(?:OUTER|OR|O/R|C/R|CR|CENTERING(?:\s+RING)?|OUTER\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})',
     re.IGNORECASE,
 )
 _SW_OUTER_INNER_SLASH_RE = re.compile(
     rf'\b(?:OUTER|OR|O/R|C/R|CR|CENTERING(?:\s+RING)?|OUTER\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\s*/\s*'
-    rf'(?:INNER|IR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})',
+    rf'(?:INNER|IR|INR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})',
     re.IGNORECASE,
 )
 _SW_RING_PAIR_RE = re.compile(
-    rf'\b(?:INNER|IR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b.*?'
+    rf'\b(?:INNER|IR|INR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b.*?'
     rf'\b(?:OUTER|OR|O/R|OUTER\s+RING|C/R|CR|CENTERING(?:\s+RING)?)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b',
     re.IGNORECASE,
 )
 _SW_RING_PAIR_REV_RE = re.compile(
     rf'\b(?:OUTER|OR|O/R|OUTER\s+RING|C/R|CR|CENTERING(?:\s+RING)?)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b.*?'
-    rf'\b(?:INNER|IR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b',
+    rf'\b(?:INNER|IR|INR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b',
     re.IGNORECASE,
 )
 
@@ -791,6 +858,11 @@ def _norm_ring_material(raw: str | None) -> str | None:
     if not raw:
         return None
     key = raw.strip().upper()
+    if re.search(r'\bCS$', key) and not re.fullmatch(r'C\.?S\.?', key):
+        return 'CS'
+    ss_match = re.search(r'SS[\s\-]*(\d{3}\w?)', key)
+    if ss_match:
+        key = f'SS{ss_match.group(1)}'
     # Clean up common prefixes
     key = re.sub(r'^(?:AND|WITH|W/)(?:\s+|$)', '', key).strip()
     key = re.sub(r'^W/', '', key).strip()
@@ -824,6 +896,12 @@ def _extract_sw_fields(desc: str) -> dict:
 
     # Normalize compact "CSCentering" / "SS316Centering" (material glued to CENTERING keyword)
     upper = re.sub(r'\b([A-Z0-9]{2,6})(CENTERING)\b', r'\1 \2', upper)
+    upper = re.sub(r'\b(RING)(ALLOY|SS|CS|INCOLOY|INCONEL)\b', r'\1 \2', upper)
+
+    for field, label in (('sw_inner_ring', 'INNER'), ('sw_outer_ring', 'OUTER')):
+        m = re.search(rf'STAINLESS\s+STEEL\s*\(\s*(SS[\s\-]*\d{{3}}\w?)\s*\)\s+{label}\s+RING', upper)
+        if m:
+            result[field] = _norm_ring_material(m.group(1))
 
     # --- Structured field labels (highest priority) ---
     # "WINDING MATL:316L SS", "FILLER MATL:GRAPHITE", "CENTERING RING MATL:316L SS", etc.
@@ -900,7 +978,9 @@ def _extract_sw_fields(desc: str) -> dict:
                     upper,
                 )
                 if m:
-                    result['sw_winding_material'] = _norm_ring_material(m.group(1).strip())
+                    candidate = _norm_ring_material(m.group(1).strip())
+                    if candidate and candidate.upper() not in ('FLEXIBLE', 'GRAPHITE', 'FILLER'):
+                        result['sw_winding_material'] = candidate
             if not result['sw_winding_material']:
                 # Try first SS/AISI/alloy/UNS/trade-name mention as winding material
                 m = re.search(
@@ -964,7 +1044,7 @@ def _extract_sw_fields(desc: str) -> dict:
             m = _SW_IR_RE.search(upper)
             if m:
                 raw = (m.group(1) or m.group(2) or '').strip()
-                mat = _norm_ring_material(raw.split()[-1] if raw else None)
+                mat = _norm_ring_material(raw)
                 result['sw_inner_ring'] = mat
 
     # Outer ring (only if not already set by INOUT= / CR-IR pattern)
@@ -983,7 +1063,7 @@ def _extract_sw_fields(desc: str) -> dict:
             m = _SW_OR_RE.search(upper)
             if m:
                 raw = (m.group(1) or '').strip()
-                mat = _norm_ring_material(raw.split()[-1] if raw else None)
+                mat = _norm_ring_material(raw)
                 result['sw_outer_ring'] = mat
 
     # "inner & outer ring" with shared material: "SS316 inner & outer ring"
@@ -1193,12 +1273,13 @@ def _extract_isk_fields(desc: str) -> dict:
         'isk_primary_seal': None,
         'isk_secondary_seal': None,
         'isk_insulating_washer': None,
+        'isk_type': None,
     }
     upper = desc.upper()
 
     # Style: prioritise explicit STYLE-xx over TYPE-xx so that "STYLE-CS (TYPE-F)" → STYLE-CS
     m_style = re.search(r'\b(STYLE[\s\-]?(?:CS|VCS|N|FCS)|VCS|FCS|VCFS)\b', upper, re.IGNORECASE)
-    m_type  = re.search(r'\bTYPE[\s\-]?([AEFDI])\b', upper, re.IGNORECASE)
+    m_type  = re.search(r'\bTYPE\s*-?\s*([AEFDI])\b', upper, re.IGNORECASE)
     if m_style:
         raw = m_style.group(1).upper().replace(' ', '-').replace('--', '-')
         if raw in ('VCS', 'STYLE-VCS', 'TYPE-VCS'):
@@ -1218,9 +1299,14 @@ def _extract_isk_fields(desc: str) -> dict:
         # TYPE-A = customer term for STYLE-CS
         if raw_type == 'A':
             result['isk_style'] = 'STYLE-CS'
+        elif raw_type == 'F' and re.search(r'\bCOMMANDER\s+EXTREME\b', upper):
+            result['isk_style'] = 'STYLE-CS'
+            result['isk_type'] = 'TYPE-F'
         else:
             result['isk_style'] = f'TYPE-{raw_type}'
-        result['isk_type'] = result['isk_style']
+        result['isk_type'] = result['isk_type'] or result['isk_style']
+    elif re.search(r'\b(?:COMMANDER\s+EXTREME|TYPE\s+F)\b', upper):
+        result['isk_style'] = 'STYLE-CS'
 
     # Fire safety
     m = _ISK_FS_RE.search(upper)
@@ -1351,7 +1437,7 @@ _DJI_FILLER_LABEL_RE = re.compile(
 )
 # DJI jacket material (expanded)
 _DJI_JACKET_RE = re.compile(
-    r'\b(COPPER|SS\s*316L?|SS\s*304L?|SS\s*321H?|SOFT\s+IRON|ARMCO\s+IRON|'
+    r'\b(COPPER|SS\s*316L?|SS\s*304L?|SS\s*321H?|316L?|304L?|321H?|SOFT\s+IRON|ARMCO\s+IRON|'
     r'SOFT\s+STEEL|MONEL\s+\d+|MONEL\b|TITANIUM\s+GR\.?\s*\d+|TITANIUM\b|'
     r'BRASS|BRONZE|TEFLON|RUBBER)\b',
     re.IGNORECASE,
@@ -1447,6 +1533,9 @@ def _extract_dji_fields(desc: str) -> dict:
 
 def _extract_dji_thickness(desc: str) -> float | None:
     """Extract thickness from DJI bare dimension pattern."""
+    m = re.search(r'\bOD\s*[:=\-]?\s*\d+(?:\.\d+)?\s*(?:MM)?\s*[Xx]\s*(\d+(?:\.\d+)?)\s*[Xx]\s*ID\b', desc, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
     m = _BARE_DIMS_RE.search(desc)
     if m:
         thk_raw = m.group(3).replace(',', '.')

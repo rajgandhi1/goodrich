@@ -1047,6 +1047,67 @@ def _delete_selected_items(items, display_indices):
 # ---------------------------------------------------------------------------
 # Fragment — data editor + Update/Delete
 # ---------------------------------------------------------------------------
+def _coerce_optional_number(value, fallback=None):
+    if value is None or value == '':
+        return fallback
+    try:
+        if pd.isna(value):
+            return fallback
+    except TypeError:
+        pass
+    return value
+
+
+def _reprocess_customer_descriptions(items, display_indices, edited_df, visible_rows):
+    """Run selected/changed customer descriptions through extraction again."""
+    if not visible_rows:
+        return 0
+
+    from core.extractor import extract_batch
+
+    raw_items = []
+    target_meta = []
+    for visible_idx in visible_rows:
+        if visible_idx >= len(edited_df) or visible_idx >= len(display_indices):
+            continue
+        row = edited_df.iloc[visible_idx]
+        new_desc = str(row.get('Customer Description') or '').strip()
+        if not new_desc:
+            continue
+
+        orig_idx = display_indices[visible_idx]
+        current = items[orig_idx]
+        raw_items.append({
+            'line_no': current.get('line_no'),
+            'description': new_desc,
+            'quantity': _coerce_optional_number(row.get('Qty'), current.get('quantity')),
+            'uom': row.get('UoM') or current.get('uom') or 'NOS',
+        })
+        target_meta.append((orig_idx, bool(row.get('Regret'))))
+
+    if not raw_items:
+        return 0
+
+    reprocessed = extract_batch(raw_items)
+    updated_full = list(items)
+
+    for extracted, (orig_idx, regret) in zip(reprocessed, target_meta):
+        item = apply_rules(extracted)
+        item['ggpl_description'] = format_description(item)
+        item['line_no'] = items[orig_idx].get('line_no', orig_idx + 1)
+        item['regret'] = regret
+        if regret:
+            item['status'] = STATUS_REGRET
+        updated_full[orig_idx] = item
+
+    for j, it in enumerate(updated_full, 1):
+        it['line_no'] = j
+    st.session_state.working_items = updated_full
+    st.session_state._selected_rows = set()
+    st.session_state.pop('_bulk_df', None)
+    return len(reprocessed)
+
+
 @st.fragment
 def _editor_fragment(items, display_indices):
     display_items = [items[i] for i in display_indices]
@@ -1070,7 +1131,11 @@ def _editor_fragment(items, display_indices):
             'Regret':               st.column_config.CheckboxColumn('⛔ Regret', width='small',
                                         help='Tick = GGPL cannot produce this item'),
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
-            'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
+            'Customer Description': st.column_config.TextColumn(
+                'Customer Description',
+                width='large',
+                help='Edit this text, select the row, then click Reprocess Text.',
+            ),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
             'Size':                 st.column_config.TextColumn('Size', width='small'),
             'Rating':               st.column_config.TextColumn('Rating', width='small'),
@@ -1132,16 +1197,40 @@ def _editor_fragment(items, display_indices):
     st.session_state._selected_rows = {i for i, row in edited_df.iterrows() if row['Select']}
     n_sel = len(st.session_state._selected_rows)
     sel_label = f'{n_sel} selected' if n_sel else 'none selected'
+    changed_description_rows = {
+        i for i, row in edited_df.iterrows()
+        if (
+            str(row.get('Customer Description') or '').strip()
+            != str(items[display_indices[i]].get('raw_description') or '').strip()
+        )
+    }
 
-    act_c1, act_c2, act_c3, act_c4 = st.columns([2.2, 2, 2, 4])
+    act_c1, act_c2, act_c3, act_c4, act_c5 = st.columns([2, 2.2, 2, 2, 2])
+
+    reprocess_targets = st.session_state._selected_rows or changed_description_rows
+    if act_c1.button(
+        'Reprocess Text',
+        type='secondary',
+        key='reprocess_text_btn',
+        disabled=(len(reprocess_targets) == 0),
+        help='Edit Customer Description, then re-run extraction for selected rows. If none are selected, changed descriptions are reprocessed.',
+    ):
+        done = _reprocess_customer_descriptions(items, display_indices, edited_df, sorted(reprocess_targets))
+        if done:
+            st.rerun(scope='app')
+        else:
+            st.warning('No non-empty customer descriptions to reprocess.')
 
     # ── Update Descriptions ──────────────────────────────────────────────────
-    if act_c1.button('↻  Update Descriptions', type='secondary', key='update_btn'):
+    if act_c2.button('↻  Update Descriptions', type='secondary', key='update_btn'):
         updated_full = list(items)
 
         for i, row in edited_df.iterrows():
             orig_idx = display_indices[i]
             base = items[orig_idx].copy()
+            edited_raw_description = str(row.get('Customer Description') or '').strip()
+            base['raw_description'] = edited_raw_description
+            base['description'] = edited_raw_description
             base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
             base['size']               = row['Size'] or base.get('size')
             base['rating']             = row['Rating'] or base.get('rating')
@@ -1207,13 +1296,13 @@ def _editor_fragment(items, display_indices):
         st.rerun(scope='app')
 
     # ── Delete Selected ──────────────────────────────────────────────────────
-    if act_c2.button(f'🗑  Delete ({sel_label})', type='secondary', key='delete_sel_btn',
+    if act_c3.button(f'🗑  Delete ({sel_label})', type='secondary', key='delete_sel_btn',
                      disabled=(n_sel == 0)):
         _delete_selected_items(items, display_indices)
         st.rerun(scope='app')
 
     # ── Mark as Regret ───────────────────────────────────────────────────────
-    if act_c3.button(f'⛔  Regret ({sel_label})', type='secondary', key='regret_sel_btn',
+    if act_c4.button(f'⛔  Regret ({sel_label})', type='secondary', key='regret_sel_btn',
                      disabled=(n_sel == 0),
                      help='Mark selected items as REGRET — GGPL cannot produce'):
         updated_full = list(items)
