@@ -863,6 +863,21 @@ with st.sidebar:
             st.rerun()
 
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
+    st.markdown('<div class="gq-sidebar-title">Tools</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<a href="/Doc_Assistant" target="_blank" style="'
+        'display:flex;align-items:center;gap:0.5rem;'
+        'background:#2e4470;color:#e8ecf1 !important;text-decoration:none;'
+        'border:1px solid #3d5a8a;border-radius:6px;'
+        'padding:0.45rem 0.9rem;font-size:0.84rem;font-weight:500;'
+        'transition:background 0.15s;margin-bottom:0.5rem;width:100%;box-sizing:border-box;"'
+        ' onmouseover="this.style.background=\'#3d5a8a\'"'
+        ' onmouseout="this.style.background=\'#2e4470\'">'
+        '📄&nbsp; Doc Assistant&nbsp;<span style="opacity:0.6;font-size:0.78rem">↗</span>'
+        '</a>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
     st.markdown('<div class="gq-sidebar-title">Enquiry History</div>', unsafe_allow_html=True)
 
     history = st.session_state.run_history
