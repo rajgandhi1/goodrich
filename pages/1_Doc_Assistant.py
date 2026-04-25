@@ -25,6 +25,9 @@ st.markdown("""
 [data-testid="stAppViewContainer"] { background: #f0f4f9; }
 [data-testid="stSidebar"]          { background: #1a2740 !important; }
 [data-testid="stSidebar"] *        { color: #e8ecf1 !important; }
+
+/* ── Hide Streamlit's auto-generated page nav ── */
+[data-testid="stSidebarNav"] { display: none !important; }
 [data-testid="stSidebar"] .stButton > button {
     background: #2e4470 !important;
     color: #e8ecf1 !important;
@@ -334,6 +337,22 @@ if "da_pending" not in st.session_state: st.session_state.da_pending = None  # q
 # ── SIDEBAR ─────────────────────────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    # ── Back link ────────────────────────────────────────────────────────────
+    st.markdown(
+        '<a href="/" target="_self" style="'
+        'display:flex;align-items:center;gap:0.5rem;'
+        'background:#2e4470;color:#e8ecf1 !important;text-decoration:none;'
+        'border:1px solid #3d5a8a;border-radius:6px;'
+        'padding:0.45rem 0.9rem;font-size:0.84rem;font-weight:500;'
+        'margin-bottom:0.6rem;width:100%;box-sizing:border-box;"'
+        ' onmouseover="this.style.background=\'#3d5a8a\'"'
+        ' onmouseout="this.style.background=\'#2e4470\'">'
+        '← &nbsp;Quote Processor'
+        '</a>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<hr style="margin:0.4rem 0 0.7rem;border-color:#2e4470">', unsafe_allow_html=True)
+
     # ── API status ───────────────────────────────────────────────────────────
     st.markdown('<div class="sb-section">AI Status</div>', unsafe_allow_html=True)
     api_key = os.environ.get("OPENAI_API_KEY", "")

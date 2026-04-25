@@ -26,6 +26,9 @@ st.markdown("""
 [data-testid="stAppViewContainer"] { background: #f4f6f9; }
 [data-testid="stSidebar"] { background: #1a2740 !important; }
 [data-testid="stSidebar"] * { color: #e8ecf1 !important; }
+
+/* ── Hide Streamlit's auto-generated page nav (we use our own links) ── */
+[data-testid="stSidebarNav"] { display: none !important; }
 [data-testid="stSidebar"] .stButton > button {
     background: #2e4470 !important;
     color: #e8ecf1 !important;
