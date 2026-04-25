@@ -1259,9 +1259,20 @@ def apply_rules(item: dict) -> dict:
     is_asme = raw_rating and '#' in str(raw_rating)
 
     gasket_type = item.get('gasket_type', 'SOFT_CUT')
+    raw_desc = (
+        item.get('description')
+        or item.get('raw_description')
+        or ''
+    ).upper()
+
+    if re.search(r'\bHEAT\s+EXCHANGER\s+GASKET\b', raw_desc):
+        gasket_type = 'KAMM'
+        item['gasket_type'] = 'KAMM'
+    elif re.search(r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bJACKETED\b', raw_desc):
+        gasket_type = 'DJI'
+        item['gasket_type'] = 'DJI'
 
     # If "non-metallic" is mentioned in the original description, force SOFT_CUT
-    raw_desc = (item.get('description') or '').upper()
     if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT',):
         gasket_type = 'SOFT_CUT'
         item['gasket_type'] = 'SOFT_CUT'

@@ -683,6 +683,11 @@ def test_dji_large_copper_jacket():
     _check(r, gasket_type='DJI', moc='COPPER')
     assert r['od_mm'] is not None and r['id_mm'] is not None
 
+def test_jacketed_keyword_is_dji():
+    """Any jacketed gasket description should classify as DJI."""
+    r = regex_extract('JACKETED GASKET OD 400MM ID 380MM THK 3MM SOFT IRON GRAPHITE')
+    _check(r, gasket_type='DJI')
+
 
 # =========================================================================
 # KAMM
@@ -751,6 +756,11 @@ def test_kamm_camprofile_graphite_centering():
         gasket_type='KAMM',
         thickness_mm=5.0,
     )
+
+def test_heat_exchanger_gasket_keyword_is_kamm():
+    """Heat exchanger gasket should classify as KAMM even without camprofile text."""
+    r = regex_extract('HEAT EXCHANGER GASKET OD 982MM ID 956MM 4.5MM THK SS316 GRAPHITE')
+    _check(r, gasket_type='KAMM')
 
 
 # =========================================================================

@@ -37,7 +37,11 @@ _RTJ_RE = re.compile(
     r'(?<![A-Za-z])RING\s+JOINT\b|\bJOINT\s+TOR[EI]\b|\bJOINT\s+TORIQUE\b',
     re.IGNORECASE,
 )
-_KAMM_RE = re.compile(r'KAMMPROFILE|\bKAMM\b|\bCAM[\s\-]?PROFILE\b|SKAG', re.IGNORECASE)
+_KAMM_RE = re.compile(
+    r'KAMMPROFILE|\bKAMM\b|\bCAM[\s\-]?PROFILE\b|SKAG|'
+    r'\bHEAT\s+EXCHANGER\s+GASKET\b',
+    re.IGNORECASE,
+)
 
 # KAMM covering layer: FG (Flexible Graphite), GRAPHITE, PTFE, MICA, NON ASB
 _KAMM_COVERING_RE = re.compile(
@@ -54,7 +58,7 @@ _KAMM_INTEGRAL_RING_RE = re.compile(
     re.IGNORECASE,
 )
 _DJI_RE = re.compile(
-    r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bCOPPER\s+JACKET\b|\bDJ\b',
+    r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bJACKETED\b|\bCOPPER\s+JACKET\b|\bDJ\b',
     re.IGNORECASE,
 )
 _ISK_RE = re.compile(
