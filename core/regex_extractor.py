@@ -113,6 +113,8 @@ def _detect_type(desc: str) -> str:
 # ---------------------------------------------------------------------------
 
 _ASME_CLASSES = '150|300|600|900|1500|2500|3000'
+_OD_LABEL = r'(?:O\s*/\s*D|OD)'
+_ID_LABEL = r'(?:I\s*/\s*D|ID)'
 
 # OD x ID patterns (various formats)
 _OD_ID_RE = re.compile(
@@ -165,6 +167,28 @@ _BARE_DIMS_RE = re.compile(
     re.IGNORECASE,
 )
 # DN format
+_OD_ID_SLASH_RE = re.compile(
+    r'(?:O\s*/\s*D|OD)[\s:\-=]*(\d+(?:\.\d+)?)\s*(?:MM)?\s*[XxX×,\s]+\s*'
+    r'(?:\d+(?:\.\d+)?\s*(?:MM)?\s*[XxX×,\s]+\s*)?'
+    r'(?:I\s*/\s*D|ID)[\s:\-=]*(\d+(?:\.\d+)?)',
+    re.IGNORECASE,
+)
+_ID_OD_SLASH_RE = re.compile(
+    r'(?:I\s*/\s*D|ID)[\s:\-=]*(\d+(?:\.\d+)?)\s*(?:MM)?\s*[XxX×,\s]+\s*'
+    r'(?:\d+(?:\.\d+)?\s*(?:MM)?\s*[XxX×,\s]+\s*)?'
+    r'(?:O\s*/\s*D|OD)[\s:\-=]*(\d+(?:\.\d+)?)',
+    re.IGNORECASE,
+)
+_PAREN_OD_ID_SLASH_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*\(\s*(?:O\s*/\s*D|OD)\s*\)\s*[XxX×,\s]+\s*'
+    r'(\d+(?:\.\d+)?)\s*\(\s*(?:I\s*/\s*D|ID)\s*\)',
+    re.IGNORECASE,
+)
+_PAREN_ID_OD_SLASH_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*\(\s*(?:I\s*/\s*D|ID)\s*\)\s*[XxX×,\s]+\s*'
+    r'(\d+(?:\.\d+)?)\s*\(\s*(?:O\s*/\s*D|OD)\s*\)',
+    re.IGNORECASE,
+)
 _DN_RE = re.compile(r'\bDN[\s\-]*(\d+)\b', re.IGNORECASE)
 # NB format
 _NB_RE = re.compile(r'\b(\d+)\s*NB\b', re.IGNORECASE)
@@ -208,6 +232,35 @@ def _extract_size(desc: str, gasket_type: str) -> dict:
     """Extract size fields. Returns dict with size, size_type, od_mm, id_mm."""
     result = {'size': None, 'size_type': 'UNKNOWN', 'od_mm': None, 'id_mm': None}
     upper = desc.upper()
+
+    # 0. Slash notation: O/D and I/D
+    m = _OD_ID_SLASH_RE.search(upper)
+    if m:
+        result['od_mm'] = float(m.group(1))
+        result['id_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
+    m = _ID_OD_SLASH_RE.search(upper)
+    if m:
+        result['id_mm'] = float(m.group(1))
+        result['od_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
+    m = _PAREN_OD_ID_SLASH_RE.search(upper)
+    if m:
+        result['od_mm'] = float(m.group(1))
+        result['id_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
+
+    m = _PAREN_ID_OD_SLASH_RE.search(upper)
+    if m:
+        result['id_mm'] = float(m.group(1))
+        result['od_mm'] = float(m.group(2))
+        result['size_type'] = 'OD_ID'
+        return result
 
     # 1. OD x ID explicit (highest priority)
     m = _OD_ID_RE.search(upper)
@@ -1561,6 +1614,14 @@ def _extract_dji_fields(desc: str) -> dict:
 
 def _extract_dji_thickness(desc: str) -> float | None:
     """Extract thickness from DJI bare dimension pattern."""
+    m = re.search(
+        r'\b(?:O\s*/\s*D|OD)\s*[:=\-]?\s*\d+(?:\.\d+)?\s*(?:MM)?\s*[Xx]\s*'
+        r'(\d+(?:\.\d+)?)\s*[Xx]\s*(?:I\s*/\s*D|ID)\b',
+        desc,
+        re.IGNORECASE,
+    )
+    if m:
+        return float(m.group(1))
     m = re.search(r'\bOD\s*[:=\-]?\s*\d+(?:\.\d+)?\s*(?:MM)?\s*[Xx]\s*(\d+(?:\.\d+)?)\s*[Xx]\s*ID\b', desc, re.IGNORECASE)
     if m:
         return float(m.group(1))

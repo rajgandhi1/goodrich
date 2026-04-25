@@ -688,6 +688,11 @@ def test_jacketed_keyword_is_dji():
     r = regex_extract('JACKETED GASKET OD 400MM ID 380MM THK 3MM SOFT IRON GRAPHITE')
     _check(r, gasket_type='DJI')
 
+def test_dji_slash_dimension_labels():
+    """DJI should also parse slash-style O/D and I/D labels."""
+    r = regex_extract('DOUBLE JACKETED GASKET O/D 400MM X 3MM X I/D 380MM SOFT IRON GRAPHITE')
+    _check(r, gasket_type='DJI', od_mm=400.0, id_mm=380.0)
+
 
 # =========================================================================
 # KAMM
@@ -756,6 +761,11 @@ def test_kamm_camprofile_graphite_centering():
         gasket_type='KAMM',
         thickness_mm=5.0,
     )
+
+def test_kamm_slash_dimension_labels():
+    """KAMM should also parse slash-style O/D and I/D labels."""
+    r = regex_extract('HEAT EXCHANGER GASKET O/D 982MM X I/D 956MM 4.5MM THK SS316 GRAPHITE')
+    _check(r, gasket_type='KAMM', od_mm=982.0, id_mm=956.0)
 
 def test_heat_exchanger_gasket_keyword_is_kamm():
     """Heat exchanger gasket should classify as KAMM even without camprofile text."""

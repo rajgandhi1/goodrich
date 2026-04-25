@@ -422,6 +422,8 @@ if '_quote_data' not in st.session_state:
     st.session_state._quote_data = {}
 if '_quote_excel' not in st.session_state:
     st.session_state._quote_excel = None
+if '_input_reset_seq' not in st.session_state:
+    st.session_state._input_reset_seq = 0
 if 'chat_messages' not in st.session_state:
     st.session_state.chat_messages = []
 if 'chat_open' not in st.session_state:
@@ -833,6 +835,7 @@ def _render_quote_page():
                 st.session_state._show_quote_page = False
                 st.session_state._quote_excel = None
                 st.session_state._quote_data = {}
+                st.session_state._input_reset_seq += 1
                 st.rerun()
 
 
@@ -1049,6 +1052,10 @@ def _delete_selected_items(items, display_indices):
 # ---------------------------------------------------------------------------
 # Fragment — data editor + Update/Delete
 # ---------------------------------------------------------------------------
+def _reset_enquiry_inputs():
+    st.session_state._input_reset_seq += 1
+
+
 def _coerce_optional_number(value, fallback=None):
     if value is None or value == '':
         return fallback
@@ -1427,6 +1434,7 @@ with tab_email:
         height=200,
         placeholder='Paste the customer email text containing gasket requirements...',
         label_visibility='visible',
+        key=f'email_text_{st.session_state._input_reset_seq}',
     )
     st.caption(_wl_hint)
     if st.button('⚡  Process & Add to List', type='primary', key='process_email_btn'):
@@ -1442,6 +1450,7 @@ with tab_excel:
         'Upload Excel file',
         type=['xlsx', 'xls'],
         help='Supports multi-sheet enquiry files',
+        key=f'excel_upload_{st.session_state._input_reset_seq}',
     )
     st.caption(_wl_hint)
     if st.button('⚡  Process & Add to List', type='primary', key='process_excel_btn'):
@@ -1690,6 +1699,7 @@ if st.session_state.working_items:
             st.session_state.pop('_last_excel', None)
             st.session_state.filter_mode = 'All'
             st.session_state._show_confirm = False
+            _reset_enquiry_inputs()
             st.rerun()
 
     # Colored metric cards
