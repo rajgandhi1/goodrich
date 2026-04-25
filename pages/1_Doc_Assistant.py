@@ -34,6 +34,34 @@ st.markdown("""
 }
 [data-testid="stSidebar"] .stButton > button:hover { background: #3d5a8a !important; }
 
+/* ── File uploader — restore dark text on its white/light interior ── */
+[data-testid="stSidebar"] [data-testid="stFileUploader"] *,
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] *,
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+    color: #1a2740 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+    background: #fff !important;
+    border: 1.5px dashed #8fa3c4 !important;
+    border-radius: 8px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"]:hover {
+    border-color: #2e4470 !important;
+    background: #f0f4f9 !important;
+}
+/* The small "Browse files" button inside the uploader */
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] button {
+    color: #2e4470 !important;
+    background: #eef2fa !important;
+    border: 1px solid #c8d3e8 !important;
+    border-radius: 6px !important;
+}
+/* Already-uploaded file name chips */
+[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] *,
+[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] {
+    color: #1a2740 !important;
+}
+
 /* ── Hero banner ── */
 .da-hero {
     background: linear-gradient(135deg, #1a2740 0%, #2e4470 60%, #3d5a8a 100%);
