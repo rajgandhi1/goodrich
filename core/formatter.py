@@ -598,8 +598,7 @@ def _isk_components(item: dict) -> str:
 
 # Sub-1" NPS decimal → standard fractional name (0.875 → 7/8 etc.)
 _NPS_DECIMAL_TO_FRAC = {
-    0.125: '1/8', 0.25: '1/4', 0.375: '3/8',
-    0.5: '1/2', 0.75: '3/4', 0.875: '7/8',
+    0.5: '1/2', 0.875: '7/8',
 }
 
 
@@ -636,6 +635,14 @@ def _fmt_size(size: str, gtype: str) -> str:
             val = int(sf.group(1)) / int(sf.group(2))
             return f'{_fmt_num(val)}"'
         # Sub-1" decimal → standard fractional name: "0.875"" → "7/8""
+        dec = _re.match(r'^(0\.\d+)"$', s)
+        if dec:
+            val = float(dec.group(1))
+            if gtype == 'SPIRAL_WOUND' and round(val, 3) == 0.5:
+                return s
+            frac = _NPS_DECIMAL_TO_FRAC.get(round(val, 3))
+            if frac:
+                return f'{frac}"'
         return s
     # Metric OD/ID strings — pass through unchanged
     if 'MM' in s.upper():

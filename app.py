@@ -990,7 +990,9 @@ def _build_rows(items):
             'Regret':               item.get('regret', False),
             'Customer Description': item.get('raw_description', ''),
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
-            'Size':                 item.get('size') or '',
+            'Size':                 '' if item.get('size_type') == 'OD_ID' else (item.get('size') or ''),
+            'OD (mm)':              item.get('od_mm') if item.get('od_mm') is not None else None,
+            'ID (mm)':              item.get('id_mm') if item.get('id_mm') is not None else None,
             'Rating':               item.get('rating') or '',
             'Standard':             item.get('standard') or '',
             'MOC':                  item.get('moc') or '',
@@ -1137,7 +1139,10 @@ def _editor_fragment(items, display_indices):
                 help='Edit this text, select the row, then click Reprocess Text.',
             ),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
-            'Size':                 st.column_config.TextColumn('Size', width='small'),
+            'Size':                 st.column_config.TextColumn('Size', width='small',
+                                        help='Nominal size only. Use OD/ID columns for custom dimensions.'),
+            'OD (mm)':              st.column_config.NumberColumn('OD (mm)', width='small', min_value=0),
+            'ID (mm)':              st.column_config.NumberColumn('ID (mm)', width='small', min_value=0),
             'Rating':               st.column_config.TextColumn('Rating', width='small'),
             'Standard':             st.column_config.TextColumn('Standard', width='medium',
                                         help='e.g. ASME B16.20, ASME B16.21, ASME B16.47 (SERIES-A), API 6A'),
@@ -1232,7 +1237,17 @@ def _editor_fragment(items, display_indices):
             base['raw_description'] = edited_raw_description
             base['description'] = edited_raw_description
             base['gasket_type']        = row['Type'] or base.get('gasket_type', 'SOFT_CUT')
-            base['size']               = row['Size'] or base.get('size')
+            od_val = _coerce_optional_number(row.get('OD (mm)'))
+            id_val = _coerce_optional_number(row.get('ID (mm)'))
+            base['od_mm']              = float(od_val) if od_val is not None else None
+            base['id_mm']              = float(id_val) if id_val is not None else None
+            if base['od_mm'] is not None or base['id_mm'] is not None:
+                base['size'] = None
+                base['size_type'] = 'OD_ID'
+            else:
+                base['size'] = row['Size'] or base.get('size')
+                if base.get('size_type') == 'OD_ID':
+                    base['size_type'] = 'UNKNOWN'
             base['rating']             = row['Rating'] or base.get('rating')
             base['standard']           = row['Standard'] or None
             base['moc']                = row['MOC'] or None

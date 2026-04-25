@@ -37,7 +37,7 @@ _RTJ_RE = re.compile(
     r'(?<![A-Za-z])RING\s+JOINT\b|\bJOINT\s+TOR[EI]\b|\bJOINT\s+TORIQUE\b',
     re.IGNORECASE,
 )
-_KAMM_RE = re.compile(r'KAMMPROFILE|\bKAMM\b|\bCAM[\s\-]?PROFILE\b|\bSKAG\b', re.IGNORECASE)
+_KAMM_RE = re.compile(r'KAMMPROFILE|\bKAMM\b|\bCAM[\s\-]?PROFILE\b|SKAG', re.IGNORECASE)
 
 # KAMM covering layer: FG (Flexible Graphite), GRAPHITE, PTFE, MICA, NON ASB
 _KAMM_COVERING_RE = re.compile(
@@ -553,6 +553,7 @@ def _extract_rtj_moc(desc: str) -> str | None:
 
 # "3MM THK" or "3 MM THK" or "3MMTHK"
 _THK_MM_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*(?:MM\s+)?(?:THK|THICK(?:NESS)?)', re.IGNORECASE)
+_THK_MM_PAREN_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*MM\s*\([^)]*\)\s*(?:THK|THCK|THICK(?:NESS)?)', re.IGNORECASE)
 # "4.5mm" or "3 mm" without THK — common in SPW descriptions
 _THK_BARE_MM_RE = re.compile(r'[XxX×]\s*(\d+(?:\.\d+)?)\s*MM\b', re.IGNORECASE)
 # "THK 3" or "THK-3" or "THK: 3" or "THCK, 2.0"
@@ -590,7 +591,17 @@ def _extract_thickness(desc: str) -> float | None:
         if not re.search(r'(?:ID|OD)\s*=?\s*$', before):
             return float(m.group(1).replace(',', '.'))
 
+    m = _THK_MM_PAREN_RE.search(desc)
+    if m:
+        return float(m.group(1).replace(',', '.'))
+
     # Thickness stated in inches — convert to mm and return
+    m = _THK_INCH_PREFIX_RE.search(desc)
+    if m:
+        val_in = float(m.group(1).replace(',', '.'))
+        mm = val_in * 25.4
+        return round(round(mm / 0.5) * 0.5, 1)
+
     m = _THK_PREFIX_RE.search(desc)
     if m:
         return float(m.group(1).replace(',', '.'))
@@ -900,8 +911,15 @@ def _extract_sw_fields(desc: str) -> dict:
 
     for field, label in (('sw_inner_ring', 'INNER'), ('sw_outer_ring', 'OUTER')):
         m = re.search(rf'STAINLESS\s+STEEL\s*\(\s*(SS[\s\-]*\d{{3}}\w?)\s*\)\s+{label}\s+RING', upper)
-        if m:
+        if result['sw_filler']:
+            pass
+        elif m:
             result[field] = _norm_ring_material(m.group(1))
+
+    m = re.search(r'FILLER\s+(' + _SW_MAT_TOKEN + r')\s+INNER\s+RING\s+(' + _SW_MAT_TOKEN + r')\s+OUTER\s+RING', upper, re.IGNORECASE)
+    if m:
+        result['sw_inner_ring'] = _norm_ring_material(m.group(1))
+        result['sw_outer_ring'] = _norm_ring_material(m.group(2))
 
     # --- Structured field labels (highest priority) ---
     # "WINDING MATL:316L SS", "FILLER MATL:GRAPHITE", "CENTERING RING MATL:316L SS", etc.
@@ -996,7 +1014,11 @@ def _extract_sw_fields(desc: str) -> dict:
 
     # Filler
     if not result['sw_filler']:
-        m = _SW_FILLER_WITH_RE.search(upper)
+        if 'EXFOLIATED EXPANDED GRAPHITE' in upper:
+            result['sw_filler'] = 'EXFOLIATED EXPANDED GRAPHITE'
+            m = None
+        else:
+            m = _SW_FILLER_WITH_RE.search(upper)
         if m:
             filler_raw = m.group(1).strip()
             paren = (m.group(2) or '').strip()  # e.g. "(98% PURE GRAPHITE)"
@@ -1701,5 +1723,14 @@ def regex_extract(description: str) -> dict:
 
     # 9. Confidence scoring
     result['confidence'] = _score_confidence(result, gasket_type)
+
+    if gasket_type == 'SOFT_CUT':
+        for key in (
+            'isk_primary_seal', 'isk_secondary_seal', 'isk_insulating_washer',
+            'isk_type', 'dji_rib', 'dji_face_type', 'dji_id_first',
+            'kamm_covering_layer', 'kamm_rib', 'kamm_core_thk',
+            'kamm_integral_outer_ring', 'series',
+        ):
+            result.pop(key, None)
 
     return result
