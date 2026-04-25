@@ -1019,7 +1019,9 @@ def _extract_sw_fields(desc: str) -> dict:
             m = None
         else:
             m = _SW_FILLER_WITH_RE.search(upper)
-        if m:
+        if result['sw_filler']:
+            pass
+        elif m:
             filler_raw = m.group(1).strip()
             paren = (m.group(2) or '').strip()  # e.g. "(98% PURE GRAPHITE)"
             # Normalize the base material name, then re-attach any parenthetical
