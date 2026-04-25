@@ -431,7 +431,7 @@ _SW_FILLER_ALIASES = {
     'FG': 'FLEXIBLE GRAPHITE', 'FLEXIBLE GRAPHITE': 'FLEXIBLE GRAPHITE', 'GRAPHITE': 'GRAPHITE',
     'GRAPH': 'GRAPHITE', 'GR': 'GRAPHITE',
     'FLEXICARB': 'FLEXIBLE GRAPHITE', 'FLEXI-CARB': 'FLEXIBLE GRAPHITE',
-    'SIGRAFLEX': 'FLEXIBLE GRAPHITE', 'GRAFOIL': 'FLEXIBLE GRAPHITE', 'GRAFIL': 'FLEXIBLE GRAPHITE', 'GRAPHOIL': 'FLEXIBLE GRAPHITE',
+    'SIGRAFLEX': 'FLEXIBLE GRAPHITE', 'GRAFOIL': 'FLEXIBLE GRAPHITE', 'GRAFIL': 'GRAPHITE', 'GRAPHOIL': 'FLEXIBLE GRAPHITE',
     'FLEX INHIB GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
     'FLEX INHIBITED GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
     'FLEXIBLE INHIB GRAPHITE': 'FLEXIBLE INHIBITED GRAPHITE',
@@ -513,6 +513,73 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
     elif outer_ring:
         moc += f' + {outer_ring} OUTER RING'
     return moc
+
+
+_FACE_MATERIAL_RE = re.compile(
+    r'\b(?:RF|FF|RAISED\s+FACE|FULL\s+FACE|REAR\s+FACE)\b',
+    re.IGNORECASE,
+)
+
+
+def _face_from_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    m = _FACE_MATERIAL_RE.search(str(value))
+    if not m:
+        return None
+    token = m.group(0).upper()
+    if token in ('FF', 'FULL FACE'):
+        return 'FF'
+    return 'RF'
+
+
+def _strip_face_tokens(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = _FACE_MATERIAL_RE.sub('', str(value))
+    cleaned = re.sub(r'\s*[/+,&-]\s*(?=$)', '', cleaned)
+    cleaned = re.sub(r'(?<=^)\s*[/+,&-]\s*', '', cleaned)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    cleaned = cleaned.strip(' ,/+&-')
+    return cleaned or None
+
+
+def _remove_face_tokens_from_material_fields(item: dict) -> None:
+    """Keep RF/FF face tokens out of material and component fields.
+
+    RF/FF describe gasket face only. For SPW/KAMM/RTJ/DJI they are flange context,
+    so they should not be preserved as face_type or material text.
+    """
+    gasket_type = item.get('gasket_type', 'SOFT_CUT')
+    material_fields = (
+        'moc',
+        'sw_winding_material',
+        'sw_filler',
+        'sw_inner_ring',
+        'sw_outer_ring',
+        'isk_gasket_material',
+        'isk_core_material',
+        'isk_sleeve_material',
+        'isk_washer_material',
+        'isk_insulating_washer',
+        'kamm_core_material',
+        'kamm_surface_material',
+        'kamm_covering_layer',
+        'dji_filler',
+    )
+
+    detected_face = None
+    for field in material_fields:
+        value = item.get(field)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        detected_face = detected_face or _face_from_text(value)
+        item[field] = _strip_face_tokens(value)
+
+    if gasket_type == 'SOFT_CUT' and not item.get('face_type') and detected_face:
+        item['face_type'] = detected_face
+    elif gasket_type not in ('SOFT_CUT', 'ISK', 'ISK_RTJ'):
+        item['face_type'] = None
 
 
 _B1647_FLAG = (
@@ -1194,6 +1261,8 @@ def apply_rules(item: dict) -> dict:
     if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT',):
         gasket_type = 'SOFT_CUT'
         item['gasket_type'] = 'SOFT_CUT'
+
+    _remove_face_tokens_from_material_fields(item)
 
     if gasket_type == 'SPIRAL_WOUND':
         _apply_sw_rules(item, flags, applied_defaults)

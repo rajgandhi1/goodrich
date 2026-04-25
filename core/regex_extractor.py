@@ -504,13 +504,13 @@ def _extract_rtj_moc(desc: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 # "3MM THK" or "3 MM THK" or "3MMTHK"
-_THK_MM_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*(?:MM\s+)?THK', re.IGNORECASE)
+_THK_MM_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*(?:MM\s+)?(?:THK|THICK(?:NESS)?)', re.IGNORECASE)
 # "4.5mm" or "3 mm" without THK — common in SPW descriptions
 _THK_BARE_MM_RE = re.compile(r'[XxX×]\s*(\d+(?:\.\d+)?)\s*MM\b', re.IGNORECASE)
 # "THK 3" or "THK-3" or "THK: 3" or "THCK, 2.0"
 # "THCK:0.175 IN" — thickness in inches (label:value IN suffix); convert to mm
-_THK_INCH_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:\-,]*(\d+(?:[.,]\d+)?)\s*IN(?:CH(?:ES)?)?\b', re.IGNORECASE)
-_THK_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:\-,]*(\d+(?:[.,]\d+)?)', re.IGNORECASE)
+_THK_INCH_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:=\-,]*(\d+(?:[.,]\d+)?)\s*IN(?:CH(?:ES)?)?\b', re.IGNORECASE)
+_THK_PREFIX_RE = re.compile(r'\bTHK?C?K?[\s:=\-,]*(\d+(?:[.,]\d+)?)', re.IGNORECASE)
 # "3T" or "3T X" — common in DJI: "3T X 1285 OD"
 _THK_T_RE = re.compile(r'\b(\d+(?:\.\d+)?)T\b', re.IGNORECASE)
 # "x 4.5mm" at end or "x 4.5 mm" — last dimension in triplet
@@ -581,7 +581,7 @@ _STANDARD_RE = re.compile(
 )
 _SPECIAL_KEYWORDS = re.compile(
     r'\bFOOD\s+GRADE\b|\bNACE(?:\s+MR[\s\-]?01[\s\-]?75)?\b|'
-    r'\bLETHAL\b|\bEIL\s+APPROVED\b|\bSERIES\s+[AB]\b|'
+    r'\bLETHAL\b|\bLOW\s+STRESS\b|\bEIL\s+APPROVED\b|\bSERIES\s+[AB]\b|'
     r'\bAS\s+PER\s+DRAWING\b|\bAS\s+PER\s+DRG\b|'
     r'\bE\.?GALV(?:ANIZ(?:ED|ING)|ANIS(?:ED|ING))?\b|'
     r'\bELECTRO[\s\-]?GALVAN(?:IZ|IS)(?:ED|ING)?\b|'
@@ -750,12 +750,38 @@ _SW_WINDING_AFTER_RE = re.compile(
 )
 # Compact "316L/GRAPH" or "SS316L/GRAPHITE" — grade slash filler (no space around /)
 _SW_GRADE_SLASH_FILLER_RE = re.compile(
-    r'\b(SS\s*\d{3}\w?|\d{3}\w?)\s*/\s*(GRAPH\w*|PTFE|TEFLON|FG|FLEXIBLE\s+GRAPHITE|MICA|CERAMIC|VERMICULITE)',
+    r'\b(SS\s*\d{3}\w?|AISI\s*\d{3}\w?|\d{3}\w?)\s*/\s*(GRAPH\w*|PTFE|TEFLON|FG|FLEXIBLE\s+GRAPHITE|MICA|CERAMIC|VERMICULITE)',
     re.IGNORECASE,
 )
 # Compact "INOUT=316L/CS" — inner/outer ring in one token
 _SW_INOUT_RE = re.compile(
     r'\bINOUT\s*=\s*(\w+)\s*/\s*(\w+)',
+    re.IGNORECASE,
+)
+_SW_MAT_TOKEN = (
+    r'SS\s*\d{0,3}\w?|AISI\s*\d{3}\w?|TYPE\s*\d{3}\w?|\d{3}\w?\s*SS|'
+    r'\d{3}\w?|CS|CARBON\s+STEEL|C\.?S\.?|LTCS|MS|MILD\s+STEEL|'
+    r'INCOLOY\s*\d{3}|INCONEL\s*\d{3}|ALLOY\s*\d+|HASTELLOY\s*\w?\d{3}|'
+    r'MONEL\s*\d{3}|DUPLEX\w*|SUPER\s*DUPLEX|UNS\s*[SNR]\d+'
+)
+_SW_INNER_OUTER_SLASH_RE = re.compile(
+    rf'\b(?:INNER|IR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\s*/\s*'
+    rf'(?:OUTER|OR|O/R|C/R|CR|CENTERING(?:\s+RING)?|OUTER\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})',
+    re.IGNORECASE,
+)
+_SW_OUTER_INNER_SLASH_RE = re.compile(
+    rf'\b(?:OUTER|OR|O/R|C/R|CR|CENTERING(?:\s+RING)?|OUTER\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\s*/\s*'
+    rf'(?:INNER|IR|I/R|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})',
+    re.IGNORECASE,
+)
+_SW_RING_PAIR_RE = re.compile(
+    rf'\b(?:INNER|IR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b.*?'
+    rf'\b(?:OUTER|OR|O/R|OUTER\s+RING|C/R|CR|CENTERING(?:\s+RING)?)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b',
+    re.IGNORECASE,
+)
+_SW_RING_PAIR_REV_RE = re.compile(
+    rf'\b(?:OUTER|OR|O/R|OUTER\s+RING|C/R|CR|CENTERING(?:\s+RING)?)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b.*?'
+    rf'\b(?:INNER|IR|I/R|INNER\s+RING|I\s+RING)\s*[:=\-]?\s*({_SW_MAT_TOKEN})\b',
     re.IGNORECASE,
 )
 
@@ -767,6 +793,9 @@ def _norm_ring_material(raw: str | None) -> str | None:
     key = raw.strip().upper()
     # Clean up common prefixes
     key = re.sub(r'^(?:AND|WITH|W/)(?:\s+|$)', '', key).strip()
+    key = re.sub(r'^W/', '', key).strip()
+    key = re.sub(r'^(?:AISI|TYPE)\s*(\d{3}\w?)$', r'\1', key)
+    key = re.sub(r'(\d{3}\w?)\s*SS$', r'SS\1', key)
     key = re.sub(r'\s+', ' ', key)
     return _SW_RING_ALIASES.get(key, key if len(key) > 1 else None)
 
@@ -776,6 +805,8 @@ def _norm_filler_material(raw: str | None) -> str | None:
     if not raw:
         return None
     key = raw.strip().upper()
+    if key == 'GRAFIL':
+        return 'GRAPHITE'
     key = re.sub(r'^(?:AND|WITH|W/)(?:\s+|$)', '', key).strip()
     key = re.sub(r'\s+', ' ', key)
     return _SW_FILLER_ALIASES.get(key, key if len(key) > 1 else None)
@@ -836,6 +867,15 @@ def _extract_sw_fields(desc: str) -> dict:
     if inout:
         result['sw_inner_ring'] = _norm_ring_material(inout.group(1))
         result['sw_outer_ring'] = _norm_ring_material(inout.group(2))
+
+    ring_pair = _SW_INNER_OUTER_SLASH_RE.search(upper) or _SW_RING_PAIR_RE.search(upper)
+    if ring_pair:
+        result['sw_inner_ring'] = result['sw_inner_ring'] or _norm_ring_material(ring_pair.group(1))
+        result['sw_outer_ring'] = result['sw_outer_ring'] or _norm_ring_material(ring_pair.group(2))
+    ring_pair_rev = _SW_OUTER_INNER_SLASH_RE.search(upper) or _SW_RING_PAIR_REV_RE.search(upper)
+    if ring_pair_rev:
+        result['sw_outer_ring'] = result['sw_outer_ring'] or _norm_ring_material(ring_pair_rev.group(1))
+        result['sw_inner_ring'] = result['sw_inner_ring'] or _norm_ring_material(ring_pair_rev.group(2))
 
     # "CR/IR 316L" — centering ring (outer) and inner ring share one material
     cr_ir = _SW_CR_IR_RE.search(upper)
@@ -982,7 +1022,8 @@ def _extract_sw_fields(desc: str) -> dict:
     if wm:
         for field in ('sw_inner_ring', 'sw_outer_ring'):
             if result[field] in ('SS', None):
-                pass  # leave as-is, rules.py handles defaults
+                if result[field] == 'SS':
+                    result[field] = wm
 
     return result
 

@@ -1127,6 +1127,126 @@ def test_spw_matl_labels():
     print(f'  All {len(cases)} MATL-label / catalog-label cases passed ✓')
 
 
+def test_face_tokens_do_not_leak_into_softcut_moc():
+    item = {
+        'description': '4" 150# CNAF RF gasket',
+        'size': '4"',
+        'rating': '150#',
+        'gasket_type': 'SOFT_CUT',
+        'moc': 'CNAF RF',
+        'quantity': 1,
+        'uom': 'NOS',
+    }
+
+    processed = apply_rules(item)
+
+    assert processed['moc'] == 'CNAF'
+    assert processed['face_type'] == 'RF'
+    assert format_description(processed) == 'SIZE : 4" X 150# X 3MM THK ,CNAF ,RF ,ASME B16.21'
+
+
+def test_spw_rf_is_ignored_and_not_added_to_moc():
+    item = {
+        'description': '2" 150# SPW RF SS316 graphite CS outer ring',
+        'size': '2"',
+        'rating': '150#',
+        'gasket_type': 'SPIRAL_WOUND',
+        'moc': 'RF',
+        'face_type': 'RF',
+        'sw_winding_material': 'SS316 RF',
+        'sw_filler': 'GRAPHITE',
+        'sw_outer_ring': 'CS RF',
+        'quantity': 1,
+        'uom': 'NOS',
+    }
+
+    processed = apply_rules(item)
+    desc = format_description(processed)
+
+    assert processed['face_type'] is None
+    assert processed['moc'] == 'SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + CS OUTER RING'
+    assert ', RF' not in desc
+    assert desc == (
+        'SIZE : 2" X 150# X 4.5MM THK, '
+        'SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + CS OUTER RING, ASME B16.20'
+    )
+
+
+def test_spw_inner_outer_variations_from_enquiry_examples():
+    from core.regex_extractor import regex_extract
+
+    def _run(desc):
+        rx = regex_extract(desc)
+        item = dict(rx)
+        item['description'] = desc
+        item['quantity'] = 1
+        item['uom'] = 'NOS'
+        processed = apply_rules(item)
+        return format_description(processed), processed
+
+    low_stress = (
+        '2"Spiral Wound Gasket , Low Stress, ASME B16.20, AISI 316/Graphite, '
+        'RF as per ASME B16.5, 150 Lbs, Thk=4.5mm, Inner AISI 316/Outer CS,'
+    )
+    got, item = _run(low_stress)
+    assert item['sw_winding_material'] == 'SS316'
+    assert item['sw_filler'] == 'GRAPHITE'
+    assert item['sw_inner_ring'] == 'SS316'
+    assert item['sw_outer_ring'] == 'CS'
+    assert got == (
+        'SIZE : 2" X 150# X 4.5MM THK, '
+        'SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & CS OUTER RING, '
+        'ASME B16.20 (LOW STRESS)'
+    )
+
+    low_stress_small = low_stress.replace('2"Spiral', '0.75"Spiral')
+    got, item = _run(low_stress_small)
+    assert got.startswith('SIZE : 0.75" X 150# X 4.5MM THK, ')
+    assert 'SS316 INNER RING & CS OUTER RING' in got
+
+    no_low_stress = low_stress.replace('Low Stress', '-').replace('150 Lbs', '600 Lbs')
+    got, item = _run(no_low_stress)
+    assert got == (
+        'SIZE : 2" X 600# X 4.5MM THK, '
+        'SS316 SPIRAL WOUND GASKET WITH GRAPHITE FILLER + SS316 INNER RING & CS OUTER RING, '
+        'ASME B16.20'
+    )
+
+    centering_cases = [
+        (
+            'GASKET SPIRAL WOUND W/CS CENTERING RING & SS INNER RING '
+            '6" 4.50 MM THICK SS 316L+ GRAFIL CL 300 ASME B16.20',
+            '300#',
+        ),
+        (
+            'GASKET SPIRAL WOUND W/CS CENTERING RING & SS INNER RING '
+            '6" 4.50 MM THICK SS 316L+ GRAFIL CL 600 ASME B16.20',
+            '600#',
+        ),
+        (
+            'GASKET SPIRAL WOUND W/CS CENTERING RING & SS INNER RING '
+            '6" 4.50 MM THICK SS 316L+ GRAFIL CL 900 ASME B16.20',
+            '900#',
+        ),
+        (
+            'GASKET SPIRAL WOUND W/CS CENTERING RING & SS INNER RING '
+            '8" 4.50 MM THICK SS 316L+ GRAFIL CL 150 ASME B16.20',
+            '150#',
+        ),
+    ]
+    for desc, rating in centering_cases:
+        got, item = _run(desc)
+        assert item['rating'] == rating
+        assert item['sw_winding_material'] == 'SS316L'
+        assert item['sw_filler'] == 'GRAPHITE'
+        assert item['sw_inner_ring'] == 'SS316L'
+        assert item['sw_outer_ring'] == 'CS'
+        assert (
+            f'{rating} X 4.5MM THK, SS316L SPIRAL WOUND GASKET WITH GRAPHITE FILLER '
+            '+ SS316L INNER RING & CS OUTER RING, ASME B16.20'
+        ) in got
+
+
 if __name__ == '__main__':
     print('\nRunning pipeline tests...\n')
     tests = [
@@ -1141,6 +1261,9 @@ if __name__ == '__main__':
         test_spw_compact_formats,
         test_spw_special_egalv,
         test_spw_matl_labels,
+        test_face_tokens_do_not_leak_into_softcut_moc,
+        test_spw_rf_is_ignored_and_not_added_to_moc,
+        test_spw_inner_outer_variations_from_enquiry_examples,
         test_rtj_formatter,
         test_kamm_formatter,
         test_kamm_new_formats,

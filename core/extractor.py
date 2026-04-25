@@ -120,7 +120,10 @@ Rules:
 - rating: "150#"/"300#"/"PN 10"/"PN 16". Valid ASME: 150/300/600/900/1500/2500/3000.
 - Normalize materials: 304SS→SS304, 316SS→SS316, CARBON STEEL/CS/MS→CS, SOFT IRON→SOFTIRON.
 - SPIRAL_WOUND: use sw_* fields, moc=null. RTJ: use moc+rtj_* fields, standard=ASME B16.20.
-- face_type: RF/FF for SOFT_CUT/ISK only; null for SW/RTJ/KAMM/DJI.
+- RF/FF mean face type only (raised face/full face), never material. Do not include RF/FF in moc or sw_*/kamm_*/isk_* material fields.
+- face_type: RF/FF for SOFT_CUT/ISK only; null for SW/RTJ/KAMM/DJI. For SPIRAL_WOUND/SPW, ignore RF/FF flange mentions.
+- SPIRAL_WOUND ring notation: IR/I-R/Inner/Inner Ring = sw_inner_ring; OR/O-R/Outer/Outer Ring/CR/C-R/Centering Ring = sw_outer_ring.
+- For phrases like "Inner AISI 316/Outer CS", set sw_inner_ring=SS316 and sw_outer_ring=CS. If ring text says only "SS" and winding is SS316/SS316L, use the same grade for that ring.
 - ISK: capture component details (GRE G10, seals, sleeves) in special field.
 - thickness_mm: null for RTJ. Patterns: "3MM THK", "THK-1.5", "3T" suffix.
 - confidence: HIGH if all key fields clear, MEDIUM if 1 missing, LOW if 2+ missing.

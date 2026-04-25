@@ -1030,6 +1030,20 @@ def _build_rows(items):
     return rows
 
 
+def _delete_selected_items(items, display_indices):
+    to_delete = {
+        display_indices[i]
+        for i in st.session_state._selected_rows
+        if i < len(display_indices)
+    }
+    final = [it for idx, it in enumerate(items) if idx not in to_delete]
+    for j, it in enumerate(final, 1):
+        it['line_no'] = j
+    st.session_state.working_items = final
+    st.session_state._selected_rows = set()
+    st.session_state.pop('_bulk_df', None)
+
+
 # ---------------------------------------------------------------------------
 # Fragment — data editor + Update/Delete
 # ---------------------------------------------------------------------------
@@ -1195,13 +1209,7 @@ def _editor_fragment(items, display_indices):
     # ── Delete Selected ──────────────────────────────────────────────────────
     if act_c2.button(f'🗑  Delete ({sel_label})', type='secondary', key='delete_sel_btn',
                      disabled=(n_sel == 0)):
-        to_delete = {display_indices[i] for i in st.session_state._selected_rows}
-        final = [it for idx, it in enumerate(items) if idx not in to_delete]
-        for j, it in enumerate(final, 1):
-            it['line_no'] = j
-        st.session_state.working_items = final
-        st.session_state._selected_rows = set()
-        st.session_state.pop('_bulk_df', None)
+        _delete_selected_items(items, display_indices)
         st.rerun(scope='app')
 
     # ── Mark as Regret ───────────────────────────────────────────────────────
@@ -1637,7 +1645,7 @@ if st.session_state.working_items:
     if not display_indices:
         st.success('No items match this filter.')
     else:
-        sa1, sa2, sa3, _ = st.columns([1, 1.3, 1.2, 7])
+        sa1, sa2, sa3, sa4, _ = st.columns([1, 1.3, 1.2, 1.4, 5.6])
         if sa1.button('Select All', key='sel_all_btn'):
             st.session_state._selected_rows = set(range(len(display_indices)))
         if sa2.button('Deselect All', key='desel_all_btn'):
@@ -1652,6 +1660,11 @@ if st.session_state.working_items:
             st.session_state.working_items.append(new_item)
             st.session_state.pop('_bulk_df', None)
             st.session_state._selected_rows = set()
+            st.rerun(scope='app')
+        if sa4.button('Delete Row', key='delete_row_top_btn',
+                      disabled=(len(st.session_state._selected_rows) == 0),
+                      help='Delete selected row(s) from the working list'):
+            _delete_selected_items(items, display_indices)
             st.rerun(scope='app')
 
         n_sel = len(st.session_state._selected_rows)
