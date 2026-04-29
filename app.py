@@ -1491,12 +1491,32 @@ def _process_and_append(raw_items=None, source=None, source_type=None):
                     'GPT-4o returned an unexpected response format. '
                     'This is rare — retrying usually fixes it. Falling back to Classic mode...'
                 )
-            elif 'no gasket line items' in err_msg.lower():
-                st.warning(
-                    'No gasket line items were found in the document. '
-                    'Make sure the document contains gasket specifications '
-                    '(size, rating, material). Check that the correct tab is selected.'
+            elif 'no_items_found' in err_msg:
+                _is_cover_email = (
+                    source_type == 'email'
+                    and len(str(source).strip()) < 500
+                    and not any(
+                        kw in str(source).upper()
+                        for kw in ['150#', '300#', 'PN ', 'GASKET', 'ASME', 'CNAF',
+                                   'PTFE', 'SPIRAL', 'RTJ', 'NEOPRENE', 'EPDM', 'GRAPHITE']
+                    )
                 )
+                if _is_cover_email:
+                    st.warning(
+                        'The email body appears to be a cover note with no gasket specifications. '
+                        'The actual line items are usually in an **attached Excel or PDF** — '
+                        'upload it using the Excel or PDF tab instead.'
+                    )
+                else:
+                    st.warning(
+                        'No gasket line items were found in this document. GPT-4o read the '
+                        'full content but could not identify any gasket specifications.\n\n'
+                        '**Possible reasons:**\n'
+                        '- This is a cover letter / admin file with no item details\n'
+                        '- The PDF is scanned (no extractable text) — copy-paste text into the Email tab\n'
+                        '- All items in this document are non-gasket products\n\n'
+                        'If you believe this is wrong, switch to **Classic mode** in the sidebar.'
+                    )
                 progress_bar.empty()
                 status_text.empty()
                 return False

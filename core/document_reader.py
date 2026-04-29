@@ -148,20 +148,26 @@ confidence:
 Set is_gasket=true ONLY for items that are gaskets or gasket kits. Set is_gasket=false for everything else.
 
 Gasket products (is_gasket=true):
-- Flat ring gaskets, sheet gaskets (soft cut, CNAF, PTFE, rubber, neoprene, graphite, etc.)
+- Flat ring gaskets, sheet gaskets (CNAF, PTFE, rubber, neoprene, graphite, EPDM, viton, etc.)
 - Spiral wound gaskets
-- Ring type joint (RTJ) rings
-- Kammprofile gaskets
-- Double jacket gaskets
-- Flange insulation kits / insulating gasket kits (ISK) — even though they are "kits", they contain the gasket
+- Ring type joint (RTJ) rings / ring joint gaskets
+- Kammprofile / cam profile gaskets
+- Double jacket / double jacketed gaskets
+- **Flange insulation kits / insulating gasket kits (ISK / IGK)** — ALWAYS is_gasket=true
+  even if the document title mentions other products alongside them.
+  Keywords: "insulation kit", "insulating gasket", "ISK", "IGK", "flange isolation kit",
+  "TYPE E", "TYPE F", "TYPE D", "STYLE-CS", "STYLE-N" — all are gasket kits.
 
-NOT gaskets (is_gasket=false — include in output but mark false so caller can filter):
-- Cam & groove couplings, hose couplings, adapters, plugs
-- Bolts, studs, nuts, fasteners
-- Flanges, pipes, fittings, valves
-- Gasket cements, coatings, tapes
-- Packing, mechanical seals, O-rings (standalone, not part of an ISK)
-- Administrative rows: totals, headers, notes, project descriptions, contact info
+NOT gaskets (is_gasket=false):
+- Cam & groove couplings, hose couplings, hose adapters, cam lock adapters, plug Type-A/B/C
+- Bolts, studs, nuts, fasteners, stud bolts
+- Pipe flanges, pipe fittings, valves, nozzles
+- Gasket cements, coatings, tapes, sealants
+- Mechanical seals, gland packing, lip seals, O-rings (standalone)
+- Administrative rows: page headers, column headers, totals, project descriptions, contact info
+
+IMPORTANT: A document may contain BOTH gaskets and non-gaskets. Classify each line item
+independently based on what THAT item is — not based on the document title.
 
 ## CRITICAL RULES
 1. One object per physical line item — include ALL items (gaskets and non-gaskets), but set is_gasket correctly.
@@ -176,15 +182,23 @@ NOT gaskets (is_gasket=false — include in output but mark false so caller can 
 
 Example 1 — SOFT_CUT ambiguous rubber:
 Input row: "1  Gasket - Rubber - 6'' PN10  27  m"
-{"line_no":1,"quantity":27,"uom":"M","raw_description":"Gasket - Rubber - 6'' PN10","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"PN 10","gasket_type":"SOFT_CUT","moc":null,"face_type":null,"thickness_mm":null,"standard":null,"special":"MOC ambiguous — confirm rubber type","confidence":"LOW","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null}
+{"line_no":1,"quantity":27,"uom":"M","raw_description":"Gasket - Rubber - 6'' PN10","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"PN 10","gasket_type":"SOFT_CUT","moc":null,"face_type":null,"thickness_mm":null,"standard":null,"special":"MOC ambiguous — confirm rubber type","confidence":"LOW","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
+
+Example 1b — ISK (flange insulation kit — always is_gasket=true even in a mixed document):
+Input row: "1  KIT:GASKET,SLEEVES,WASHER INSULATING  SIZE: 2-1/2 IN  ASME CL 150  TYPE E  3  KIT"
+{"line_no":1,"quantity":3,"uom":"NOS","raw_description":"KIT:GASKET,SLEEVES,WASHER INSULATING  SIZE: 2-1/2 IN  ASME CL 150  TYPE E","size":"2-1/2\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"150#","gasket_type":"ISK","moc":null,"face_type":"RF","thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":"TYPE-E","isk_type":"TYPE-E","isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":"Mylar","isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
+
+Example 1c — Non-gasket item in the same document (is_gasket=false):
+Input row: "2  ADAPTER FOR CAM & GROOVE FITTINGS TYPE-A  1 INCH NPT ALUMINUM  216  EACH"
+{"line_no":2,"quantity":216,"uom":"NOS","raw_description":"ADAPTER FOR CAM & GROOVE FITTINGS TYPE-A  1 INCH NPT ALUMINUM","size":null,"size_type":"UNKNOWN","od_mm":null,"id_mm":null,"rating":null,"gasket_type":"SOFT_CUT","moc":null,"face_type":null,"thickness_mm":null,"standard":null,"special":null,"confidence":"LOW","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":false}
 
 Example 2 — SPIRAL_WOUND:
 Input row: "6\" Spiral Wound SS316 Winding GRAPHITE Filler SS316 IR CS OR 900# ASME B16.20"
-{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"6\" Spiral Wound SS316 Winding GRAPHITE Filler SS316 IR CS OR 900# ASME B16.20","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"900#","gasket_type":"SPIRAL_WOUND","moc":null,"face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":"SS316","sw_filler":"GRAPHITE","sw_inner_ring":"SS316","sw_outer_ring":"CS","rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null}
+{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"6\" Spiral Wound SS316 Winding GRAPHITE Filler SS316 IR CS OR 900# ASME B16.20","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"900#","gasket_type":"SPIRAL_WOUND","moc":null,"face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":"SS316","sw_filler":"GRAPHITE","sw_inner_ring":"SS316","sw_outer_ring":"CS","rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
 
 Example 3 — RTJ:
 Input row: "RING JOINT GASKET 6in R46 OCTAGONAL 1500lb ASME B16.20 INCONEL 625"
-{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"RING JOINT GASKET 6in R46 OCTAGONAL 1500lb ASME B16.20 INCONEL 625","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"1500#","gasket_type":"RTJ","moc":"INCONEL 625","face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":"OCT","rtj_hardness_bhn":null,"ring_no":"R-46","kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null}
+{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"RING JOINT GASKET 6in R46 OCTAGONAL 1500lb ASME B16.20 INCONEL 625","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"1500#","gasket_type":"RTJ","moc":"INCONEL 625","face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":"OCT","rtj_hardness_bhn":null,"ring_no":"R-46","kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
 """
 
 
@@ -317,14 +331,17 @@ def _prepare_document_text(source, source_type: str) -> tuple[str, dict]:
 # Output validation & normalization
 # ---------------------------------------------------------------------------
 
-def _validate_and_normalize_output(raw_items: list) -> list[dict]:
+def _validate_and_normalize_output(raw_items: list) -> tuple[list[dict], int]:
     """Coerce GPT-4o output list to the exact schema rules.py expects."""
     if not isinstance(raw_items, list):
         raise SmartParseError(f'LLM output is not a list (got {type(raw_items).__name__})')
     if len(raw_items) == 0:
-        raise SmartParseError('LLM returned empty list — no gasket line items found in document')
+        raise SmartParseError(
+            'no_items_found'  # sentinel — caller maps to user-friendly message
+        )
 
     result = []
+    skipped_raw = []   # keep filtered items in case we need the safety fallback
     skipped_non_gasket = 0
     for i, raw in enumerate(raw_items):
         if not isinstance(raw, dict):
@@ -337,6 +354,7 @@ def _validate_and_normalize_output(raw_items: list) -> list[dict]:
             desc_preview = str(raw.get('raw_description', ''))[:60]
             logger.info(f'Smart Parse: skipping non-gasket item — {desc_preview}')
             skipped_non_gasket += 1
+            skipped_raw.append(raw)
             continue
 
         # Start from template, overlay LLM values for known fields
@@ -404,6 +422,25 @@ def _validate_and_normalize_output(raw_items: list) -> list[dict]:
             f'Smart Parse: filtered out {skipped_non_gasket} non-gasket item(s) '
             f'(cam & groove, fittings, etc.) — {len(result)} gasket item(s) remain'
         )
+
+    # Safety fallback: if ALL items were filtered as non-gasket, the is_gasket
+    # classification may have been too aggressive (e.g. document title context
+    # confused the model). Return everything unfiltered with a flag so the caller
+    # can warn the user rather than silently failing.
+    if len(result) == 0 and skipped_non_gasket > 0:
+        logger.warning(
+            f'Smart Parse: all {skipped_non_gasket} item(s) were classified as non-gasket — '
+            f'is_gasket filter may be wrong; returning all items unfiltered'
+        )
+        # Process the skipped items as if they were gaskets
+        for raw in skipped_raw:
+            item: dict = dict(_ITEM_TEMPLATE)
+            for k, v in raw.items():
+                if k in _ITEM_TEMPLATE:
+                    item[k] = v
+            item['_all_filtered_fallback'] = True
+            result.append(item)
+        skipped_non_gasket = 0  # reset — we un-filtered them
 
     return result, skipped_non_gasket
 
