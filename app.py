@@ -1444,142 +1444,166 @@ def _process_and_append(raw_items=None, source=None, source_type=None):
             status_text.empty()
             return False
 
-        status_text.text('Smart Parse: sending document to GPT-4o...')
-        progress_bar.progress(5)
+        extracted_items = None
+        n_skipped = 0
 
-        def _smart_progress(done, total):
-            pct = int(done / total * 80)
-            progress_bar.progress(5 + pct)
-
-        try:
-            extracted_items, n_skipped = read_document_smart(
-                source, source_type, _smart_client, progress_cb=_smart_progress
-            )
-        except SmartParseError as e:
-            err_msg = str(e)
-            # Provide specific, actionable error messages
-            if 'truncated' in err_msg.lower():
-                st.warning(
-                    f'Smart Parse: document is too large (>200 rows). '
-                    f'Split it into smaller files and process each separately. '
-                    f'Falling back to Classic mode...'
-                )
-            elif 'no extractable text' in err_msg.lower() or 'scanned' in err_msg.lower():
-                st.warning(
-                    f'PDF appears to be a scanned image — text cannot be extracted directly. '
-                    f'Copy the text from your PDF viewer and paste it into the Email tab instead.'
-                )
-                progress_bar.empty()
-                status_text.empty()
-                return False
-            elif 'rate_limit' in err_msg.lower() or '429' in err_msg:
-                st.warning(
-                    'OpenAI rate limit hit. Wait 60 seconds and try again, '
-                    'or switch to Classic mode which uses GPT-4o-mini.'
-                )
-                progress_bar.empty()
-                status_text.empty()
-                return False
-            elif 'api call failed' in err_msg.lower() or 'connection' in err_msg.lower():
-                st.warning(
-                    f'Could not reach OpenAI API ({err_msg}). '
-                    f'Check your internet connection and API key, then retry. '
-                    f'Falling back to Classic mode...'
-                )
-            elif 'invalid json' in err_msg.lower():
-                st.warning(
-                    'GPT-4o returned an unexpected response format. '
-                    'This is rare — retrying usually fixes it. Falling back to Classic mode...'
-                )
-            elif 'no_items_found' in err_msg:
-                _is_cover_email = (
-                    source_type == 'email'
-                    and len(str(source).strip()) < 500
-                    and not any(
-                        kw in str(source).upper()
-                        for kw in ['150#', '300#', 'PN ', 'GASKET', 'ASME', 'CNAF',
-                                   'PTFE', 'SPIRAL', 'RTJ', 'NEOPRENE', 'EPDM', 'GRAPHITE']
-                    )
-                )
-                if _is_cover_email:
-                    st.warning(
-                        'The email body appears to be a cover note with no gasket specifications. '
-                        'The actual line items are usually in an **attached Excel or PDF** — '
-                        'upload it using the Excel or PDF tab instead.'
-                    )
-                else:
-                    st.warning(
-                        'No gasket line items were found in this document. GPT-4o read the '
-                        'full content but could not identify any gasket specifications.\n\n'
-                        '**Possible reasons:**\n'
-                        '- This is a cover letter / admin file with no item details\n'
-                        '- The PDF is scanned (no extractable text) — copy-paste text into the Email tab\n'
-                        '- All items in this document are non-gasket products\n\n'
-                        'If you believe this is wrong, switch to **Classic mode** in the sidebar.'
-                    )
-                progress_bar.empty()
-                status_text.empty()
-                return False
-            else:
-                st.warning(f'Smart Parse encountered an issue: {err_msg}. Falling back to Classic mode...')
-
-            # Classic fallback
-            status_text.text('Falling back to Classic mode...')
-            if source_type == 'email':
-                from core.parser import parse_email_text
-                raw_items = parse_email_text(str(source))
-            elif source_type == 'excel':
+        # ── Excel fast path ────────────────────────────────────────────────
+        # For well-structured Excels, Classic regex gets HIGH confidence on
+        # everything and finishes in <2s — no GPT-4o call needed.
+        # Only escalate to GPT-4o when the layout is genuinely complex.
+        if source_type == 'excel':
+            status_text.text('Reading Excel layout...')
+            progress_bar.progress(5)
+            try:
                 from core.parser import parse_excel_file
-                _excel_client = None
+                from core.regex_extractor import regex_extract as _rxe
+                _xl_client2 = None
                 try:
-                    from openai import OpenAI as _OAI_XL
-                    _excel_client = _OAI_XL(api_key=api_key)
+                    from openai import OpenAI as _OAI_XL2
+                    _xl_client2 = _OAI_XL2(api_key=api_key)
                 except Exception:
                     pass
-                raw_items = parse_excel_file(source, openai_client=_excel_client)
+                _classic_raw = parse_excel_file(source, openai_client=_xl_client2)
+                if _classic_raw:
+                    _n_high = sum(
+                        1 for _it in _classic_raw
+                        if _rxe(_it.get('description', '')).get('confidence') == 'HIGH'
+                    )
+                    _high_pct = _n_high / len(_classic_raw)
+                    if _high_pct >= 0.70:
+                        logger.info(
+                            f'Excel fast path: {_high_pct:.0%} HIGH confidence '
+                            f'({len(_classic_raw)} items) — skipping GPT-4o'
+                        )
+                        status_text.text(f'Extracted {len(_classic_raw)} items via fast path...')
+                        progress_bar.progress(75)
+                        from core.extractor import extract_batch as _eb
+                        extracted_items = _eb(_classic_raw)
+                    else:
+                        logger.info(
+                            f'Excel fast path: {_high_pct:.0%} HIGH — '
+                            f'layout is complex, escalating to GPT-4o'
+                        )
+            except Exception as _fp_err:
+                logger.warning(f'Excel fast path failed ({_fp_err}), escalating to GPT-4o')
+
+        # ── GPT-4o Smart Parse (PDF / email / complex Excel) ──────────────
+        if extracted_items is None:
+            status_text.text('Smart Parse: sending document to GPT-4o...')
+            progress_bar.progress(10)
+
+            def _smart_progress(done, total):
+                progress_bar.progress(10 + int(done / total * 75))
+
+            try:
+                extracted_items, n_skipped = read_document_smart(
+                    source, source_type, _smart_client, progress_cb=_smart_progress
+                )
+            except SmartParseError as e:
+                err_msg = str(e)
+                if 'truncated' in err_msg.lower():
+                    st.warning(
+                        'Smart Parse: document is too large (>300 rows). '
+                        'Split it into smaller files and process each separately. '
+                        'Falling back to Classic mode...'
+                    )
+                elif 'no extractable text' in err_msg.lower() or 'scanned' in err_msg.lower():
+                    st.warning(
+                        'PDF appears to be a scanned image — text cannot be extracted. '
+                        'Copy the text from your PDF viewer and paste it into the Email tab.'
+                    )
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                elif 'rate_limit' in err_msg.lower() or '429' in err_msg:
+                    st.warning(
+                        'OpenAI rate limit hit. Wait 60 seconds and try again, '
+                        'or switch to Classic mode which uses GPT-4o-mini.'
+                    )
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                elif 'authentication' in err_msg.lower() or 'invalid api key' in err_msg.lower():
+                    st.warning('Invalid OpenAI API key. Check it in the sidebar.')
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                elif 'no_items_found' in err_msg:
+                    _is_cover = (
+                        source_type == 'email' and len(str(source).strip()) < 500
+                        and not any(kw in str(source).upper() for kw in
+                                    ['150#', '300#', 'PN ', 'GASKET', 'ASME', 'CNAF',
+                                     'PTFE', 'SPIRAL', 'RTJ', 'NEOPRENE', 'EPDM', 'GRAPHITE'])
+                    )
+                    if _is_cover:
+                        st.warning(
+                            'The email body appears to be a cover note. '
+                            'The actual line items are in an **attached Excel or PDF** — '
+                            'upload it using the Excel or PDF tab.'
+                        )
+                    else:
+                        st.warning(
+                            'No gasket line items were found in this document. '
+                            'GPT-4o read the full content but found no gasket specifications.\n\n'
+                            '**Possible reasons:**\n'
+                            '- Cover letter / admin file with no item details\n'
+                            '- Scanned PDF (copy-paste text into the Email tab)\n'
+                            '- All items are non-gasket products\n\n'
+                            'If this seems wrong, try **Classic mode** in the sidebar.'
+                        )
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                elif 'connection' in err_msg.lower() or 'api call failed' in err_msg.lower():
+                    st.warning(
+                        f'Network error: {err_msg}. '
+                        'Check your internet connection. Falling back to Classic mode...'
+                    )
+                else:
+                    st.warning(f'Smart Parse issue: {err_msg}. Falling back to Classic mode...')
+
+                # Classic fallback for non-fatal errors
+                status_text.text('Falling back to Classic mode...')
+                if source_type == 'email':
+                    from core.parser import parse_email_text
+                    _fb_raw = parse_email_text(str(source))
+                elif source_type == 'excel':
+                    from core.parser import parse_excel_file
+                    _fb_xl_client = None
+                    try:
+                        from openai import OpenAI as _OAI_FB
+                        _fb_xl_client = _OAI_FB(api_key=api_key)
+                    except Exception:
+                        pass
+                    _fb_raw = parse_excel_file(source, openai_client=_fb_xl_client)
+                else:
+                    st.error('No fallback available for PDF. Use the Email tab to paste text.')
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                if not _fb_raw:
+                    st.warning('No gasket line items found even in Classic mode. Check your input.')
+                    progress_bar.empty(); status_text.empty()
+                    return False
+                from core.extractor import extract_batch as _eb2
+                def _fb_progress(done, total):
+                    status_text.text(f'Classic mode: {done}/{total} items...')
+                    progress_bar.progress(10 + int(done / total * 70))
+                extracted_items = _eb2(_fb_raw, progress_cb=_fb_progress)
+
             else:
-                st.error('Classic fallback not supported for PDF. Use email/Excel input.')
-                progress_bar.empty()
-                status_text.empty()
-                return False
-
-            if not raw_items:
-                st.warning('No gasket line items found. Check your input format.')
-                progress_bar.empty()
-                status_text.empty()
-                return False
-
-            from core.extractor import extract_batch
-
-            def _classic_progress(done, total):
-                pct = int(done / total * 70)
-                status_text.text(f'Classic mode: extracting {done}/{total} items...')
-                progress_bar.progress(10 + pct)
-
-            extracted_items = extract_batch(raw_items, progress_cb=_classic_progress)
-
-        else:
-            # Smart Parse succeeded — surface truncation warning if any
-            if extracted_items and extracted_items[0].get('_doc_was_truncated'):
-                st.warning(
-                    'The document was too large to send in full — only the first 300 rows were '
-                    'processed. If line items are missing, split the file into smaller parts '
-                    'and process each separately.'
-                )
-
-            if n_skipped:
-                st.info(
-                    f'{n_skipped} non-gasket item(s) in this document were automatically '
-                    f'filtered out (cam & groove fittings, adapters, etc.) and will not appear in the list.'
-                )
-
-            # Run regex guard rail
-            status_text.text('Validating with regex guard rails...')
-            progress_bar.progress(85)
-            extracted_items = validate_with_regex(extracted_items)
-            n_overrides = sum(len(it.get('_override_log', [])) for it in extracted_items)
-            if n_overrides:
-                logger.info(f'Smart validator: {n_overrides} field overrides across {len(extracted_items)} items')
+                # GPT-4o succeeded
+                if extracted_items and extracted_items[0].get('_doc_was_truncated'):
+                    st.warning(
+                        'Document was too large to send in full — only the first 300 rows '
+                        'were processed. Split the file if items are missing.'
+                    )
+                if n_skipped:
+                    st.info(
+                        f'{n_skipped} non-gasket item(s) automatically filtered out '
+                        f'(cam & groove fittings, adapters, etc.).'
+                    )
+                status_text.text('Validating with regex guard rails...')
+                progress_bar.progress(85)
+                extracted_items = validate_with_regex(extracted_items)
+                n_overrides = sum(len(it.get('_override_log', [])) for it in extracted_items)
+                if n_overrides:
+                    logger.info(f'Smart validator: {n_overrides} overrides across {len(extracted_items)} items')
 
     # ── Classic mode path ──────────────────────────────────────────────────
     else:
