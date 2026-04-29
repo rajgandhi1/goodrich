@@ -430,6 +430,8 @@ if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False  # unused for panel CSS; panel state managed by JS sessionStorage
 if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
+if 'parse_mode' not in st.session_state:
+    st.session_state.parse_mode = 'Smart'
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
@@ -448,6 +450,9 @@ if not st.session_state._history_loaded:
 import os as _os
 import datetime as _dt
 import json as _json
+import logging
+
+logger = logging.getLogger(__name__)
 
 _LOGO_PATH = _os.path.join(_os.path.dirname(__file__), 'logo.png')
 
@@ -867,6 +872,41 @@ with st.sidebar:
         if api_key_input:
             _os.environ['OPENAI_API_KEY'] = api_key_input
             st.rerun()
+
+    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
+
+    # ── Parse mode toggle ───────────────────────────────────────────────────
+    st.markdown('<div class="gq-sidebar-title">Parse Mode</div>', unsafe_allow_html=True)
+    _parse_choice = st.radio(
+        'Parse Mode',
+        ['Smart (GPT-4o)', 'Classic (regex + GPT-4o-mini)'],
+        index=0 if st.session_state.parse_mode == 'Smart' else 1,
+        key='parse_mode_radio',
+        label_visibility='collapsed',
+        help=(
+            'Smart: one GPT-4o call reads the full document at once — '
+            'better for complex Excel layouts and mixed gasket types.\n\n'
+            'Classic: parser detects layout, then extracts field-by-field — '
+            'faster for clean, well-structured files.'
+        ),
+    )
+    st.session_state.parse_mode = 'Smart' if _parse_choice.startswith('Smart') else 'Classic'
+
+    if st.session_state.parse_mode == 'Smart':
+        if _os.environ.get('OPENAI_API_KEY'):
+            st.markdown(
+                '<div class="gq-ai-status" style="background:#1a3a2e;margin-top:0.3rem">'
+                '<div class="gq-ai-dot" style="background:#4caf50;box-shadow:0 0 5px #4caf50"></div>'
+                'Smart Parse active</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="gq-ai-status gq-ai-off" style="margin-top:0.3rem">'
+                '<div class="gq-ai-dot gq-ai-dot-off"></div>'
+                'Smart Parse needs API key</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
     st.markdown('<div class="gq-sidebar-title">Tools</div>', unsafe_allow_html=True)
@@ -1359,38 +1399,197 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab_email, tab_excel, tab_manual, tab_conv = st.tabs(['📧 Email', '📊 Excel', '✏️ Manual', '📐 Converter'])
+tab_email, tab_excel, tab_pdf, tab_manual, tab_conv = st.tabs(
+    ['📧 Email', '📊 Excel', '📄 PDF', '✏️ Manual', '📐 Converter']
+)
 
 
-def _process_and_append(raw_items):
-    """Extract, apply rules, and append processed items to working_items."""
-    if not raw_items:
-        st.warning('No gasket line items found. Check your input and try again.')
-        return False
+def _process_and_append(raw_items=None, source=None, source_type=None):
+    """
+    Extract, apply rules, and append processed items to working_items.
 
-    from core.extractor import extract_batch
-    unique_count = len({item['description'] for item in raw_items})
+    Smart mode (source + source_type provided):
+        document_reader → llm_validator → rules → formatter
+        Falls back to Classic if SmartParseError is raised.
 
+    Classic mode (raw_items provided):
+        extractor.extract_batch → rules → formatter
+    """
     status_text = st.empty()
     progress_bar = st.progress(0)
     preview_ph   = st.empty()
 
-    status_text.text(f'Extracting {unique_count} unique descriptions...')
-    progress_bar.progress(5)
+    # ── Smart mode path ────────────────────────────────────────────────────
+    if source is not None and source_type is not None:
+        from core.document_reader import read_document_smart, SmartParseError
+        from core.llm_validator import validate_with_regex
+        from core.extractor import extract_batch
 
-    def _on_progress(done, total):
-        pct = int(done / total * 100)
-        status_text.text(f'Extracting... {done}/{total} descriptions ({pct}%)')
-        progress_bar.progress(5 + int(done / total * 70))
+        api_key = _os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            st.warning(
+                'Smart Parse requires an OpenAI API key. '
+                'Enter it in the sidebar or switch to Classic mode.'
+            )
+            progress_bar.empty()
+            status_text.empty()
+            return False
 
-    extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
-    progress_bar.progress(75)
+        try:
+            from openai import OpenAI as _OAI_SMART
+            _smart_client = _OAI_SMART(api_key=api_key, timeout=180.0)
+        except Exception as e:
+            st.error(f'Could not create OpenAI client: {e}')
+            progress_bar.empty()
+            status_text.empty()
+            return False
 
+        status_text.text('Smart Parse: sending document to GPT-4o...')
+        progress_bar.progress(5)
+
+        def _smart_progress(done, total):
+            pct = int(done / total * 80)
+            progress_bar.progress(5 + pct)
+
+        try:
+            extracted_items, n_skipped = read_document_smart(
+                source, source_type, _smart_client, progress_cb=_smart_progress
+            )
+        except SmartParseError as e:
+            err_msg = str(e)
+            # Provide specific, actionable error messages
+            if 'truncated' in err_msg.lower():
+                st.warning(
+                    f'Smart Parse: document is too large (>200 rows). '
+                    f'Split it into smaller files and process each separately. '
+                    f'Falling back to Classic mode...'
+                )
+            elif 'no extractable text' in err_msg.lower() or 'scanned' in err_msg.lower():
+                st.warning(
+                    f'PDF appears to be a scanned image — text cannot be extracted directly. '
+                    f'Copy the text from your PDF viewer and paste it into the Email tab instead.'
+                )
+                progress_bar.empty()
+                status_text.empty()
+                return False
+            elif 'rate_limit' in err_msg.lower() or '429' in err_msg:
+                st.warning(
+                    'OpenAI rate limit hit. Wait 60 seconds and try again, '
+                    'or switch to Classic mode which uses GPT-4o-mini.'
+                )
+                progress_bar.empty()
+                status_text.empty()
+                return False
+            elif 'api call failed' in err_msg.lower() or 'connection' in err_msg.lower():
+                st.warning(
+                    f'Could not reach OpenAI API ({err_msg}). '
+                    f'Check your internet connection and API key, then retry. '
+                    f'Falling back to Classic mode...'
+                )
+            elif 'invalid json' in err_msg.lower():
+                st.warning(
+                    'GPT-4o returned an unexpected response format. '
+                    'This is rare — retrying usually fixes it. Falling back to Classic mode...'
+                )
+            elif 'no gasket line items' in err_msg.lower():
+                st.warning(
+                    'No gasket line items were found in the document. '
+                    'Make sure the document contains gasket specifications '
+                    '(size, rating, material). Check that the correct tab is selected.'
+                )
+                progress_bar.empty()
+                status_text.empty()
+                return False
+            else:
+                st.warning(f'Smart Parse encountered an issue: {err_msg}. Falling back to Classic mode...')
+
+            # Classic fallback
+            status_text.text('Falling back to Classic mode...')
+            if source_type == 'email':
+                from core.parser import parse_email_text
+                raw_items = parse_email_text(str(source))
+            elif source_type == 'excel':
+                from core.parser import parse_excel_file
+                _excel_client = None
+                try:
+                    from openai import OpenAI as _OAI_XL
+                    _excel_client = _OAI_XL(api_key=api_key)
+                except Exception:
+                    pass
+                raw_items = parse_excel_file(source, openai_client=_excel_client)
+            else:
+                st.error('Classic fallback not supported for PDF. Use email/Excel input.')
+                progress_bar.empty()
+                status_text.empty()
+                return False
+
+            if not raw_items:
+                st.warning('No gasket line items found. Check your input format.')
+                progress_bar.empty()
+                status_text.empty()
+                return False
+
+            from core.extractor import extract_batch
+
+            def _classic_progress(done, total):
+                pct = int(done / total * 70)
+                status_text.text(f'Classic mode: extracting {done}/{total} items...')
+                progress_bar.progress(10 + pct)
+
+            extracted_items = extract_batch(raw_items, progress_cb=_classic_progress)
+
+        else:
+            # Smart Parse succeeded — surface truncation warning if any
+            if extracted_items and extracted_items[0].get('_doc_was_truncated'):
+                st.warning(
+                    'The document was too large to send in full — only the first 300 rows were '
+                    'processed. If line items are missing, split the file into smaller parts '
+                    'and process each separately.'
+                )
+
+            if n_skipped:
+                st.info(
+                    f'{n_skipped} non-gasket item(s) in this document were automatically '
+                    f'filtered out (cam & groove fittings, adapters, etc.) and will not appear in the list.'
+                )
+
+            # Run regex guard rail
+            status_text.text('Validating with regex guard rails...')
+            progress_bar.progress(85)
+            extracted_items = validate_with_regex(extracted_items)
+            n_overrides = sum(len(it.get('_override_log', [])) for it in extracted_items)
+            if n_overrides:
+                logger.info(f'Smart validator: {n_overrides} field overrides across {len(extracted_items)} items')
+
+    # ── Classic mode path ──────────────────────────────────────────────────
+    else:
+        if not raw_items:
+            st.warning('No gasket line items found. Check your input and try again.')
+            return False
+
+        from core.extractor import extract_batch
+        unique_count = len({item['description'] for item in raw_items})
+        status_text.text(f'Extracting {unique_count} unique descriptions...')
+        progress_bar.progress(5)
+
+        def _on_progress(done, total):
+            pct = int(done / total * 100)
+            status_text.text(f'Extracting... {done}/{total} descriptions ({pct}%)')
+            progress_bar.progress(5 + int(done / total * 70))
+
+        extracted_items = extract_batch(raw_items, progress_cb=_on_progress)
+
+    # ── Common tail: rules + formatter ────────────────────────────────────
+    progress_bar.progress(88)
     n = len(extracted_items)
+    if n == 0:
+        st.warning('No gasket line items were extracted from the document.')
+        progress_bar.empty()
+        status_text.empty()
+        return False
+
     step = max(1, n // 20)
     processed = []
-
-    # Offset line numbers from existing items
     existing = st.session_state.working_items
     line_offset = (max(i.get('line_no', 0) for i in existing) if existing else 0)
 
@@ -1399,12 +1598,12 @@ def _process_and_append(raw_items):
         item['ggpl_description'] = format_description(item)
         item['line_no'] = line_offset + i
         processed.append(item)
-        progress_bar.progress(75 + int(i / n * 24))
+        progress_bar.progress(88 + int(i / n * 11))
         if i % step == 0 or i == n:
-            status_text.text(f'Processing {i}/{n} items...')
+            status_text.text(f'Applying business rules... {i}/{n} items')
             preview_ph.dataframe(
                 _build_preview_df(processed),
-                width="stretch",
+                width='stretch',
                 hide_index=True,
             )
 
@@ -1436,12 +1635,22 @@ with tab_email:
         label_visibility='visible',
         key=f'email_text_{st.session_state._input_reset_seq}',
     )
-    st.caption(_wl_hint)
+    if st.session_state.parse_mode == 'Smart':
+        st.caption(
+            f'**Smart Parse active** — GPT-4o reads the full email in one pass. '
+            f'{_wl_hint}'
+        )
+    else:
+        st.caption(_wl_hint)
     if st.button('⚡  Process & Add to List', type='primary', key='process_email_btn'):
         if email_text.strip():
-            raw_items = parse_email_text(email_text)
-            if _process_and_append(raw_items):
-                st.rerun()
+            if st.session_state.parse_mode == 'Smart' and _os.environ.get('OPENAI_API_KEY'):
+                if _process_and_append(source=email_text, source_type='email'):
+                    st.rerun()
+            else:
+                raw_items = parse_email_text(email_text)
+                if _process_and_append(raw_items=raw_items):
+                    st.rerun()
         else:
             st.warning('Please paste some email text first.')
 
@@ -1452,21 +1661,58 @@ with tab_excel:
         help='Supports multi-sheet enquiry files',
         key=f'excel_upload_{st.session_state._input_reset_seq}',
     )
-    st.caption(_wl_hint)
+    if st.session_state.parse_mode == 'Smart':
+        st.caption(
+            f'**Smart Parse active** — GPT-4o reads all sheets at once (max 200 rows). '
+            f'{_wl_hint}'
+        )
+    else:
+        st.caption(_wl_hint)
     if st.button('⚡  Process & Add to List', type='primary', key='process_excel_btn'):
         if uploaded_file:
-            _excel_client = None
-            if _os.environ.get('OPENAI_API_KEY'):
-                try:
-                    from openai import OpenAI as _OAI_XL
-                    _excel_client = _OAI_XL(api_key=_os.environ['OPENAI_API_KEY'])
-                except Exception:
-                    pass
-            raw_items = parse_excel_file(uploaded_file.read(), openai_client=_excel_client)
-            if _process_and_append(raw_items):
-                st.rerun()
+            file_bytes = uploaded_file.read()
+            if st.session_state.parse_mode == 'Smart' and _os.environ.get('OPENAI_API_KEY'):
+                if _process_and_append(source=file_bytes, source_type='excel'):
+                    st.rerun()
+            else:
+                _excel_client = None
+                if _os.environ.get('OPENAI_API_KEY'):
+                    try:
+                        from openai import OpenAI as _OAI_XL
+                        _excel_client = _OAI_XL(api_key=_os.environ['OPENAI_API_KEY'])
+                    except Exception:
+                        pass
+                raw_items = parse_excel_file(file_bytes, openai_client=_excel_client)
+                if _process_and_append(raw_items=raw_items):
+                    st.rerun()
         else:
             st.warning('Please upload an Excel file first.')
+
+with tab_pdf:
+    st.caption(
+        'Upload a PDF gasket enquiry. The text will be extracted and processed with Smart Parse. '
+        'Scanned/image-only PDFs are not supported — copy-paste from those into the Email tab instead.'
+    )
+    pdf_file = st.file_uploader(
+        'Upload PDF',
+        type=['pdf'],
+        help='Text-based PDFs only (not scanned images)',
+        key='pdf_uploader',
+    )
+    st.caption(_wl_hint)
+    if st.button('⚡  Process & Add to List', type='primary', key='process_pdf_btn'):
+        if pdf_file:
+            if not _os.environ.get('OPENAI_API_KEY'):
+                st.warning(
+                    'PDF processing requires an OpenAI API key (Smart Parse mode). '
+                    'Enter your key in the sidebar.'
+                )
+            else:
+                pdf_bytes = pdf_file.read()
+                if _process_and_append(source=pdf_bytes, source_type='pdf'):
+                    st.rerun()
+        else:
+            st.warning('Please upload a PDF file first.')
 
 with tab_manual:
     st.caption('Fill in fields to add a single line item directly to the working list.')
