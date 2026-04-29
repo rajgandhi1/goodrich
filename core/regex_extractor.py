@@ -1113,15 +1113,24 @@ def _extract_sw_fields(desc: str) -> dict:
         if _FILLER_RANK.get(label_filler, 0) > _FILLER_RANK.get(result['sw_filler'], 0):
             result['sw_filler'] = label_filler
 
+    # Words that are structural/face-type keywords, NOT ring materials.
+    # Prevents capturing "RF", "FF", "GASKET" etc. when they follow "inner ring".
+    _NOT_RING_MAT = frozenset({
+        'RF', 'FF', 'RTJ', 'RJ', 'MF', 'TG', 'GASKET', 'RING', 'FACE', 'FLANGED',
+        'ASME', 'EN', 'BS', 'DIN', 'ANSI', 'API',
+    })
+
     # Inner ring (only if not already set by INOUT= / CR-IR pattern)
     if not result['sw_inner_ring']:
         # Try keyword-before-material first ("INNER RING SS304", "I/R 316L")
         m = _SW_IR_AFTER_RE.search(upper)
         if m:
-            mat = _norm_ring_material(m.group(1).strip().split()[0])  # first token only
-            result['sw_inner_ring'] = mat
+            first_token = m.group(1).strip().split()[0].upper()
+            if first_token not in _NOT_RING_MAT:
+                mat = _norm_ring_material(first_token)
+                result['sw_inner_ring'] = mat
         if not result['sw_inner_ring']:
-            # Fall back to material-before-keyword ("SS304 INNER RING")
+            # Fall back to material-before-keyword ("SS304 INNER RING" / "SS INNER RING")
             m = _SW_IR_RE.search(upper)
             if m:
                 raw = (m.group(1) or m.group(2) or '').strip()
