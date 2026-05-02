@@ -1455,8 +1455,15 @@ def _process_and_append(raw_items=None, source=None, source_type=None):
             status_text.text('Reading Excel layout...')
             progress_bar.progress(5)
             try:
-                from core.parser import parse_excel_file
+                from core.parser import parse_excel_file, excel_requires_smart_parse
                 from core.regex_extractor import regex_extract as _rxe
+                if excel_requires_smart_parse(source):
+                    logger.info(
+                        'Excel fast path skipped: merged cells or multiple table sections detected'
+                    )
+                    status_text.text('Complex Excel layout detected; using Smart Parse...')
+                    progress_bar.progress(10)
+                    raise RuntimeError('__skip_excel_fast_path__')
                 _xl_client2 = None
                 try:
                     from openai import OpenAI as _OAI_XL2
@@ -1485,7 +1492,8 @@ def _process_and_append(raw_items=None, source=None, source_type=None):
                             f'layout is complex, escalating to GPT-4o'
                         )
             except Exception as _fp_err:
-                logger.warning(f'Excel fast path failed ({_fp_err}), escalating to GPT-4o')
+                if str(_fp_err) != '__skip_excel_fast_path__':
+                    logger.warning(f'Excel fast path failed ({_fp_err}), escalating to GPT-4o')
 
         # ── GPT-4o Smart Parse (PDF / email / complex Excel) ──────────────
         if extracted_items is None:

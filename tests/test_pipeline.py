@@ -214,7 +214,8 @@ def test_excel_merged_description_sections():
     buf = io.BytesIO()
     wb.save(buf)
 
-    items = parse_excel_file(buf.getvalue())
+    file_bytes = buf.getvalue()
+    items = parse_excel_file(file_bytes)
 
     assert len(items) == 3
     assert items[1]['quantity'] == 4
@@ -223,6 +224,9 @@ def test_excel_merged_description_sections():
     assert items[2]['line_no'] == 1
     assert items[2]['quantity'] == 24
     assert '2" X 600 #' in items[2]['description']
+
+    from core.parser import excel_requires_smart_parse
+    assert excel_requires_smart_parse(file_bytes) is True
 
 
 def test_softcut_formatter():

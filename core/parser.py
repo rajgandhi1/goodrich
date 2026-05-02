@@ -408,6 +408,23 @@ def parse_excel_file(file_bytes: bytes, openai_client=None) -> list[dict]:
     return items
 
 
+def excel_requires_smart_parse(file_bytes: bytes) -> bool:
+    """Return True for layouts where the app should not use Excel fast path."""
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        if any(rng.min_row != rng.max_row for rng in ws.merged_cells.ranges):
+            return True
+
+        rows = worksheet_rows_with_merged_values(ws)
+        description_sections = _detect_description_sections(rows)
+        structured_sections = _detect_structured_sections(rows)
+        if len(description_sections) + len(structured_sections) > 1:
+            return True
+
+    return False
+
+
 def _parse_sheet(ws, openai_client=None) -> list[dict]:
     """Detect header row and extract line items from a worksheet.
 
