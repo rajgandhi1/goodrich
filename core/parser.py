@@ -12,6 +12,30 @@ import openpyxl
 logger = logging.getLogger(__name__)
 
 
+def worksheet_rows_with_merged_values(ws, max_row: int | None = None) -> list[tuple]:
+    """Return worksheet rows with merged cells expanded to every covered row.
+
+    openpyxl exposes only the top-left value of a merged range. Enquiry sheets
+    often merge MOC/spec cells vertically, so reading values directly makes the
+    following line items look incomplete.
+    """
+    row_limit = min(max_row or ws.max_row, ws.max_row)
+    rows = [
+        [ws.cell(r, c).value for c in range(1, ws.max_column + 1)]
+        for r in range(1, row_limit + 1)
+    ]
+
+    for merged_range in ws.merged_cells.ranges:
+        value = ws.cell(merged_range.min_row, merged_range.min_col).value
+        if value is None:
+            continue
+        for r in range(merged_range.min_row, min(merged_range.max_row, row_limit) + 1):
+            for c in range(merged_range.min_col, merged_range.max_col + 1):
+                rows[r - 1][c - 1] = value
+
+    return [tuple(row) for row in rows]
+
+
 def parse_email_text(text: str) -> list[dict]:
     """Extract line items from pasted email body text."""
     items = []
@@ -203,7 +227,7 @@ Key rules:
 def _ai_detect_sheet_layout(ws, openai_client) -> dict | None:
     """Send the first 20 rows to the LLM and return the column layout dict, or None on failure."""
     preview_rows = []
-    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True), 1):
+    for row_idx, row in enumerate(worksheet_rows_with_merged_values(ws, max_row=20), 1):
         cells = [str(c) if c is not None else '' for c in row]
         if any(s.strip() for s in cells):
             preview_rows.append({'row': row_idx, 'cells': cells})
@@ -254,7 +278,8 @@ def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
         line_col = ci('line_no')
         moc_col = ci('moc')
 
-        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        rows = worksheet_rows_with_merged_values(ws)
+        for row in rows[header_row:]:
             desc = _cell_str(row, desc_col)
             if not desc or not _looks_like_gasket(desc):
                 continue
@@ -288,7 +313,8 @@ def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
         last_moc = None
         last_comp = None
 
-        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        rows = worksheet_rows_with_merged_values(ws)
+        for row in rows[header_row:]:
             # Fill-down MOC and component_name (often repeated only in first row)
             mat_val = _cell_str(row, moc_col) if moc_col is not None else None
             if mat_val:
@@ -402,33 +428,8 @@ def _parse_sheet(ws, openai_client=None) -> list[dict]:
             # AI detected a layout but found no items — fall through to rule-based
 
     # --- Rule-based fallback: description-based format ---
-    header_row, col_map = _detect_header(ws)
-    if col_map.get('description'):
-        items = []
-        desc_col = col_map['description']
-        qty_col = col_map.get('quantity')
-        uom_col = col_map.get('uom')
-        line_col = col_map.get('line_no')
-        moc_col = col_map.get('moc')
-
-        for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
-            desc = _cell_str(row, desc_col)
-            if not desc or not _looks_like_gasket(desc):
-                continue
-            # Append MOC column content to description so the extractor can use it
-            if moc_col is not None:
-                moc_val = _cell_str(row, moc_col)
-                if moc_val and moc_val.upper() != desc.upper():
-                    desc = desc + ' MOC: ' + moc_val
-            qty = _cell_float(row, qty_col) if qty_col is not None else None
-            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
-            line_no = _cell_float(row, line_col) if line_col is not None else None
-            items.append({
-                'line_no': int(line_no) if line_no else None,
-                'description': desc,
-                'quantity': qty,
-                'uom': uom,
-            })
+    items = _parse_description_sections(ws)
+    if items:
         return items
 
     # --- Rule-based fallback: structured column format ---
@@ -469,6 +470,148 @@ def _classify_structured_col(norm: str) -> str | None:
     if 'sl.no' in norm or 'sr.no' in norm or norm == 'sno' or norm == 'sl no' or norm == 'sr no':
         return 'line_no'
     return None
+
+
+def _classify_description_col(norm: str) -> str | None:
+    if not norm:
+        return None
+    for col_type, keywords in _HEADER_PATTERNS.items():
+        if any(kw in norm for kw in keywords):
+            return col_type
+    if norm == 'material':
+        return 'moc'
+    return _classify_structured_col(norm)
+
+
+def _detect_description_sections(all_rows: list[tuple]) -> list[tuple]:
+    """Find all description-column header blocks in a sheet."""
+    sections = []
+    current_header_idx = None
+    current_col_map = None
+    current_data: list[tuple] = []
+
+    def _is_description_header(col_map: dict) -> bool:
+        return 'description' in col_map and (
+            'quantity' in col_map or 'moc' in col_map or 'size_inch' in col_map
+            or 'rating' in col_map or ('od_mm' in col_map and 'id_mm' in col_map)
+        )
+
+    for row_idx, row in enumerate(all_rows):
+        col_map = {}
+        for col_idx, cell in enumerate(row):
+            norm = _norm_header_cell(cell)
+            col_type = _classify_description_col(norm)
+            if col_type and col_type not in col_map:
+                col_map[col_type] = col_idx
+
+        if _is_description_header(col_map):
+            if current_col_map is not None and current_data:
+                sections.append((current_header_idx, current_col_map, current_data))
+            current_header_idx = row_idx
+            current_col_map = col_map
+            current_data = []
+        elif current_col_map is not None and any(c is not None for c in row):
+            current_data.append(row)
+
+    if current_col_map is not None and current_data:
+        sections.append((current_header_idx, current_col_map, current_data))
+
+    return sections
+
+
+def _append_field(parts: list[str], label: str, value: str | None, suffix: str = '') -> None:
+    if value:
+        if re.fullmatch(r'n/?a|not applicable|nil|none', value.strip(), re.IGNORECASE):
+            return
+        parts.append(f'{label}: {value}{suffix}')
+
+
+def _description_from_section_row(row: tuple, col_map: dict) -> str | None:
+    desc = _cell_str(row, col_map.get('description'))
+    if not desc or not _looks_like_gasket(desc):
+        return None
+
+    parts = [desc]
+    size = _cell_str(row, col_map.get('size_inch'))
+    rating = _cell_str(row, col_map.get('rating'))
+    thk = _cell_str(row, col_map.get('thickness'))
+    od = _cell_str(row, col_map.get('od_mm'))
+    id_ = _cell_str(row, col_map.get('id_mm'))
+
+    if size:
+        size_rating = size
+        if rating:
+            size_rating += f' X {rating}'
+        if thk:
+            size_rating += f' X {thk}MM THK'
+        parts.append(size_rating)
+    elif od and id_:
+        dim = f'OD {od}MM X ID {id_}MM'
+        if thk:
+            dim += f' X {thk}MM THK'
+        parts.append(dim)
+    elif thk:
+        _append_field(parts, 'THK', thk, 'MM')
+
+    moc_val = _cell_str(row, col_map.get('moc'))
+    if moc_val and moc_val.upper() != desc.upper():
+        parts.append(f'MOC: {moc_val}')
+
+    _append_field(parts, 'INNER RING WIDTH', _cell_str(row, col_map.get('inner_ring_width')), 'MM')
+    _append_field(parts, 'OUTER RING WIDTH', _cell_str(row, col_map.get('outer_ring_width')), 'MM')
+    _append_field(parts, 'REMARKS', _cell_str(row, col_map.get('remarks')))
+
+    return ' '.join(parts)
+
+
+def _parse_description_sections(ws) -> list[dict]:
+    all_rows = worksheet_rows_with_merged_values(ws)
+    sections = _detect_description_sections(all_rows)
+    if not sections:
+        return []
+
+    items = []
+    for _, col_map, data_rows in sections:
+        qty_col = col_map.get('quantity')
+        uom_col = col_map.get('uom')
+        line_col = col_map.get('line_no')
+        if line_col is None:
+            line_col = _infer_line_no_col(data_rows, col_map.get('description'))
+
+        for row in data_rows:
+            desc = _description_from_section_row(row, col_map)
+            if not desc:
+                continue
+            qty = _cell_float(row, qty_col) if qty_col is not None else None
+            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
+            line_no = _cell_float(row, line_col) if line_col is not None else None
+            if qty_col is not None and qty is None and line_no is None:
+                continue
+            items.append({
+                'line_no': int(line_no) if line_no else None,
+                'description': desc,
+                'quantity': qty,
+                'uom': uom,
+            })
+
+    return items
+
+
+def _infer_line_no_col(data_rows: list[tuple], desc_col: int | None) -> int | None:
+    """Infer a serial-number column immediately to the left of Description."""
+    if desc_col is None or desc_col <= 0:
+        return None
+    best_col = None
+    best_count = 0
+    for col_idx in range(desc_col):
+        count = 0
+        for row in data_rows[:25]:
+            if _cell_float(row, col_idx) is not None:
+                count += 1
+        if count > best_count:
+            best_col = col_idx
+            best_count = count
+    return best_col if best_count >= 1 else None
 
 
 def _detect_structured_sections(all_rows: list[tuple]) -> list[tuple]:
@@ -521,7 +664,7 @@ def _detect_structured_sections(all_rows: list[tuple]) -> list[tuple]:
 
 def _parse_structured_sheet(ws) -> list[dict]:
     """Parse a sheet that uses one column per field (no combined description column)."""
-    all_rows = list(ws.iter_rows(values_only=True))
+    all_rows = worksheet_rows_with_merged_values(ws)
     sections = _detect_structured_sections(all_rows)
     if not sections:
         return []
@@ -608,8 +751,17 @@ _HEADER_PATTERNS = {
     'description': ['description', 'notes'],
     'quantity':    ['qty', 'quantity', 'balance to order', 'balance', 'required qty', 'count'],
     'uom':         ['uom', 'inv uom'],
-    'line_no':     ['sl.no', 'sl no', 'sr. no', 'sr no', 'sr no.', 'sno', 'serial'],
+    'line_no':     ['sl.no', 'sl no', 'sr. no', 'sr no', 'sr no.', 'sno', 'serial', 'sr. no.', 'sr no'],
     'moc':         ['moc'],
+    'size_inch':   ['nps', 'size'],
+    'rating':      ['class /rating', 'class/rating', 'rating', 'class'],
+    'thickness':   ['thickness', 'thk', 'thick'],
+    'od_mm':       ['gasket od', '(od)', 'od (', 'od mm'],
+    'id_mm':       ['gasket id', '(id)', 'id (', 'id mm'],
+    'remarks':     ['remarks', 'remark'],
+    'inner_ring_width': ['inner ring width'],
+    'outer_ring_width': ['outer / center ring  width', 'outer / center ring width', 'outer ring width',
+                         'center ring width', 'centering ring width'],
 }
 
 

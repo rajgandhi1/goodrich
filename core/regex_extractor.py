@@ -1157,20 +1157,23 @@ def _extract_sw_fields(desc: str) -> dict:
                 result['sw_outer_ring'] = mat
 
     # "inner & outer ring" with shared material: "SS316 inner & outer ring"
+    # or "SS inner and outer centering ring" where SS inherits the winding grade.
     # Also handles reversed order: "316 outer & inner ring"
     _RING_MAT_PAT = (
-        r'(SS\s*\d{3}\w?|\b\d{3}\w{0,2}\b|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|CS|'
+        r'(SS\s*\d{0,3}\w?|\b\d{3}\w{0,2}\b|INCOLOY\s*\d{3}|INCONEL\s*\d{3}|CS|'
         r'ALLOY\s*\d+|DUPLEX\s*SS?\d*)'
     )
     shared_re = re.search(
-        _RING_MAT_PAT + r'\s+(?:INNER\s*[&+]\s*OUTER|OUTER\s*[&+]\s*INNER)\s+RING',
+        _RING_MAT_PAT
+        + r'\s+(?:INNER\s*(?:[&+]|AND)\s*OUTER|OUTER\s*(?:[&+]|AND)\s*INNER)\s+'
+        + r'(?:CENTERING\s+)?RINGS?',
         upper,
     )
     if shared_re:
         mat = _norm_ring_material(shared_re.group(1))
         if mat:
-            result['sw_inner_ring'] = result['sw_inner_ring'] or mat
-            result['sw_outer_ring'] = result['sw_outer_ring'] or mat
+            result['sw_inner_ring'] = mat
+            result['sw_outer_ring'] = mat
 
     # "SS INNER AND CS OUTER RINGS" pattern
     mixed_re = re.search(

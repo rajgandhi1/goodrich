@@ -254,6 +254,7 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 300) -> str:
     Returns a (text, was_truncated, total_row_count) tuple.
     """
     import openpyxl
+    from core.parser import worksheet_rows_with_merged_values
     wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
     parts = []
     total_rows = 0
@@ -262,7 +263,7 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 300) -> str:
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         sheet_rows = []
-        for row in ws.iter_rows(values_only=True):
+        for row in worksheet_rows_with_merged_values(ws):
             cells = [str(c) if c is not None else '' for c in row]
             if not any(c.strip() for c in cells):
                 continue  # skip fully empty rows

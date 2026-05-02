@@ -1,7 +1,7 @@
 """
 End-to-end pipeline tests using the WABAG email and L&T Excel as inputs.
 """
-import sys, os
+import sys, os, io
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from dotenv import load_dotenv
@@ -195,6 +195,34 @@ def test_sw_enquiry_test3():
         assert item['status'] != STATUS_MISSING or item.get('quantity') is None, \
             f'Sheet3 fully-specified item should not be missing: {item}'
     print(f'  {len(sheet3_items)} Sheet3 fully-specified items produce GGPL descriptions ✓')
+
+
+def test_excel_merged_description_sections():
+    """Merged MOC cells and multiple description tables in one sheet stay separated."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(['', 'Sr. no.', 'Tag No', 'Description', 'MOC', 'Gasket OD (mm)', 'Gasket ID (mm)', 'Thickness (mm)', 'Qty. (Nos.)'])
+    ws.append(['', 1, 7, 'GASKET Ch FL- T/S', 'SS 317L SPWD gasket with grafoil filler and SS inner and outer centering ring.', 1489, 1453, 6.35, 4])
+    ws.append(['', 2, 7, 'GASKET SH FL- T/S', None, 1489, 1453, 6.35, 4])
+    ws.merge_cells('E2:E3')
+    ws.append([])
+    ws.append(['', 'B', 'Tag. No.', 'Description', 'MOC', 'NPS', 'CLASS /RATING', 'REMARKS', 'Qty'])
+    ws.append(['', 1, 7, 'GASKET (S+H)', 'SS 317L SPWD for Nozzles shall be 4.5 thk with grafoil filler and SS inner & outer ring, dimension as per ASME B 16.20.', '2"', '600 #', 'ASME 16.20', 24])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    items = parse_excel_file(buf.getvalue())
+
+    assert len(items) == 3
+    assert items[1]['quantity'] == 4
+    assert 'SS 317L SPWD' in items[1]['description']
+    assert 'OD 1489MM X ID 1453MM X 6.35MM THK' in items[1]['description']
+    assert items[2]['line_no'] == 1
+    assert items[2]['quantity'] == 24
+    assert '2" X 600 #' in items[2]['description']
 
 
 def test_softcut_formatter():

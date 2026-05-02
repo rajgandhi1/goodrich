@@ -124,6 +124,21 @@ def test_softcut_mixed_fraction():
     )
 
 
+def test_spw_shared_ss_inner_outer_centering_ring():
+    r = regex_extract(
+        'GASKET 2" 600# SS 317L SPWD for Nozzles shall be 4.5 thk '
+        'with grafoil filler and SS inner and outer centering ring'
+    )
+    _check(r,
+        gasket_type='SPIRAL_WOUND',
+        size='2"', rating='600#',
+        sw_winding_material='SS317L',
+        sw_filler='FLEXIBLE GRAPHITE',
+        sw_inner_ring='SS317L',
+        sw_outer_ring='SS317L',
+    )
+
+
 # =========================================================================
 # SOFT CUT — regex MEDIUM/LOW (needs LLM to fill gaps)
 # =========================================================================
