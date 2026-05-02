@@ -133,7 +133,7 @@ def test_spw_shared_ss_inner_outer_centering_ring():
         gasket_type='SPIRAL_WOUND',
         size='2"', rating='600#',
         sw_winding_material='SS317L',
-        sw_filler='FLEXIBLE GRAPHITE',
+        sw_filler='GRAPHITE',
         sw_inner_ring='SS317L',
         sw_outer_ring='SS317L',
     )
