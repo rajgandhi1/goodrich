@@ -127,8 +127,7 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
     LEFT,  RIGHT  = 20,  575          # page left / right edges
     H_TOP, H_BTM  = 10,  148          # "top" coords of header top / bottom
     DIVX          = 377               # vertical divider: left section | SALES QUOTATION
-    LOGO_X        = 25                # logo left edge
-    ADDR_X        = 116               # address text left edge (right of logo)
+    ADDR_X        = 178               # address text left edge (right of logo)
 
     # ── Outer border box (full header) ──────────────────────────────────────
     c.setLineWidth(0.6)
@@ -147,12 +146,12 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
         try:
             image = ImageReader(logo_path)
             iw, ih = image.getSize()
-            w = 88
+            w = 150
             h = w * ih / iw
-            if h > 95:
-                h = 95
+            if h > 104:
+                h = 104
                 w = h * iw / ih
-            c.drawImage(image, LOGO_X, _top(130), width=w, height=h,
+            c.drawImage(image, 24, _top(127), width=w, height=h,
                         preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
@@ -167,7 +166,7 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
 
     # ── Right section: "SALES QUOTATION" centred in its box ─────────────────
     right_center = (DIVX + RIGHT) / 2          # ≈ 476
-    _draw(c, right_center, 33, "SALES QUOTATION", size=8.5, bold=True, align="center")
+    _draw(c, right_center - 20, 33, "SALES QUOTATION", size=8.5, bold=True, align="center")
 
     # ── Quote details (below the horizontal separator at top=50) ────────────
     lx = DIVX + 8                              # labels left edge  ≈ 385
@@ -246,7 +245,8 @@ ITEM_COLS   = [20, 45.5, 83.8, 177.8, 345.5, 404.8, 437.8, 503.8, 575.2]
 _ITEM_COL_W = [ITEM_COLS[i+1] - ITEM_COLS[i] for i in range(len(ITEM_COLS)-1)]
 
 _TBL_TOP = 358   # "top" coord of table top edge
-_TBL_BTM = 687   # "top" coord of table bottom edge
+_TBL_BTM = 785   # "top" coord of table bottom edge
+_PAGE_TURN_Y = 805
 
 _PS_HDR  = ParagraphStyle('hdr',  fontName='Helvetica-Bold', fontSize=8,
                            leading=10, alignment=TA_CENTER)
@@ -323,24 +323,31 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     unit_prices = quote_data.get("unit_prices", [])
     TABLE_X = ITEM_COLS[0]                         # 20 pt
     TABLE_W = ITEM_COLS[-1] - ITEM_COLS[0]         # 555.2 pt
-    AVAIL_H = _TBL_BTM - _TBL_TOP                  # 329 pt available
+    AVAIL_H = _TBL_BTM - _TBL_TOP
 
-    # ── Estimate how many items fit before building the table ────────────────
-    desc_inner_w = _ITEM_COL_W[3] - 6              # usable description cell width
-    HDR_APPROX   = 32                              # header row height estimate
-    used_h, n_fit = 0, 0
-    for item in items[start:]:
-        n_lines = min(len(_wrap(_item_description(item), desc_inner_w, "Helvetica", 8)), 4)
-        row_h   = max(22, n_lines * 10) + 10       # content + top+bottom padding
-        if used_h + row_h > AVAIL_H - HDR_APPROX:
+    # ── Measure actual ReportLab table heights to use the page fully ────────
+    def _prices_for(count: int) -> list[float]:
+        return [
+            _num(unit_prices[start + i] if start + i < len(unit_prices) else 0)
+            for i in range(count)
+        ]
+
+    n_fit = 0
+    tbl_h = 0
+    for count in range(1, len(items) - start + 1):
+        candidate = _make_items_table(
+            items[start : start + count],
+            _prices_for(count),
+        )
+        _, candidate_h = candidate.wrapOn(c, TABLE_W, AVAIL_H)
+        if candidate_h > AVAIL_H:
             break
-        used_h += row_h
-        n_fit  += 1
+        n_fit = count
+        tbl_h = candidate_h
     n_fit = max(1, n_fit)
 
     items_slice  = items[start : start + n_fit]
-    prices_slice = [_num(unit_prices[start + i] if start + i < len(unit_prices) else 0)
-                    for i in range(n_fit)]
+    prices_slice = _prices_for(n_fit)
 
     # ── Build & draw the table ───────────────────────────────────────────────
     t = _make_items_table(items_slice, prices_slice)
@@ -350,17 +357,12 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     t.drawOn(c, TABLE_X, tbl_pdf_y)
 
     # ── Extend column dividers into the blank rows below the table ───────────
-    c.setStrokeColorRGB(*BLACK)
-    c.setLineWidth(0.3)
-    for x in ITEM_COLS:
-        c.line(x, tbl_pdf_y, x, _top(_TBL_BTM))
+    next_start = start + n_fit
 
     # ── Bottom border of the whole table area ────────────────────────────────
-    c.setLineWidth(0.5)
-    c.line(TABLE_X, _top(_TBL_BTM), ITEM_COLS[-1], _top(_TBL_BTM))
-
-    _draw(c, 298, 705, "PAGE TURN OVER", size=8, bold=True, align="center")
-    return start + n_fit
+    if next_start < len(items):
+        _draw(c, 298, _PAGE_TURN_Y, "PAGE TURN OVER", size=8, bold=True, align="center")
+    return next_start
 
 
 def _totals(items: list[dict], quote_data: dict):
