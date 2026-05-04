@@ -4,6 +4,9 @@ Soft cut & spiral wound gaskets.
 """
 import streamlit as st
 import pandas as pd
+import base64
+import copy
+from pathlib import Path
 
 from core.parser import parse_email_text, parse_excel_file
 from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING, STATUS_REGRET
@@ -432,19 +435,35 @@ if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
 if 'parse_mode' not in st.session_state:
     st.session_state.parse_mode = 'Smart'
+if '_undo_stack' not in st.session_state:
+    st.session_state._undo_stack = []
+if '_undo_msg' not in st.session_state:
+    st.session_state._undo_msg = ''
+
+_HISTORY_PATH = Path(__file__).resolve().parent / 'data' / 'quote_history.json'
+_HISTORY_LIMIT = 25
+_UNDO_LIMIT = 20
 
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
     import json as _json
     from core.extractor import _get_redis as _get_redis_client
+    loaded_history = None
     _r = _get_redis_client()
     if _r:
         try:
             _raw = _r.get('gq:run_history')
             if _raw:
-                st.session_state.run_history = _json.loads(_raw)
+                loaded_history = _json.loads(_raw)
         except Exception:
             pass
+    if loaded_history is None and _HISTORY_PATH.exists():
+        try:
+            loaded_history = _json.loads(_HISTORY_PATH.read_text(encoding='utf-8'))
+        except Exception:
+            loaded_history = None
+    if isinstance(loaded_history, list):
+        st.session_state.run_history = loaded_history[-_HISTORY_LIMIT:]
     st.session_state._history_loaded = True
 
 import os as _os
@@ -458,13 +477,138 @@ _LOGO_PATH = _os.path.join(_os.path.dirname(__file__), 'logo.png')
 
 
 def _save_history_to_redis():
+    history_json = _json.dumps(st.session_state.run_history)
+    try:
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _HISTORY_PATH.write_text(history_json, encoding='utf-8')
+    except Exception:
+        pass
     from core.extractor import _get_redis as _get_redis_client
     _r = _get_redis_client()
     if _r:
         try:
-            _r.set('gq:run_history', _json.dumps(st.session_state.run_history))
+            _r.set('gq:run_history', history_json)
         except Exception:
             pass
+
+
+def _make_history_entry(items, quote_data=None, quote_pdf=None):
+    quote_data = dict(quote_data or {})
+    n_ready   = sum(1 for i in items if i.get('status') == STATUS_READY)
+    n_check   = sum(1 for i in items if i.get('status') == STATUS_CHECK)
+    n_missing = sum(1 for i in items if i.get('status') == STATUS_MISSING)
+    n_regret  = sum(1 for i in items if i.get('status') == STATUS_REGRET)
+    customer_val = quote_data.get('buyer_name_address', '').split('\n')[0] or ''
+    project_val = quote_data.get('customer_enq_no', '')
+    quote_no = quote_data.get('quote_no', '')
+    entry = {
+        'timestamp': _dt.datetime.now().strftime('%d %b %Y %H:%M'),
+        'customer': customer_val,
+        'project_ref': project_val,
+        'quote_no': quote_no,
+        'quote_data': quote_data,
+        'n_items': len(items),
+        'n_ready': n_ready,
+        'n_check': n_check,
+        'n_missing': n_missing,
+        'n_regret': n_regret,
+        'items': [dict(i) for i in items],
+    }
+    if quote_pdf:
+        entry['quote_pdf_b64'] = base64.b64encode(quote_pdf).decode('ascii')
+        entry['quote_pdf_name'] = f"{(quote_no or 'quotation').replace('/', '-')}.pdf"
+    return entry
+
+
+def _append_history(entry):
+    st.session_state.run_history.append(entry)
+    st.session_state.run_history = st.session_state.run_history[-_HISTORY_LIMIT:]
+    _save_history_to_redis()
+
+
+def _restore_history_entry(run):
+    _push_undo_snapshot('restore quote history')
+    st.session_state.working_items = [dict(i) for i in run.get('items', [])]
+    st.session_state._quote_data = dict(run.get('quote_data') or {})
+    st.session_state._quote_excel = None
+    st.session_state._selected_rows = set()
+    st.session_state.pop('_bulk_df', None)
+    st.session_state.pop('_last_excel', None)
+    st.session_state.filter_mode = 'All'
+    st.session_state._show_confirm = False
+    st.session_state._show_quote_page = False
+
+
+def _history_pdf_bytes(run):
+    pdf_b64 = run.get('quote_pdf_b64')
+    if not pdf_b64:
+        return None
+    try:
+        return base64.b64decode(pdf_b64)
+    except Exception:
+        return None
+
+
+def _undo_widget_keys():
+    prefixes = ('inp_', 'qp_', 'bulk_', 'm_', 'email_text_')
+    explicit = {'filter_mode', 'parse_mode', '_last_filter_mode'}
+    return [
+        key for key in st.session_state.keys()
+        if key in explicit or any(str(key).startswith(prefix) for prefix in prefixes)
+    ]
+
+
+def _capture_undo_state(label):
+    return {
+        'label': label,
+        'working_items': copy.deepcopy(st.session_state.get('working_items', [])),
+        '_selected_rows': copy.deepcopy(st.session_state.get('_selected_rows', set())),
+        '_show_confirm': st.session_state.get('_show_confirm', False),
+        '_show_quote_page': st.session_state.get('_show_quote_page', False),
+        '_quote_data': copy.deepcopy(st.session_state.get('_quote_data', {})),
+        '_quote_excel': st.session_state.get('_quote_excel'),
+        '_input_reset_seq': st.session_state.get('_input_reset_seq', 0),
+        '_bulk_df': copy.deepcopy(st.session_state.get('_bulk_df')) if '_bulk_df' in st.session_state else None,
+        '_last_excel': st.session_state.get('_last_excel'),
+        '_last_filename': st.session_state.get('_last_filename'),
+        'widget_values': {
+            key: copy.deepcopy(st.session_state.get(key))
+            for key in _undo_widget_keys()
+            if key in st.session_state
+        },
+    }
+
+
+def _push_undo_snapshot(label):
+    stack = st.session_state._undo_stack
+    stack.append(_capture_undo_state(label))
+    st.session_state._undo_stack = stack[-_UNDO_LIMIT:]
+
+
+def _restore_undo_snapshot():
+    if not st.session_state._undo_stack:
+        return False
+    snap = st.session_state._undo_stack.pop()
+    for key in (
+        'working_items', '_selected_rows', '_show_confirm', '_show_quote_page',
+        '_quote_data', '_quote_excel', '_input_reset_seq', '_last_excel',
+        '_last_filename',
+    ):
+        if snap.get(key) is None and key in ('_last_excel', '_last_filename'):
+            st.session_state.pop(key, None)
+        else:
+            st.session_state[key] = copy.deepcopy(snap.get(key))
+    if snap.get('_bulk_df') is None:
+        st.session_state.pop('_bulk_df', None)
+    else:
+        st.session_state['_bulk_df'] = copy.deepcopy(snap['_bulk_df'])
+    for key, value in snap.get('widget_values', {}).items():
+        try:
+            st.session_state[key] = copy.deepcopy(value)
+        except Exception:
+            pass
+    st.session_state._undo_msg = f"Undid: {snap.get('label', 'last change')}"
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +626,7 @@ def _render_quote_page():
     back_col, title_col = st.columns([1, 9])
     with back_col:
         if st.button('← Back', key='qp_back_btn'):
+            _push_undo_snapshot('leave quotation form')
             st.session_state._show_quote_page = False
             st.session_state._quote_excel = None
             st.rerun()
@@ -772,6 +917,7 @@ def _render_quote_page():
 
     with gen_c1:
         if st.button('📄  Generate Quotation', type='primary', key='qp_generate_btn'):
+            _push_undo_snapshot('generate quotation')
             st.session_state._quote_data = qd
             with st.spinner('Building quotation PDF…'):
                 pdf_bytes = build_quotation_pdf(
@@ -780,31 +926,12 @@ def _render_quote_page():
                     logo_path=_LOGO_PATH if _os.path.exists(_LOGO_PATH) else None,
                 )
             st.session_state._quote_excel = pdf_bytes
-            # Also save to history
-            n_ready   = sum(1 for i in items if i['status'] == STATUS_READY)
-            n_check   = sum(1 for i in items if i['status'] == STATUS_CHECK)
-            n_missing = sum(1 for i in items if i['status'] == STATUS_MISSING)
-            n_regret  = sum(1 for i in items if i['status'] == STATUS_REGRET)
-            customer_val  = qd.get('buyer_name_address', '').split('\n')[0] or ''
-            project_val   = qd.get('customer_enq_no', '')
-            st.session_state.run_history.append({
-                'timestamp':   _dt.datetime.now().strftime('%d %b %H:%M'),
-                'customer':    customer_val,
-                'project_ref': project_val,
-                'n_items':     len(items),
-                'n_ready':     n_ready,
-                'n_check':     n_check,
-                'n_missing':   n_missing,
-                'n_regret':    n_regret,
-                'items':       items,
-            })
-            if len(st.session_state.run_history) > 15:
-                st.session_state.run_history = st.session_state.run_history[-15:]
-            _save_history_to_redis()
+            _append_history(_make_history_entry(items, qd, quote_pdf=pdf_bytes))
             st.rerun()
 
     with gen_c2:
         if st.button('Cancel', key='qp_cancel_btn', type='secondary'):
+            _push_undo_snapshot('cancel quotation form')
             st.session_state._show_quote_page = False
             st.session_state._quote_excel = None
             st.rerun()
@@ -834,6 +961,7 @@ def _render_quote_page():
             )
         with dl_c2:
             if st.button('＋  Start New Enquiry', type='secondary', key='qp_new_btn'):
+                _push_undo_snapshot('start new enquiry')
                 st.session_state.working_items = []
                 st.session_state._selected_rows = set()
                 st.session_state.pop('_bulk_df', None)
@@ -876,6 +1004,20 @@ with st.sidebar:
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
 
     # ── Parse mode toggle ───────────────────────────────────────────────────
+    st.markdown('<div class="gq-sidebar-title">Undo</div>', unsafe_allow_html=True)
+    if st.button(
+        '↶ Undo',
+        key='gq_undo_btn',
+        type='secondary',
+        disabled=(len(st.session_state._undo_stack) == 0),
+        help='Shortcut: Ctrl+Z when focus is not inside a text field',
+    ):
+        if _restore_undo_snapshot():
+            st.rerun()
+    if st.session_state.get('_undo_msg'):
+        st.caption(st.session_state._undo_msg)
+
+    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
     st.markdown('<div class="gq-sidebar-title">Parse Mode</div>', unsafe_allow_html=True)
     _parse_choice = st.radio(
         'Parse Mode',
@@ -924,44 +1066,55 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
-    st.markdown('<div class="gq-sidebar-title">Enquiry History</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gq-sidebar-title">Quote History</div>', unsafe_allow_html=True)
 
     history = st.session_state.run_history
     if not history:
-        st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No enquiries committed yet.</p>',
+        st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No quotes saved yet.</p>',
                     unsafe_allow_html=True)
     else:
         for idx, run in enumerate(reversed(history)):
             run_idx = len(history) - 1 - idx
-            label = run['customer'] or run['project_ref'] or f'Enquiry {run_idx + 1}'
+            quote_no = run.get('quote_no') or ''
+            label = quote_no or run.get('customer') or run.get('project_ref') or f'Quote {run_idx + 1}'
             with st.expander(f'**{label}**', expanded=False):
                 n_regret_h = run.get('n_regret', 0)
                 st.markdown(
-                    f'<div class="gq-hist-meta">{run["timestamp"]}</div>'
+                    f'<div class="gq-hist-meta">{run.get("timestamp", "")}</div>'
+                    f'<div class="gq-hist-meta">{run.get("customer") or "No customer"}'
+                    f'{" | " + run.get("project_ref") if run.get("project_ref") else ""}</div>'
                     f'<div class="gq-hist-pills">'
-                    f'<span class="gq-pill gq-pill-ready">✅ {run["n_ready"]}</span>'
-                    f'<span class="gq-pill gq-pill-check">🟡 {run["n_check"]}</span>'
-                    f'<span class="gq-pill gq-pill-missing">🔴 {run["n_missing"]}</span>'
+                    f'<span class="gq-pill gq-pill-ready">✅ {run.get("n_ready", 0)}</span>'
+                    f'<span class="gq-pill gq-pill-check">🟡 {run.get("n_check", 0)}</span>'
+                    f'<span class="gq-pill gq-pill-missing">🔴 {run.get("n_missing", 0)}</span>'
                     + (f'<span class="gq-pill gq-pill-regret">⛔ {n_regret_h}</span>' if n_regret_h else '')
                     + '</div>',
                     unsafe_allow_html=True,
                 )
-                btn_col, del_col = st.columns(2)
+                btn_col, quote_col, del_col = st.columns(3)
                 if btn_col.button('Restore', key=f'restore_{run_idx}'):
-                    st.session_state.working_items = [dict(i) for i in run['items']]
-                    st.session_state._selected_rows = set()
-                    st.session_state.pop('_bulk_df', None)
-                    st.session_state.pop('_last_excel', None)
-                    st.session_state.filter_mode = 'All'
-                    st.session_state._show_confirm = False
+                    _restore_history_entry(run)
                     st.rerun()
+                if quote_col.button('Quote Form', key=f'quote_form_{run_idx}'):
+                    _restore_history_entry(run)
+                    st.session_state._show_quote_page = True
+                    st.rerun()
+                pdf_bytes = _history_pdf_bytes(run)
+                if pdf_bytes:
+                    st.download_button(
+                        'Download PDF',
+                        data=pdf_bytes,
+                        file_name=run.get('quote_pdf_name') or 'quotation.pdf',
+                        mime='application/pdf',
+                        key=f'hist_pdf_{run_idx}',
+                    )
                 if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
                     from core.extractor import _get_redis, _cache_key
                     r = _get_redis()
                     if r:
                         descs = {
                             item.get('raw_description', '')
-                            for item in run['items']
+                            for item in run.get('items', [])
                             if item.get('raw_description')
                         }
                         for desc in descs:
@@ -978,6 +1131,43 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Quote page — intercept main content if quote page is active
 # ---------------------------------------------------------------------------
+_has_unsaved_progress = bool(
+    st.session_state.get('working_items')
+    or st.session_state.get('_quote_data')
+    or st.session_state.get('_quote_excel')
+)
+st.html(f"""
+<script>
+(function() {{
+  window.gqHasUnsavedProgress = {str(_has_unsaved_progress).lower()};
+  window.onbeforeunload = function(event) {{
+    if (!window.gqHasUnsavedProgress) return undefined;
+    event.preventDefault();
+    event.returnValue = '';
+    return '';
+  }};
+  if (!window.gqUndoShortcutAttached) {{
+    window.gqUndoShortcutAttached = true;
+    document.addEventListener('keydown', function(event) {{
+      var key = (event.key || '').toLowerCase();
+      if (!(event.ctrlKey || event.metaKey) || key !== 'z' || event.shiftKey || event.altKey) return;
+      var el = document.activeElement;
+      var tag = el && el.tagName ? el.tagName.toLowerCase() : '';
+      var nativeUndo = tag === 'input' || tag === 'textarea' || (el && el.isContentEditable);
+      if (nativeUndo) return;
+      var buttons = Array.from(document.querySelectorAll('button'));
+      var undoBtn = buttons.find(function(btn) {{
+        return btn.innerText && btn.innerText.trim().indexOf('Undo') !== -1 && !btn.disabled;
+      }});
+      if (!undoBtn) return;
+      event.preventDefault();
+      undoBtn.click();
+    }}, true);
+  }}
+}})();
+</script>
+""", unsafe_allow_javascript=True)
+
 if st.session_state._show_quote_page:
     _render_quote_page()
     st.stop()
@@ -1076,6 +1266,7 @@ def _build_rows(items):
 
 
 def _delete_selected_items(items, display_indices):
+    _push_undo_snapshot('delete selected rows')
     to_delete = {
         display_indices[i]
         for i in st.session_state._selected_rows
@@ -1137,6 +1328,7 @@ def _reprocess_customer_descriptions(items, display_indices, edited_df, visible_
     if not raw_items:
         return 0
 
+    _push_undo_snapshot('reprocess text')
     reprocessed = extract_batch(raw_items)
     updated_full = list(items)
 
@@ -1275,6 +1467,7 @@ def _editor_fragment(items, display_indices):
 
     # ── Update Descriptions ──────────────────────────────────────────────────
     if act_c2.button('↻  Update Descriptions', type='secondary', key='update_btn'):
+        _push_undo_snapshot('update descriptions')
         updated_full = list(items)
 
         for i, row in edited_df.iterrows():
@@ -1367,6 +1560,7 @@ def _editor_fragment(items, display_indices):
     if act_c4.button(f'⛔  Regret ({sel_label})', type='secondary', key='regret_sel_btn',
                      disabled=(n_sel == 0),
                      help='Mark selected items as REGRET — GGPL cannot produce'):
+        _push_undo_snapshot('toggle regret')
         updated_full = list(items)
         for i in st.session_state._selected_rows:
             orig_idx = display_indices[i]
@@ -1663,6 +1857,7 @@ def _process_and_append(raw_items=None, source=None, source_type=None):
     status_text.empty()
     preview_ph.empty()
 
+    _push_undo_snapshot('process and add items')
     st.session_state.working_items = existing + processed
     st.session_state._selected_rows = set()
     st.session_state.pop('_bulk_df', None)
@@ -1805,6 +2000,7 @@ with tab_manual:
             }
             item = apply_rules(raw)
             item['ggpl_description'] = format_description(item)
+            _push_undo_snapshot('add manual item')
             st.session_state.working_items = existing + [item]
             st.session_state._show_confirm = False
             st.rerun()
@@ -1991,6 +2187,7 @@ if st.session_state.working_items:
     with wl_clear:
         st.markdown('<div style="height:0.9rem"></div>', unsafe_allow_html=True)
         if st.button('🗑 Clear', key='clear_list_btn', type='secondary', help='Remove all items from working list'):
+            _push_undo_snapshot('clear working list')
             st.session_state.working_items = []
             st.session_state._selected_rows = set()
             st.session_state.pop('_bulk_df', None)
@@ -2063,6 +2260,7 @@ if st.session_state.working_items:
         if sa2.button('Deselect All', key='desel_all_btn'):
             st.session_state._selected_rows = set()
         if sa3.button('＋ Add Row', key='add_row_btn'):
+            _push_undo_snapshot('add blank row')
             new_item = apply_rules({
                 'line_no': len(items) + 1,
                 'raw_description': '',
@@ -2103,6 +2301,7 @@ if st.session_state.working_items:
             bulk_standard = bc13.text_input('Standard',      placeholder='e.g. ASME B16.20',        key='bulk_standard')
 
             if st.button('Apply Bulk Edit', type='secondary', key='apply_bulk'):
+                _push_undo_snapshot('apply bulk edit')
                 df_bulk = st.session_state['_bulk_df'].copy() if '_bulk_df' in st.session_state \
                           else pd.DataFrame(_build_rows([items[i] for i in display_indices]))
                 df_bulk = df_bulk.drop(columns=[c for c in ('Select', 'Delete') if c in df_bulk.columns])
@@ -2172,6 +2371,7 @@ if st.session_state.working_items:
     gen_col, _ = st.columns([3, 7])
     with gen_col:
         if st.button('📋  Generate Quotation', type='primary', key='gen_enquiry_btn'):
+            _push_undo_snapshot('open quotation form')
             # Pre-populate buyer info from customer/project fields if not already set
             if not st.session_state._quote_data.get('buyer_name_address') and customer:
                 st.session_state._quote_data['buyer_name_address'] = customer
@@ -2211,6 +2411,7 @@ if st.session_state.get('_last_excel'):
         )
     with new_col:
         if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn'):
+            _push_undo_snapshot('start new enquiry')
             st.session_state.pop('_last_excel', None)
             st.session_state.pop('_last_filename', None)
             st.rerun()
