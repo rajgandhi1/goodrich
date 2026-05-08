@@ -402,8 +402,8 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
         f'--- DOCUMENT CONTENT END ---'
     )
     try:
-        response = openai_client.chat.completions.create(
-            model='gpt-4o',
+        stream = openai_client.chat.completions.create(
+            model='gpt-4o-mini',
             temperature=0,
             response_format={'type': 'json_object'},
             messages=[
@@ -412,7 +412,17 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
             ],
             timeout=120,
             max_tokens=8192,
+            stream=True,
         )
+        chunks_received = []
+        finish_reason = None
+        for event in stream:
+            delta = event.choices[0].delta
+            if delta.content:
+                chunks_received.append(delta.content)
+            if event.choices[0].finish_reason:
+                finish_reason = event.choices[0].finish_reason
+        response_text = ''.join(chunks_received)
     except UnicodeEncodeError:
         raise SmartParseError(
             'Your OpenAI API key contains an invisible non-ASCII character '
@@ -449,14 +459,13 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
             )
         raise SmartParseError(f'GPT-4o API call failed: {err}')
 
-    choice = response.choices[0]
-    if choice.finish_reason == 'length':
+    if finish_reason == 'length':
         raise SmartParseError(
             'GPT-4o output was cut off mid-response. '
             'This chunk is too large - reduce CHUNK_SIZE or split the file.'
         )
 
-    raw_content = choice.message.content or '{}'
+    raw_content = response_text or '{}'
     try:
         parsed = json.loads(raw_content)
     except json.JSONDecodeError as e:
