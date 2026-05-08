@@ -8,6 +8,13 @@ import base64
 import copy
 from pathlib import Path
 
+# Load .env before anything else so OPENAI_API_KEY is available
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass
+
 from core.parser import parse_email_text, parse_excel_file
 from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING, STATUS_REGRET
 from core.formatter import format_description
