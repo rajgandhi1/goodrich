@@ -499,6 +499,32 @@ def _size_nps_value_from_item(item: dict) -> float | None:
     return None
 
 
+_MOC_IR_RE = re.compile(r'(\bSS\d{3}L?\b|\bCS\b|\bLTCS\b|\bINCONEL\s*\d*\b|\bMONEL\b|\bHASTELLOY\s*[A-Z0-9]*\b)\s+INNER\s+RING', re.IGNORECASE)
+_MOC_OR_RE = re.compile(r'(\bSS\d{3}L?\b|\bCS\b|\bLTCS\b|\bINCONEL\s*\d*\b|\bMONEL\b|\bHASTELLOY\s*[A-Z0-9]*\b)\s+OUTER\s+RING', re.IGNORECASE)
+_MOC_IR_ABBR_RE = re.compile(r'\+\s*(\bSS\d{3}L?\b|\bCS\b|\bLTCS\b)\s+IR\b', re.IGNORECASE)
+_MOC_OR_ABBR_RE = re.compile(r'&\s*(\bSS\d{3}L?\b|\bCS\b|\bLTCS\b)\s+OR\b', re.IGNORECASE)
+
+
+def _recover_rings_from_moc(moc_str: str) -> tuple[str | None, str | None]:
+    """Try to extract inner_ring and outer_ring from a GPT-4o-generated moc string."""
+    ir = or_ = None
+    m = _MOC_IR_RE.search(moc_str)
+    if m:
+        ir = m.group(1).upper()
+    else:
+        m = _MOC_IR_ABBR_RE.search(moc_str)
+        if m:
+            ir = m.group(1).upper()
+    m = _MOC_OR_RE.search(moc_str)
+    if m:
+        or_ = m.group(1).upper()
+    else:
+        m = _MOC_OR_ABBR_RE.search(moc_str)
+        if m:
+            or_ = m.group(1).upper()
+    return ir, or_
+
+
 def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_ring: str | None) -> str:
     # If filler has a parenthetical qualifier (e.g. "GRAPHITE (98% PURE GRAPHITE)"),
     # place the FILLER keyword before the parenthetical for correct GGPL format.
@@ -616,6 +642,15 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
     outer_ring = _norm_ring(item.get('sw_outer_ring'))
     inner_ring = _norm_ring(item.get('sw_inner_ring'))
 
+    # If GPT-4o set moc directly but didn't fill the dedicated ring fields,
+    # try to recover inner/outer ring from the moc string before we rebuild it.
+    if (not inner_ring or not outer_ring) and item.get('moc'):
+        rec_ir, rec_or = _recover_rings_from_moc(item['moc'])
+        if not inner_ring and rec_ir:
+            inner_ring = rec_ir
+        if not outer_ring and rec_or:
+            outer_ring = rec_or
+
     if not filler:
         filler = 'GRAPHITE'
         if inner_ring and outer_ring:
@@ -677,10 +712,11 @@ def _apply_sw_rules(item: dict, flags: list, applied_defaults: list) -> None:
             item['sw_winding_material'] = winding_mat
             applied_defaults.append(f'winding material inferred from ring material: {winding_mat}')
 
-    # Build MOC string from component fields
-    if not item.get('moc') and winding_mat:
+    # Always rebuild MOC from structured component fields to ensure consistent
+    # GGPL format — never use whatever string GPT-4o placed in the moc field
+    if winding_mat:
         item['moc'] = _build_sw_moc(winding_mat, filler, inner_ring, outer_ring)
-    elif not item.get('moc') and not grade_flag_fired:
+    elif not grade_flag_fired:
         flags.append('Spiral wound: winding material not identified — verify SS304/SS316/etc.')
 
     # Default thickness to 4.5mm

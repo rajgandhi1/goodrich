@@ -114,9 +114,21 @@ size & size_type:
 - DN: size="DN 100", size_type="DN"
 - OD/ID dimensions: od_mm=372.0, id_mm=315.0, size_type="OD_ID", size=null
 - Mixed fractions: "1 1/2" or "1.5" → size="1-1/2\"", size_type="NPS"
+- Number-first DN: "20DN"→size="DN 20", "100DN"→size="DN 100"
+
+GARBLED / CONCATENATED TEXT — Input may have no spaces between columns. You MUST parse aggressively:
+- "IR-SS3161SS316" → inner ring=SS316, size=1", winding=SS316  (the lone digit between two material codes is the NPS inch size)
+- "IR-SS31616SS316" → inner ring=SS316, size=16", winding=SS316
+- "IR-SS3163SS316" → size=3"
+- Pattern: IR-{material}{size_digit(s)}{winding_material} — extract the digit(s) between the two material codes as the NPS size
+- Standard pipe sizes: 1/2, 3/4, 1, 1-1/2, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24
+- "FILLERNACE" = "FILLER" + "NACE" → sw_filler from FILLER portion, special="NACE"
+- "4.5150#" = thickness 4.5mm + rating 150#
+- When a batch of items shows a clear size series (1,2,3,4,6,8 or 50,80,100,150...) assign sizes in order
 
 rating: "Class 150"→"150#", "CL300"→"300#", "PN10"→"PN 10", "PN-16"→"PN 16".
 Valid ASME classes: 150, 300, 600, 900, 1500, 2500.
+Also: bare "150#" run together with other text e.g. "4.5150#ASME" → rating=150#, thickness=4.5.
 
 gasket_type keywords:
 - SPIRAL_WOUND: "spiral wound", "SPW", "SW gasket", winding/inner ring/outer ring
@@ -473,6 +485,8 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str) -> list[dic
         f'--- DOCUMENT CONTENT START ---\n'
         f'{document_text}\n'
         f'--- DOCUMENT CONTENT END ---\n\n'
+        f'Note: text may have columns concatenated without spaces (e.g. "IR-SS3161SS316" means inner ring SS316, size 1", winding SS316). '
+        f'Use your best judgement to parse each field, especially size.\n\n'
         f'Extract all gasket line items and return {{"items": [...]}}. '
         f'Include every schema field in each item.'
     )
