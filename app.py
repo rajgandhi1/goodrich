@@ -534,7 +534,6 @@ def _append_history(entry):
 
 
 def _restore_history_entry(run):
-    _push_undo_snapshot('restore quote history')
     st.session_state.working_items = [dict(i) for i in run.get('items', [])]
     st.session_state._quote_data = dict(run.get('quote_data') or {})
     st.session_state._quote_excel = None
@@ -633,7 +632,6 @@ def _render_quote_page():
     back_col, title_col = st.columns([1, 9])
     with back_col:
         if st.button('← Back', key='qp_back_btn'):
-            _push_undo_snapshot('leave quotation form')
             st.session_state._show_quote_page = False
             st.session_state._quote_excel = None
             st.rerun()
@@ -924,7 +922,6 @@ def _render_quote_page():
 
     with gen_c1:
         if st.button('📄  Generate Quotation', type='primary', key='qp_generate_btn'):
-            _push_undo_snapshot('generate quotation')
             st.session_state._quote_data = qd
             with st.spinner('Building quotation PDF…'):
                 pdf_bytes = build_quotation_pdf(
@@ -938,7 +935,6 @@ def _render_quote_page():
 
     with gen_c2:
         if st.button('Cancel', key='qp_cancel_btn', type='secondary'):
-            _push_undo_snapshot('cancel quotation form')
             st.session_state._show_quote_page = False
             st.session_state._quote_excel = None
             st.rerun()
@@ -968,7 +964,6 @@ def _render_quote_page():
             )
         with dl_c2:
             if st.button('＋  Start New Enquiry', type='secondary', key='qp_new_btn'):
-                _push_undo_snapshot('start new enquiry')
                 st.session_state.working_items = []
                 st.session_state._selected_rows = set()
                 st.session_state.pop('_bulk_df', None)
@@ -1231,6 +1226,7 @@ def _build_rows(items):
             'Customer Description': item.get('raw_description', ''),
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
             'Size':                 '' if item.get('size_type') == 'OD_ID' else (item.get('size') or ''),
+            'Size (in)':            '' if item.get('size_type') == 'OD_ID' else (item.get('size_norm') or ''),
             'OD (mm)':              item.get('od_mm') if item.get('od_mm') is not None else None,
             'ID (mm)':              item.get('id_mm') if item.get('id_mm') is not None else None,
             'Rating':               item.get('rating') or '',
@@ -1386,7 +1382,9 @@ def _editor_fragment(items, display_indices):
             ),
             'Type':                 st.column_config.SelectboxColumn('Type', options=TYPE_OPTIONS, width='small'),
             'Size':                 st.column_config.TextColumn('Size', width='small',
-                                        help='Nominal size only. Use OD/ID columns for custom dimensions.'),
+                                        help='Size as written by customer.'),
+            'Size (in)':            st.column_config.TextColumn('Size (in)', width='small',
+                                        help='Converted to NPS inches (e.g. DN 25 → 1\", 100 NB → 4\").'),
             'OD (mm)':              st.column_config.NumberColumn('OD (mm)', width='small', min_value=0),
             'ID (mm)':              st.column_config.NumberColumn('ID (mm)', width='small', min_value=0),
             'Rating':               st.column_config.TextColumn('Rating', width='small'),
@@ -2397,7 +2395,6 @@ if st.session_state.working_items:
     gen_col, _ = st.columns([3, 7])
     with gen_col:
         if st.button('📋  Generate Quotation', type='primary', key='gen_enquiry_btn'):
-            _push_undo_snapshot('open quotation form')
             # Pre-populate buyer info from customer/project fields if not already set
             if not st.session_state._quote_data.get('buyer_name_address') and customer:
                 st.session_state._quote_data['buyer_name_address'] = customer
@@ -2437,7 +2434,6 @@ if st.session_state.get('_last_excel'):
         )
     with new_col:
         if st.button('＋  Start New Enquiry', type='secondary', key='new_enquiry_btn'):
-            _push_undo_snapshot('start new enquiry')
             st.session_state.pop('_last_excel', None)
             st.session_state.pop('_last_filename', None)
             st.rerun()
