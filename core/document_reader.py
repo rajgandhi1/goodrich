@@ -51,166 +51,36 @@ _ITEM_TEMPLATE: dict = {
 # GPT-4o system prompt
 # ---------------------------------------------------------------------------
 
-_SMART_PARSE_SYSTEM_PROMPT = r"""You are a gasket procurement document reader for Goodrich Gasket Pvt. Ltd.
+_SMART_PARSE_SYSTEM_PROMPT = """You are a gasket procurement reader. Extract every gasket line item from the customer enquiry and return ONLY valid JSON: {"items": [...]}. No markdown, no explanation.
 
-Read the customer enquiry document (email, Excel data, or PDF text) and extract EVERY gasket line item.
-Return ONLY a JSON object: {"items": [...]}. No markdown, no explanation.
+Each item must have these fields (use null for anything not present):
 
-## OUTPUT SCHEMA (one object per gasket line item)
-{
-  "line_no": <integer|null>,
-  "quantity": <number|null>,
-  "uom": <"NOS"|"M">,
-  "raw_description": "<exact original text of this gasket spec, verbatim>",
-  "size": <"6\""|"100 NB"|"DN 100"|null>,
-  "size_type": <"NPS"|"NB"|"DN"|"OD_ID"|"UNKNOWN">,
-  "od_mm": <number|null>,
-  "id_mm": <number|null>,
-  "rating": <"150#"|"300#"|"600#"|"900#"|"1500#"|"2500#"|"PN 6"|"PN 10"|"PN 16"|"PN 25"|"PN 40"|"PN 63"|null>,
-  "gasket_type": <"SOFT_CUT"|"SPIRAL_WOUND"|"RTJ"|"KAMM"|"DJI"|"ISK"|"ISK_RTJ">,
-  "moc": <material string|null>,
-  "face_type": <"RF"|"FF"|null>,
-  "thickness_mm": <number|null>,
-  "standard": <"ASME B16.20"|"ASME B16.21"|"EN 1514-1"|"EN 1514-2"|"API 6A"|null>,
-  "special": <notes or special requirements|null>,
-  "confidence": <"HIGH"|"MEDIUM"|"LOW">,
-  "sw_winding_material": <"SS316"|"SS304"|"SS316L"|"INCONEL 625"|null>,
-  "sw_filler": <"GRAPHITE"|"PTFE"|"FLEXIBLE GRAPHITE"|null>,
-  "sw_inner_ring": <"SS316"|"SS304"|"CS"|null>,
-  "sw_outer_ring": <"CS"|"SS304"|"SS316"|null>,
-  "rtj_groove_type": <"OCT"|"OVAL"|null>,
-  "rtj_hardness_bhn": <number|null>,
-  "ring_no": <"R-24"|"BX-155"|"RX-53"|null>,
-  "kamm_core_material": <"SS316"|"CS"|"ALLOY 625"|null>,
-  "kamm_surface_material": <"GRAPHITE"|"PTFE"|"MICA"|null>,
-  "kamm_covering_layer": <"GRAPHITE"|"PTFE"|"MICA"|"NON ASBESTOS"|null>,
-  "kamm_rib": <"WITH RIB"|"WITHOUT RIB"|null>,
-  "kamm_core_thk": <number|null>,
-  "kamm_integral_outer_ring": <"INTEGRAL"|null>,
-  "dji_filler": <"GRAPHITE"|"ASBESTOS FREE"|null>,
-  "dji_rib": <"WITH RIB"|"WITHOUT RIB"|null>,
-  "dji_face_type": <"RF"|"FF"|null>,
-  "dji_id_first": <true|false>,
-  "isk_style": <"STYLE-CS"|"STYLE-N"|"FCS"|"TYPE-E"|"TYPE-F"|"TYPE-D"|null>,
-  "isk_type": <"TYPE-E"|"TYPE-F"|"TYPE-D"|null>,
-  "isk_fire_safety": <"FIRE SAFE"|"NON FIRE SAFE"|null>,
-  "isk_gasket_material": <"GRE G10"|"GRE G11"|"PTFE"|"PEEK"|"Mica"|null>,
-  "isk_core_material": <"SS316"|"CS"|"DUPLEX"|"UNS S32760"|"INC 625"|null>,
-  "isk_sleeve_material": <"GRE G10"|"PTFE"|"Mylar"|null>,
-  "isk_washer_material": <"Zinc Plated CS"|"SS316"|"MS"|null>,
-  "isk_primary_seal": <"Viton O-ring"|"PTFE Spring Energised"|"Graphite"|"EPDM O-ring"|null>,
-  "isk_secondary_seal": <"Mica"|"Graphite"|null>,
-  "isk_insulating_washer": <"G10"|"G11"|"Mica"|"Mylar"|null>,
-  "is_gasket": <true|false>
-}
+line_no, quantity, uom ("NOS" or "M" for meters/sheet), raw_description (verbatim from source),
+size (e.g. "6\\"", "100 NB", "DN 100"), size_type ("NPS"/"NB"/"DN"/"OD_ID"/"UNKNOWN"),
+od_mm, id_mm, rating (e.g. "150#", "300#", "PN 10"), thickness_mm,
+gasket_type ("SOFT_CUT"/"SPIRAL_WOUND"/"RTJ"/"KAMM"/"DJI"/"ISK"/"ISK_RTJ"),
+moc (gasket material — null for SPIRAL_WOUND/KAMM/DJI, use sub-fields below instead),
+face_type ("RF"/"FF" — only for SOFT_CUT and ISK, null for others),
+standard ("ASME B16.20"/"ASME B16.21"/"EN 1514-1"/"EN 1514-2"/"API 6A"),
+special (any notes or flags), confidence ("HIGH"/"MEDIUM"/"LOW"),
+sw_winding_material (spiral wound winding metal, e.g. "SS316"),
+sw_filler (spiral wound filler, e.g. "GRAPHITE", "PTFE"),
+sw_inner_ring (spiral wound inner/inside ring material, e.g. "SS316"),
+sw_outer_ring (spiral wound outer/outside/centering ring material, e.g. "CS"),
+rtj_groove_type ("OCT"/"OVAL"), rtj_hardness_bhn, ring_no,
+kamm_core_material, kamm_surface_material, kamm_covering_layer, kamm_rib ("WITH RIB"/"WITHOUT RIB"), kamm_core_thk, kamm_integral_outer_ring,
+dji_filler, dji_rib, dji_face_type, dji_id_first (true/false),
+isk_style, isk_type, isk_fire_safety, isk_gasket_material, isk_core_material, isk_sleeve_material, isk_washer_material, isk_primary_seal, isk_secondary_seal, isk_insulating_washer,
+is_gasket (true for gaskets/gasket kits; false for bolts, flanges, fittings, couplings, etc.)
 
-## FIELD RULES
-
-raw_description: Copy verbatim from the document. For structured Excel rows, join all relevant cells.
-
-size & size_type:
-- NPS inch: size="6\"", size_type="NPS"
-- NB metric nominal bore: size="100 NB", size_type="NB"
-- DN: size="DN 100", size_type="DN"
-- OD/ID dimensions: od_mm=372.0, id_mm=315.0, size_type="OD_ID", size=null
-- Mixed fractions: "1 1/2" or "1.5" → size="1-1/2\"", size_type="NPS"
-- Number-first DN: "20DN"→size="DN 20", "100DN"→size="DN 100"
-
-GARBLED / CONCATENATED TEXT — Input may have no spaces between columns. You MUST parse aggressively:
-- "IR-SS3161SS316" → inner ring=SS316, size=1", winding=SS316  (the lone digit between two material codes is the NPS inch size)
-- "IR-SS31616SS316" → inner ring=SS316, size=16", winding=SS316
-- "IR-SS3163SS316" → size=3"
-- Pattern: IR-{material}{size_digit(s)}{winding_material} — extract the digit(s) between the two material codes as the NPS size
-- Standard pipe sizes: 1/2, 3/4, 1, 1-1/2, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24
-- "FILLERNACE" = "FILLER" + "NACE" → sw_filler from FILLER portion, special="NACE"
-- "4.5150#" = thickness 4.5mm + rating 150#
-- When a batch of items shows a clear size series (1,2,3,4,6,8 or 50,80,100,150...) assign sizes in order
-
-rating: "Class 150"→"150#", "CL300"→"300#", "PN10"→"PN 10", "PN-16"→"PN 16".
-Valid ASME classes: 150, 300, 600, 900, 1500, 2500.
-Also: bare "150#" run together with other text e.g. "4.5150#ASME" → rating=150#, thickness=4.5.
-
-gasket_type keywords:
-- SPIRAL_WOUND: "spiral wound", "SPW", "SW gasket", winding/inner ring/outer ring
-- RTJ: "RTJ", "ring type joint", "ring joint", "R-XX", "OVAL ring", "OCTAGONAL"
-- KAMM: "kammprofile", "cam profile", "KAMM", grooved metal
-- DJI: "double jacket", "double jacketed", "DJI"
-- ISK: "insulating gasket", "insulation kit", "ISK", "flange isolation"
-- ISK_RTJ: ISK + RTJ in same item
-- SOFT_CUT: everything else (rubber, PTFE, CNAF, neoprene, EPDM, graphite sheet, etc.)
-
-moc rules:
-- SOFT_CUT: material of gasket (CNAF, EPDM, PTFE, NEOPRENE, GRAPHITE, VITON, etc.)
-- RTJ: ring material (SOFT IRON→"SOFTIRON", SS316, INCONEL 625)
-- SPIRAL_WOUND/KAMM/DJI: moc must be null; use type-specific sub-fields instead
-- RUBBER without specific type: moc=null, special="MOC ambiguous — confirm rubber type"
-
-Material normalization: 304SS→SS304, 316SS→SS316, CARBON STEEL/MS→CS, SOFT IRON→SOFTIRON
-
-face_type: RF/FF for SOFT_CUT and ISK only. Null for SW, RTJ, KAMM, DJI.
-
-uom: "M" if unit is meters (sheet supply). "NOS" for pieces/sets/units.
-
-confidence:
-- HIGH: gasket_type specific AND size AND rating AND (moc OR material fields) all found
-- MEDIUM: one critical field missing
-- LOW: two or more missing, or gasket_type defaulted to SOFT_CUT without clear type keywords
-
-## is_gasket FIELD — CRITICAL
-Set is_gasket=true ONLY for items that are gaskets or gasket kits. Set is_gasket=false for everything else.
-
-Gasket products (is_gasket=true):
-- Flat ring gaskets, sheet gaskets (CNAF, PTFE, rubber, neoprene, graphite, EPDM, viton, etc.)
-- Spiral wound gaskets
-- Ring type joint (RTJ) rings / ring joint gaskets
-- Kammprofile / cam profile gaskets
-- Double jacket / double jacketed gaskets
-- **Flange insulation kits / insulating gasket kits (ISK / IGK)** — ALWAYS is_gasket=true
-  even if the document title mentions other products alongside them.
-  Keywords: "insulation kit", "insulating gasket", "ISK", "IGK", "flange isolation kit",
-  "TYPE E", "TYPE F", "TYPE D", "STYLE-CS", "STYLE-N" — all are gasket kits.
-
-NOT gaskets (is_gasket=false):
-- Cam & groove couplings, hose couplings, hose adapters, cam lock adapters, plug Type-A/B/C
-- Bolts, studs, nuts, fasteners, stud bolts
-- Pipe flanges, pipe fittings, valves, nozzles
-- Gasket cements, coatings, tapes, sealants
-- Mechanical seals, gland packing, lip seals, O-rings (standalone)
-- Administrative rows: page headers, column headers, totals, project descriptions, contact info
-
-IMPORTANT: A document may contain BOTH gaskets and non-gaskets. Classify each line item
-independently based on what THAT item is — not based on the document title.
-
-## CRITICAL RULES
-1. One object per physical line item — include ALL items (gaskets and non-gaskets), but set is_gasket correctly.
-2. raw_description must be verbatim from source — never paraphrase or clean it.
-3. null for all fields not applicable to this gasket type.
-4. SPIRAL_WOUND: moc must be null; winding metal goes in sw_winding_material.
-5. Do NOT invent values not present in the source text.
-6. Skip only administrative rows: page headers, column headers, totals rows, blank rows.
-7. If quantity or line_no is absent, use null — do not guess.
-
-## EXAMPLES
-
-Example 1 — SOFT_CUT ambiguous rubber:
-Input row: "1  Gasket - Rubber - 6'' PN10  27  m"
-{"line_no":1,"quantity":27,"uom":"M","raw_description":"Gasket - Rubber - 6'' PN10","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"PN 10","gasket_type":"SOFT_CUT","moc":null,"face_type":null,"thickness_mm":null,"standard":null,"special":"MOC ambiguous — confirm rubber type","confidence":"LOW","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
-
-Example 1b — ISK (flange insulation kit — always is_gasket=true even in a mixed document):
-Input row: "1  KIT:GASKET,SLEEVES,WASHER INSULATING  SIZE: 2-1/2 IN  ASME CL 150  TYPE E  3  KIT"
-{"line_no":1,"quantity":3,"uom":"NOS","raw_description":"KIT:GASKET,SLEEVES,WASHER INSULATING  SIZE: 2-1/2 IN  ASME CL 150  TYPE E","size":"2-1/2\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"150#","gasket_type":"ISK","moc":null,"face_type":"RF","thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":"TYPE-E","isk_type":"TYPE-E","isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":"Mylar","isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
-
-Example 1c — Non-gasket item in the same document (is_gasket=false):
-Input row: "2  ADAPTER FOR CAM & GROOVE FITTINGS TYPE-A  1 INCH NPT ALUMINUM  216  EACH"
-{"line_no":2,"quantity":216,"uom":"NOS","raw_description":"ADAPTER FOR CAM & GROOVE FITTINGS TYPE-A  1 INCH NPT ALUMINUM","size":null,"size_type":"UNKNOWN","od_mm":null,"id_mm":null,"rating":null,"gasket_type":"SOFT_CUT","moc":null,"face_type":null,"thickness_mm":null,"standard":null,"special":null,"confidence":"LOW","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":false}
-
-Example 2 — SPIRAL_WOUND:
-Input row: "6\" Spiral Wound SS316 Winding GRAPHITE Filler SS316 IR CS OR 900# ASME B16.20"
-{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"6\" Spiral Wound SS316 Winding GRAPHITE Filler SS316 IR CS OR 900# ASME B16.20","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"900#","gasket_type":"SPIRAL_WOUND","moc":null,"face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":"SS316","sw_filler":"GRAPHITE","sw_inner_ring":"SS316","sw_outer_ring":"CS","rtj_groove_type":null,"rtj_hardness_bhn":null,"ring_no":null,"kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
-
-Example 3 — RTJ:
-Input row: "RING JOINT GASKET 6in R46 OCTAGONAL 1500lb ASME B16.20 INCONEL 625"
-{"line_no":null,"quantity":null,"uom":"NOS","raw_description":"RING JOINT GASKET 6in R46 OCTAGONAL 1500lb ASME B16.20 INCONEL 625","size":"6\"","size_type":"NPS","od_mm":null,"id_mm":null,"rating":"1500#","gasket_type":"RTJ","moc":"INCONEL 625","face_type":null,"thickness_mm":null,"standard":"ASME B16.20","special":null,"confidence":"HIGH","sw_winding_material":null,"sw_filler":null,"sw_inner_ring":null,"sw_outer_ring":null,"rtj_groove_type":"OCT","rtj_hardness_bhn":null,"ring_no":"R-46","kamm_core_material":null,"kamm_surface_material":null,"kamm_covering_layer":null,"kamm_rib":null,"kamm_core_thk":null,"kamm_integral_outer_ring":null,"dji_filler":null,"dji_rib":null,"dji_face_type":null,"dji_id_first":false,"isk_style":null,"isk_type":null,"isk_fire_safety":null,"isk_gasket_material":null,"isk_core_material":null,"isk_sleeve_material":null,"isk_washer_material":null,"isk_primary_seal":null,"isk_secondary_seal":null,"isk_insulating_washer":null,"is_gasket":true}
+Critical rules:
+1. SPIRAL_WOUND: moc must be null — put winding metal in sw_winding_material, inner ring in sw_inner_ring, outer ring in sw_outer_ring.
+2. If rubber type is unspecified, set moc=null and special="MOC ambiguous — confirm rubber type".
+3. Normalize: "316SS"→"SS316", "CL300"→"300#", "Class 150"→"150#", "carbon steel"→"CS".
+4. For garbled concatenated text like "IR-SS3161SS316": inner ring=SS316, size=1", winding=SS316.
+5. Set is_gasket=false for non-gasket items but still include them.
+6. raw_description must be verbatim — never paraphrase.
+7. If a short abbreviated line (e.g. "GASKET,RTJ,BX-162") is immediately followed by a longer description of the same item (same ring number or same gasket), merge them into ONE item — use the longer description as raw_description and extract fields from both.
 """
 
 
