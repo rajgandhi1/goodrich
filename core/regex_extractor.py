@@ -731,7 +731,7 @@ def _extract_thickness(desc: str) -> float | None:
 # Face type, standard, special
 # ---------------------------------------------------------------------------
 
-_FACE_RE = re.compile(r'\b(RF|FF)\b|\bRAISED\s+FACE\b|\bFULL\s+FACE\b', re.IGNORECASE)
+_FACE_RE = re.compile(r'\b(RF|FF)\b|\bRAISED[\s\-]+FACE\b|\bFULL[\s\-]+FACE\b', re.IGNORECASE)
 _SERIES_RE = re.compile(r'\bSERIES[\s\-]?([AB])\b', re.IGNORECASE)
 _STANDARD_RE = re.compile(
     r'ASME\s+B16\.\d+(?:\s*\(?\s*SERIES[\s\-]?[AB]\s*\)?)?|'

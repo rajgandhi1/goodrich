@@ -544,7 +544,7 @@ def _build_sw_moc(winding_mat: str, filler: str, inner_ring: str | None, outer_r
 
 
 _FACE_MATERIAL_RE = re.compile(
-    r'\b(?:RF|FF|RAISED\s+FACE|FULL\s+FACE|REAR\s+FACE)\b',
+    r'\b(?:RF|FF|RAISED[\s\-]+FACE|FULL[\s\-]+FACE|REAR[\s\-]+FACE)\b',
     re.IGNORECASE,
 )
 
@@ -555,7 +555,7 @@ def _face_from_text(value: str | None) -> str | None:
     m = _FACE_MATERIAL_RE.search(str(value))
     if not m:
         return None
-    token = m.group(0).upper()
+    token = re.sub(r'[\s\-]+', ' ', m.group(0).upper())
     if token in ('FF', 'FULL FACE'):
         return 'FF'
     return 'RF'
