@@ -1515,14 +1515,32 @@ def _process_and_append(source, source_type: str):
     status_text.text('Sending document to GPT-4o...')
     progress_bar.progress(10)
 
+    # Accumulates processed items streamed in chunk by chunk for live preview
+    _streamed: list[dict] = []
+    _line_offset_ref = [
+        max((i.get('line_no') or 0 for i in st.session_state.working_items), default=0)
+    ]
+
+    def _on_chunk_items(chunk_items):
+        from core.llm_validator import validate_with_regex as _vwr
+        chunk_items = _vwr(chunk_items)
+        for item in chunk_items:
+            item = apply_rules(item)
+            item['ggpl_description'] = format_description(item)
+            _line_offset_ref[0] += 1
+            item['line_no'] = _line_offset_ref[0]
+            _streamed.append(item)
+        status_text.text(f'GPT-4o processing... {len(_streamed)} item(s) extracted so far')
+        preview_ph.dataframe(_build_preview_df(_streamed), use_container_width=True, hide_index=True)
+
     def _on_progress(done, total):
         progress_bar.progress(10 + int(done / total * 75))
-        if total > 1:
-            status_text.text(f'GPT-4o processing... ({done}/{total} chunks done)')
 
     try:
         extracted_items, n_skipped = read_document_smart(
-            source, source_type, _client, progress_cb=_on_progress
+            source, source_type, _client,
+            progress_cb=_on_progress,
+            on_chunk_items=_on_chunk_items,
         )
     except SmartParseError as e:
         err_msg = str(e)

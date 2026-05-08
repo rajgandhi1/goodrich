@@ -411,7 +411,7 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
                 {'role': 'user', 'content': user_msg},
             ],
             timeout=120,
-            max_tokens=4096,
+            max_tokens=8192,
         )
     except UnicodeEncodeError:
         raise SmartParseError(
@@ -472,14 +472,19 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
     raise SmartParseError(f'GPT-4o returned unexpected structure: {type(parsed).__name__}')
 
 
-def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb=None) -> tuple[list[dict], int]:
+def _call_gpt4o(
+    openai_client,
+    document_text: str,
+    source_type: str,
+    progress_cb=None,
+    on_chunk_items=None,
+) -> tuple[list[dict], int]:
     """
     GPT-4o call with automatic chunking for large documents.
-    Splits into chunks of CHUNK_SIZE rows, calls in parallel, merges results.
-    Returns (items, skipped_count).
+    Processes chunks sequentially so results stream in as each completes.
+    on_chunk_items(items) is called with normalized items after each chunk.
+    Returns (all_items, skipped_count).
     """
-    import concurrent.futures
-
     # Check Redis cache first (keyed on full document)
     r = _get_redis_smart()
     cache_key = _smart_cache_key(document_text)
@@ -488,7 +493,7 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb
             hit = r.get(cache_key)
             if hit:
                 cached = json.loads(hit)
-                logger.info(f'Smart Parse: cache hit ({len(cached)} items)')
+                print(f'[Smart Parse] cache hit ({len(cached)} items)', flush=True)
                 return cached, 0
         except Exception:
             pass
@@ -497,28 +502,23 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb
     print(f'[Smart Parse] {len(chunks)} chunk(s) for {source_type}, '
           f'{len(document_text):,} chars', flush=True)
 
-    # Parallel API calls for each chunk
     all_raw: list[dict] = []
-    if len(chunks) == 1:
-        print(f'[Smart Parse] calling GPT-4o (1 chunk)...', flush=True)
-        all_raw = _gpt4o_single_chunk(openai_client, chunks[0], source_type)
-        print(f'[Smart Parse] GPT-4o returned {len(all_raw)} raw item(s)', flush=True)
+    for i, chunk in enumerate(chunks, 1):
+        print(f'[Smart Parse] calling GPT-4o chunk {i}/{len(chunks)}...', flush=True)
+        chunk_raw = _gpt4o_single_chunk(openai_client, chunk, source_type)
+        print(f'[Smart Parse] chunk {i}/{len(chunks)} done — {len(chunk_raw)} raw item(s)', flush=True)
+        all_raw.extend(chunk_raw)
+
+        # Normalize this chunk's items and surface them immediately
+        if on_chunk_items and chunk_raw:
+            try:
+                chunk_items, _ = _validate_and_normalize_output(chunk_raw)
+                on_chunk_items(chunk_items)
+            except SmartParseError:
+                pass  # empty / bad chunk — skip streaming for this one
+
         if progress_cb:
-            progress_cb(1, 1)
-    else:
-        done_count = 0
-        print(f'[Smart Parse] calling GPT-4o ({len(chunks)} chunks in parallel)...', flush=True)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as executor:
-            futures = [
-                executor.submit(_gpt4o_single_chunk, openai_client, chunk, source_type)
-                for chunk in chunks
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                all_raw.extend(future.result())
-                done_count += 1
-                print(f'[Smart Parse] chunk {done_count}/{len(chunks)} done', flush=True)
-                if progress_cb:
-                    progress_cb(done_count, len(chunks))
+            progress_cb(i, len(chunks))
 
     result, skipped = _validate_and_normalize_output(all_raw)
 
@@ -528,7 +528,7 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb
         except Exception:
             pass
 
-    logger.info(f'Smart Parse: extracted {len(result)} item(s) from {source_type} ({skipped} non-gasket skipped)')
+    print(f'[Smart Parse] done — {len(result)} item(s), {skipped} non-gasket skipped', flush=True)
     return result, skipped
 
 
@@ -541,6 +541,7 @@ def read_document_smart(
     source_type: str,
     openai_client,
     progress_cb=None,
+    on_chunk_items=None,
 ) -> tuple[list[dict], int]:
     """
     Main Smart Parse entry point.
@@ -575,7 +576,11 @@ def read_document_smart(
         if progress_cb:
             progress_cb(3 + int(done / total * 6), 10)
 
-    items, skipped_non_gasket = _call_gpt4o(openai_client, document_text, source_type, progress_cb=_chunk_progress)
+    items, skipped_non_gasket = _call_gpt4o(
+        openai_client, document_text, source_type,
+        progress_cb=_chunk_progress,
+        on_chunk_items=on_chunk_items,
+    )
 
     if progress_cb:
         progress_cb(9, 10)
