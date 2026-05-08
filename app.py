@@ -1517,6 +1517,8 @@ def _process_and_append(source, source_type: str):
 
     def _on_progress(done, total):
         progress_bar.progress(10 + int(done / total * 75))
+        if total > 1:
+            status_text.text(f'GPT-4o processing... ({done}/{total} chunks done)')
 
     try:
         extracted_items, n_skipped = read_document_smart(

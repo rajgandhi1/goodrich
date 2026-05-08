@@ -410,8 +410,8 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
                 {'role': 'system', 'content': _SMART_PARSE_SYSTEM_PROMPT},
                 {'role': 'user', 'content': user_msg},
             ],
-            timeout=180,
-            max_tokens=16384,
+            timeout=120,
+            max_tokens=4096,
         )
     except UnicodeEncodeError:
         raise SmartParseError(
@@ -494,16 +494,20 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb
             pass
 
     chunks = _split_into_chunks(document_text)
-    logger.info(f'Smart Parse: {len(chunks)} chunk(s) for {source_type}')
+    print(f'[Smart Parse] {len(chunks)} chunk(s) for {source_type}, '
+          f'{len(document_text):,} chars', flush=True)
 
     # Parallel API calls for each chunk
     all_raw: list[dict] = []
     if len(chunks) == 1:
+        print(f'[Smart Parse] calling GPT-4o (1 chunk)...', flush=True)
         all_raw = _gpt4o_single_chunk(openai_client, chunks[0], source_type)
+        print(f'[Smart Parse] GPT-4o returned {len(all_raw)} raw item(s)', flush=True)
         if progress_cb:
             progress_cb(1, 1)
     else:
         done_count = 0
+        print(f'[Smart Parse] calling GPT-4o ({len(chunks)} chunks in parallel)...', flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as executor:
             futures = [
                 executor.submit(_gpt4o_single_chunk, openai_client, chunk, source_type)
@@ -512,6 +516,7 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb
             for future in concurrent.futures.as_completed(futures):
                 all_raw.extend(future.result())
                 done_count += 1
+                print(f'[Smart Parse] chunk {done_count}/{len(chunks)} done', flush=True)
                 if progress_cb:
                     progress_cb(done_count, len(chunks))
 
