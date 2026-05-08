@@ -15,6 +15,15 @@ try:
 except ImportError:
     pass
 
+# Strip invisible non-ASCII characters (e.g. narrow no-break space from copy-paste)
+# from the API key however it arrived (Streamlit Secrets, .env, or shell env).
+import os as _os
+_raw_key = _os.environ.get('OPENAI_API_KEY', '')
+if _raw_key:
+    _clean_key = _raw_key.encode('ascii', errors='ignore').decode('ascii').strip()
+    if _clean_key != _raw_key:
+        _os.environ['OPENAI_API_KEY'] = _clean_key
+
 from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING, STATUS_REGRET
 from core.formatter import format_description
 from core.exporter import build_excel
