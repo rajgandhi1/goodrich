@@ -413,6 +413,12 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
             timeout=180,
             max_tokens=16384,
         )
+    except UnicodeEncodeError:
+        raise SmartParseError(
+            'Your OpenAI API key contains an invisible non-ASCII character '
+            '(likely a narrow no-break space from copy-pasting). '
+            'Clear the key in the sidebar, retype or re-paste it, and try again.'
+        )
     except Exception as e:
         err = str(e)
         if 'rate_limit' in err.lower() or '429' in err:
@@ -434,6 +440,12 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
             raise SmartParseError(
                 f'Network error reaching OpenAI API: {err}. '
                 'Check your internet connection and try again.'
+            )
+        if 'ascii' in err.lower() and 'encode' in err.lower():
+            raise SmartParseError(
+                'Your OpenAI API key contains an invisible non-ASCII character '
+                '(likely a narrow no-break space from copy-pasting). '
+                'Clear the key in the sidebar, retype or re-paste it, and try again.'
             )
         raise SmartParseError(f'GPT-4o API call failed: {err}')
 

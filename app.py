@@ -931,7 +931,9 @@ with st.sidebar:
             help='Paste your key to enable AI extraction',
         )
         if api_key_input:
-            _os.environ['OPENAI_API_KEY'] = api_key_input
+            # Strip any invisible Unicode spaces (e.g.  ) that sneak in from copy-paste
+            clean_key = api_key_input.encode('ascii', errors='ignore').decode('ascii').strip()
+            _os.environ['OPENAI_API_KEY'] = clean_key
             st.rerun()
 
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
