@@ -472,7 +472,7 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
     raise SmartParseError(f'GPT-4o returned unexpected structure: {type(parsed).__name__}')
 
 
-def _call_gpt4o(openai_client, document_text: str, source_type: str) -> tuple[list[dict], int]:
+def _call_gpt4o(openai_client, document_text: str, source_type: str, progress_cb=None) -> tuple[list[dict], int]:
     """
     GPT-4o call with automatic chunking for large documents.
     Splits into chunks of CHUNK_SIZE rows, calls in parallel, merges results.
@@ -500,7 +500,10 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str) -> tuple[li
     all_raw: list[dict] = []
     if len(chunks) == 1:
         all_raw = _gpt4o_single_chunk(openai_client, chunks[0], source_type)
+        if progress_cb:
+            progress_cb(1, 1)
     else:
+        done_count = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunks)) as executor:
             futures = [
                 executor.submit(_gpt4o_single_chunk, openai_client, chunk, source_type)
@@ -508,6 +511,9 @@ def _call_gpt4o(openai_client, document_text: str, source_type: str) -> tuple[li
             ]
             for future in concurrent.futures.as_completed(futures):
                 all_raw.extend(future.result())
+                done_count += 1
+                if progress_cb:
+                    progress_cb(done_count, len(chunks))
 
     result, skipped = _validate_and_normalize_output(all_raw)
 
@@ -559,7 +565,12 @@ def read_document_smart(
     if progress_cb:
         progress_cb(3, 10)
 
-    items, skipped_non_gasket = _call_gpt4o(openai_client, document_text, source_type)
+    def _chunk_progress(done, total):
+        # Map chunk completion (0→total) onto the 3→9 slice of the outer scale
+        if progress_cb:
+            progress_cb(3 + int(done / total * 6), 10)
+
+    items, skipped_non_gasket = _call_gpt4o(openai_client, document_text, source_type, progress_cb=_chunk_progress)
 
     if progress_cb:
         progress_cb(9, 10)
