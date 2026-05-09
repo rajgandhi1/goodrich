@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _SMART_CACHE_TTL = 7 * 24 * 3600
 _CHUNK_SIZE = 30
-_MAX_WORKERS = 3
+_MAX_WORKERS = 2  # keep parallel calls low to avoid rate limits
 
 
 class SmartParseError(Exception):
@@ -345,11 +345,25 @@ def _call_llm_parallel(
     lock = threading.Lock()
 
     def _process(idx_chunk):
+        import time as _time
         idx, chunk = idx_chunk
         logger.info(f'Smart Parse: chunk {idx}/{len(chunks)}...')
-        raw = _call_single_chunk(openai_client, chunk, source_type)
-        logger.info(f'Smart Parse: chunk {idx} done — {len(raw)} item(s)')
-        return raw
+        for attempt in range(3):
+            try:
+                raw = _call_single_chunk(openai_client, chunk, source_type)
+                logger.info(f'Smart Parse: chunk {idx} done — {len(raw)} item(s)')
+                return raw
+            except SmartParseError as e:
+                err = str(e).lower()
+                if 'timed out' in err and attempt < 2:
+                    logger.warning(f'Smart Parse: chunk {idx} timed out, retry {attempt + 1}...')
+                    _time.sleep(5)
+                elif 'rate limit' in err and attempt < 2:
+                    wait = 30 * (attempt + 1)
+                    logger.warning(f'Smart Parse: chunk {idx} rate limited, waiting {wait}s...')
+                    _time.sleep(wait)
+                else:
+                    raise
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
         futures = {

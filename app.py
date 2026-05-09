@@ -1096,6 +1096,11 @@ def _build_rows(items):
         parts    = list(flags) + [f'[default] {d}' for d in defaults]
         rows.append({
             '#':                    item.get('line_no', ''),
+            'Status':               status_icon,
+            'GGPL Description':     item.get('ggpl_description', ''),
+            'Notes / Flags':        '; '.join(parts),
+            'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
+            'UoM':                  item.get('uom') or 'NOS',
             'Regret':               item.get('regret', False),
             'Customer Description': item.get('raw_description', ''),
             'Type':                 item.get('gasket_type', 'SOFT_CUT'),
@@ -1104,11 +1109,12 @@ def _build_rows(items):
             'OD (mm)':              item.get('od_mm') if item.get('od_mm') is not None else None,
             'ID (mm)':              item.get('id_mm') if item.get('id_mm') is not None else None,
             'Rating':               item.get('rating') or '',
-            'Standard':             item.get('standard') or '',
             'MOC':                  item.get('moc') or '',
             'Face':                 item.get('face_type') or '',
-            'Series':               item.get('series') or '',
             'Thk (mm)':             item.get('thickness_mm') if item.get('thickness_mm') is not None else None,
+            'Standard':             item.get('standard') or '',
+            'Series':               item.get('series') or '',
+            'Special':              item.get('special') or '',
             'Ring No':              item.get('ring_no') or '',
             'Groove':               item.get('rtj_groove_type') or '',
             'BHN':                  item.get('rtj_hardness_bhn') or None,
@@ -1131,13 +1137,7 @@ def _build_rows(items):
             'DJI Filler':           item.get('dji_filler') or '',
             'DJI Rib':              item.get('dji_rib') or '',
             'DJI Face':             item.get('dji_face_type') or '',
-            'Qty':                  item.get('quantity') if item.get('quantity') is not None else None,
-            'UoM':                  item.get('uom') or 'NOS',
-            'Special':              item.get('special') or '',
-            'GGPL Description':     item.get('ggpl_description', ''),
-            'Status':               status_icon,
             'AI':                   item.get('confidence', ''),
-            'Notes / Flags':        '; '.join(parts),
         })
     return rows
 
