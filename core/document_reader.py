@@ -1,9 +1,6 @@
 """
-Smart Parse mode - reads the entire customer enquiry document with a single
-GPT-4o call and returns structured gasket line items.
-
-Used as an alternative to parser.py -> extractor.py in Classic mode.
-The downstream rules.py -> formatter.py -> exporter.py pipeline is unchanged.
+Smart Parse mode — reads the customer enquiry document with parallel GPT-4o-mini
+calls (one per chunk of rows) and returns structured gasket line items.
 """
 from __future__ import annotations
 
@@ -12,124 +9,76 @@ import json
 import hashlib
 import logging
 import os
+import concurrent.futures
+import threading
 
 logger = logging.getLogger(__name__)
 
-_SMART_CACHE_TTL = 7 * 24 * 3600  # 7 days
+_SMART_CACHE_TTL = 7 * 24 * 3600
+_CHUNK_SIZE = 30
+_MAX_WORKERS = 3
 
 
 class SmartParseError(Exception):
-    """Raised when Smart Parse cannot complete. Triggers Classic mode fallback."""
+    """Raised when Smart Parse cannot complete."""
 
 
-# ---------------------------------------------------------------------------
-# Default item template - every field rules.py expects
-# ---------------------------------------------------------------------------
+_SYSTEM_PROMPT = """You are an expert in industrial gasket procurement. Extract every line item from the customer enquiry document and return ONLY valid JSON: {"items": [...]}.
 
-_ITEM_TEMPLATE: dict = {
-    'line_no': None, 'quantity': None, 'uom': 'NOS', 'raw_description': '',
-    'size': None, 'size_type': 'UNKNOWN', 'od_mm': None, 'id_mm': None,
-    'rating': None, 'gasket_type': 'SOFT_CUT',
-    'moc': None, 'face_type': None, 'thickness_mm': None,
-    'standard': None, 'special': None, 'confidence': 'MEDIUM',
-    'is_gasket': True,
-    'sw_winding_material': None, 'sw_filler': None,
-    'sw_inner_ring': None, 'sw_outer_ring': None,
-    'rtj_groove_type': None, 'rtj_hardness_bhn': None, 'ring_no': None,
-    'kamm_core_material': None, 'kamm_surface_material': None,
-    'kamm_covering_layer': None, 'kamm_rib': None,
-    'kamm_core_thk': None, 'kamm_integral_outer_ring': None,
-    'dji_filler': None, 'dji_rib': None, 'dji_face_type': None, 'dji_id_first': False,
-    'isk_style': None, 'isk_type': None, 'isk_fire_safety': None,
-    'isk_gasket_material': None, 'isk_core_material': None,
-    'isk_sleeve_material': None, 'isk_washer_material': None,
-    'isk_primary_seal': None, 'isk_secondary_seal': None,
-    'isk_insulating_washer': None,
-}
-
-# ---------------------------------------------------------------------------
-# GPT-4o system prompt
-# ---------------------------------------------------------------------------
-
-_SMART_PARSE_SYSTEM_PROMPT = """You are a gasket procurement data extraction assistant. Extract every gasket line item and return ONLY valid JSON: {"items": [...]}. No markdown, no explanation.
-
-Output ONLY these fields per item (skip a field entirely if the value is null/unknown - do NOT output null):
-line_no, quantity, uom, raw_description, is_gasket,
-size, size_type, rating, gasket_type, confidence,
-moc, face_type, standard, thickness_mm, special,
-sw_winding_material, sw_filler, sw_inner_ring, sw_outer_ring,
-rtj_groove_type, rtj_hardness_bhn, ring_no,
-kamm_core_material, kamm_surface_material, kamm_covering_layer, kamm_rib, kamm_core_thk,
-dji_filler, dji_rib, dji_face_type,
-isk_gasket_material, isk_core_material, isk_sleeve_material, isk_fire_safety
-
-Rules:
-- uom: "NOS" or "M" (meters = sheet supply)
-- size: keep as found, e.g. "25 mm NB", "6\\"", "DN 100"
-- size_type: "NPS" / "NB" / "DN" / "OD_ID" / "UNKNOWN"
-- rating: output as "150#" / "300#" / "600#" etc. or "PN 10" / "PN 16". "# 300" or "#  150" (hash before number) means the same - output as "300#" / "150#"
+FIELDS per item (omit a field entirely if value is unknown — never output null):
+- line_no (int), quantity (number), uom ("NOS" or "M"), raw_description (verbatim copy of input text), is_gasket (bool)
+- size (string, keep as found), size_type ("NPS"/"NB"/"DN"/"OD_ID"/"UNKNOWN")
+- rating: normalise to "150#"/"300#"/"600#" etc. or "PN 10"/"PN 16" etc.
+  Variants: "# 150", "#  300", "CL 150", "Class 300" → "150#", "300#"; "PN16", "PN-16" → "PN 16"
 - gasket_type: "SOFT_CUT" / "SPIRAL_WOUND" / "RTJ" / "KAMM" / "DJI" / "ISK"
-- moc: for SOFT_CUT only; omit for SPIRAL_WOUND/RTJ/KAMM/DJI
-- face_type: "RF" or "FF" for SOFT_CUT/ISK only; omit for all others
-- is_gasket: true for gaskets; false for bolts, flanges, fittings (still include the row)
-- raw_description: exact verbatim copy from source
-- SPIRAL_WOUND: sw_winding_material = strip metal (e.g. SS316), sw_filler = GRAPHITE/PTFE, sw_inner_ring / sw_outer_ring = ring materials
-- Normalize: 316SS->SS316, carbon steel/MS->CS, CL300->300#, Class 150->150#
-- Unspecified rubber: omit moc, set special="MOC ambiguous - confirm rubber type"
+- moc: for SOFT_CUT only — the sealing material (EPDM, NEOPRENE, CNAF, PTFE, VITON, etc.)
+  Unspecified rubber with no clear type → omit moc, set special="MOC ambiguous - confirm rubber type"
+- face_type: "RF" or "FF" — for SOFT_CUT and ISK only
+- thickness_mm (number): default 3 for SOFT_CUT, 4.5 for SPIRAL_WOUND if not stated
+- standard: "ASME B16.21" (SOFT_CUT, # rating), "EN 1514-1" (SOFT_CUT, PN rating), "ASME B16.20" (SW/RTJ)
+  NPS ≥26": use "ASME B16.47" instead of B16.21
+- od_mm, id_mm (numbers): when size is given as OD×ID in mm; for "A×B mm" use larger value as od_mm
+- special: genuine technical notes only — ignore plant tag numbers, MR/RFQ references, area codes
+
+SPIRAL_WOUND — always extract all four material fields:
+- sw_winding_material: the metal strip (e.g. SS316, SS304, INCONEL 625, HASTELLOY C276)
+- sw_filler: filler/sealing element (GRAPHITE, FLEXIBLE GRAPHITE, PTFE, MICA, CERAMIC)
+- sw_inner_ring: inner ring material if present (e.g. SS316, SS304, CS)
+- sw_outer_ring: outer centering ring material (e.g. CS, SS304, SS316) — often mandatory
+
+RTJ: ring_no (R-/RX-/BX- number), rtj_groove_type ("OCT"/"OVL"/"BX"), rtj_hardness_bhn (number)
+KAMM: kamm_core_material, kamm_surface_material, kamm_core_thk, kamm_integral_outer_ring
+DJI: dji_filler, dji_face_type, dji_id_first (bool — true when ID listed before OD in input)
+ISK: isk_style, isk_type, isk_fire_safety, isk_gasket_material, isk_core_material, isk_sleeve_material, isk_washer_material, isk_primary_seal, isk_insulating_washer
+
+NORMALISATION:
+- is_gasket=false for bolts, studs, nuts, flanges, fittings, pipes (still include the row)
+- Materials: SS 316 / 316SS / S.S.316L → SS316/SS316L; M.S./Mild Steel/Carbon Steel → CS; 304SS → SS304
+- Duplex → UNS S31803; Super Duplex/2507 → UNS S32750
+- Ignore plant area tags and procurement reference codes embedded in descriptions — they are not materials or sizes
+- uom "M" (metres) = sheet/roll supply, not individual gaskets
 """
 
-
-# ---------------------------------------------------------------------------
-# Redis cache helpers
-# ---------------------------------------------------------------------------
-
-def _get_redis_smart():
-    url = os.environ.get('REDIS_URL')
-    if not url:
-        return None
-    try:
-        import redis
-        return redis.from_url(url, decode_responses=True, socket_connect_timeout=2)
-    except Exception:
-        return None
-
-
-def _smart_cache_key(content: str) -> str:
-    digest = hashlib.sha256(content.encode()).hexdigest()[:20]
-    return f'gq:smart:{digest}'
-
-
-# ---------------------------------------------------------------------------
-# Input preparation
-# ---------------------------------------------------------------------------
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract text from a PDF using pdfplumber. Returns empty string on failure."""
     try:
         import pdfplumber
-        text_parts = []
+        parts = []
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
                 if t:
-                    text_parts.append(t)
-        return '\n'.join(text_parts)
+                    parts.append(t)
+        return '\n'.join(parts)
     except ImportError:
-        raise SmartParseError(
-            'pdfplumber not installed. Run: pip install pdfplumber'
-        )
+        raise SmartParseError('pdfplumber not installed. Run: pip install pdfplumber')
     except Exception as e:
         logger.warning(f'PDF text extraction failed: {e}')
         return ''
 
 
-def _excel_to_text(excel_bytes: bytes, max_rows: int = 300) -> str:
-    """
-    Convert Excel workbook to tab-separated text.
-
-    Skips fully empty rows. Caps at max_rows data rows across all sheets.
-    Returns a (text, was_truncated, total_row_count) tuple.
-    """
+def _excel_to_text(excel_bytes: bytes, max_rows: int = 400) -> tuple[str, bool, int]:
     import openpyxl
     from core.parser import worksheet_rows_with_merged_values
     wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -143,7 +92,7 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 300) -> str:
         for row in worksheet_rows_with_merged_values(ws):
             cells = [str(c) if c is not None else '' for c in row]
             if not any(c.strip() for c in cells):
-                continue  # skip fully empty rows
+                continue
             if total_rows >= max_rows:
                 was_truncated = True
                 break
@@ -153,209 +102,52 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 300) -> str:
             parts.append(f'=== Sheet: {sheet_name} ===')
             parts.extend(sheet_rows)
 
-    text = '\n'.join(parts)
-    return text, was_truncated, total_rows
+    return '\n'.join(parts), was_truncated, total_rows
 
 
 def _sanitize_text(text: str) -> str:
-    """Normalize to ASCII-safe text before sending to GPT-4o."""
     import unicodedata
-    # NFKC: resolve ligatures, fractions, compatibility variants
-    text = unicodedata.normalize('NFKC', text)
-    # Encode to ASCII, replacing any non-ASCII character with a plain space.
-    # This handles narrow no-break spaces, em dashes, arrows, etc. universally.
-    text = text.encode('ascii', errors='replace').decode('ascii')
-    # Replace the '?' placeholders from non-ASCII with space so descriptions stay readable
-    # (encode 'replace' uses '?' — swap for space to avoid confusing the LLM)
     import re
+    text = unicodedata.normalize('NFKC', text)
+    text = text.encode('ascii', errors='replace').decode('ascii')
     text = re.sub(r'\?+', ' ', text)
     return text
 
-def _prepare_document_text(source, source_type: str) -> tuple[str, dict]:
-    """
-    Convert raw input to a plain text string ready for the LLM.
 
-    Returns (text, metadata) where metadata contains:
-      - 'char_count': int
-      - 'was_truncated': bool
-      - 'row_count': int (Excel only)
-      - 'page_count': int (PDF only)
-    """
+def _prepare_document_text(source, source_type: str) -> tuple[str, dict]:
     metadata: dict = {'char_count': 0, 'was_truncated': False}
 
     if source_type == 'email':
         text = _sanitize_text(str(source))
-        if len(text) > 40000:
-            text = text[:40000]
+        if len(text) > 50000:
+            text = text[:50000]
             metadata['was_truncated'] = True
-        metadata['char_count'] = len(text)
-        return text, metadata
-
     elif source_type == 'excel':
-        text, was_truncated, row_count = _excel_to_text(source, max_rows=300)
+        text, was_truncated, row_count = _excel_to_text(source, max_rows=400)
         text = _sanitize_text(text)
-        if len(text) > 40000:
-            text = text[:40000]
+        if len(text) > 50000:
+            text = text[:50000]
             was_truncated = True
-        metadata['char_count'] = len(text)
         metadata['was_truncated'] = was_truncated
         metadata['row_count'] = row_count
-        return text, metadata
-
     elif source_type == 'pdf':
         text = _sanitize_text(extract_text_from_pdf(source))
         if not text.strip():
             raise SmartParseError(
                 'PDF has no extractable text - it appears to be a scanned image. '
-                'Open the PDF, select all text (Ctrl+A), copy it, '
-                'then paste into the Email tab.'
+                'Open the PDF, select all text (Ctrl+A), copy it, then paste into the Email tab.'
             )
-        if len(text) > 40000:
-            text = text[:40000]
+        if len(text) > 50000:
+            text = text[:50000]
             metadata['was_truncated'] = True
-        metadata['char_count'] = len(text)
-        return text, metadata
-
     else:
         raise SmartParseError(f'Unknown source_type: {source_type!r}')
 
-
-# ---------------------------------------------------------------------------
-# Output validation & normalization
-# ---------------------------------------------------------------------------
-
-def _validate_and_normalize_output(raw_items: list) -> tuple[list[dict], int]:
-    """Coerce GPT-4o output list to the exact schema rules.py expects."""
-    if not isinstance(raw_items, list):
-        raise SmartParseError(f'LLM output is not a list (got {type(raw_items).__name__})')
-    if len(raw_items) == 0:
-        raise SmartParseError(
-            'no_items_found'  # sentinel - caller maps to user-friendly message
-        )
-
-    result = []
-    skipped_raw = []   # keep filtered items in case we need the safety fallback
-    skipped_non_gasket = 0
-    for i, raw in enumerate(raw_items):
-        if not isinstance(raw, dict):
-            logger.warning(f'Smart Parse: item {i} is not a dict - skipping')
-            continue
-
-        # Filter out non-gasket items before any further processing
-        is_gasket_val = raw.get('is_gasket', True)
-        if is_gasket_val is False or str(is_gasket_val).lower() == 'false':
-            desc_preview = str(raw.get('raw_description', ''))[:60]
-            logger.info(f'Smart Parse: skipping non-gasket item - {desc_preview}')
-            skipped_non_gasket += 1
-            skipped_raw.append(raw)
-            continue
-
-        # Start from template, overlay LLM values for known fields
-        item: dict = dict(_ITEM_TEMPLATE)
-        for k, v in raw.items():
-            if k in _ITEM_TEMPLATE:
-                item[k] = v
-
-        # Normalize string "null"/"none"/"" -> actual None (except sentinel fields)
-        _KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
-        for k, v in item.items():
-            if k not in _KEEP_AS_STRING and isinstance(v, str) and v.strip().lower() in ('null', 'none', ''):
-                item[k] = None
-
-        # Float coercions
-        for f in ('od_mm', 'id_mm', 'thickness_mm', 'rtj_hardness_bhn', 'kamm_core_thk'):
-            val = item.get(f)
-            if val is not None:
-                try:
-                    item[f] = float(val)
-                except (TypeError, ValueError):
-                    item[f] = None
-
-        # Int coercions
-        for f in ('line_no',):
-            val = item.get(f)
-            if val is not None:
-                try:
-                    item[f] = int(float(val))
-                except (TypeError, ValueError):
-                    item[f] = None
-
-        # Quantity as float
-        val = item.get('quantity')
-        if val is not None:
-            try:
-                item['quantity'] = float(val)
-            except (TypeError, ValueError):
-                item['quantity'] = None
-
-        # Bool coercion
-        item['dji_id_first'] = bool(item.get('dji_id_first', False))
-
-        # Ensure critical defaults
-        if not item.get('uom'):
-            item['uom'] = 'NOS'
-        if not item.get('gasket_type'):
-            item['gasket_type'] = 'SOFT_CUT'
-        if not item.get('size_type'):
-            item['size_type'] = 'UNKNOWN'
-        if not item.get('confidence'):
-            item['confidence'] = 'MEDIUM'
-
-        # Uppercase certain enum fields
-        for f in ('gasket_type', 'size_type', 'face_type', 'rtj_groove_type',
-                   'uom', 'confidence', 'isk_fire_safety'):
-            v = item.get(f)
-            if isinstance(v, str):
-                item[f] = v.strip().upper()
-
-        result.append(item)
-
-    if skipped_non_gasket:
-        logger.info(
-            f'Smart Parse: filtered out {skipped_non_gasket} non-gasket item(s) '
-            f'(cam & groove, fittings, etc.) - {len(result)} gasket item(s) remain'
-        )
-
-    # Safety fallback: if ALL items were filtered as non-gasket, the is_gasket
-    # classification may have been too aggressive (e.g. document title context
-    # confused the model). Return everything unfiltered with a flag so the caller
-    # can warn the user rather than silently failing.
-    if len(result) == 0 and skipped_non_gasket > 0:
-        logger.warning(
-            f'Smart Parse: all {skipped_non_gasket} item(s) were classified as non-gasket - '
-            f'is_gasket filter may be wrong; returning all items unfiltered'
-        )
-        # Process the skipped items as if they were gaskets
-        for raw in skipped_raw:
-            item: dict = dict(_ITEM_TEMPLATE)
-            for k, v in raw.items():
-                if k in _ITEM_TEMPLATE:
-                    item[k] = v
-            item['_all_filtered_fallback'] = True
-            result.append(item)
-        skipped_non_gasket = 0  # reset - we un-filtered them
-
-    return result, skipped_non_gasket
-
-
-# ---------------------------------------------------------------------------
-# GPT-4o call
-# ---------------------------------------------------------------------------
-
-_CHUNK_SIZE = 50  # rows per GPT-4o call
+    metadata['char_count'] = len(text)
+    return text, metadata
 
 
 def _split_into_chunks(document_text: str, chunk_size: int = _CHUNK_SIZE) -> list[str]:
-    """
-    Split document text into chunks of chunk_size rows/lines.
-
-    Excel (tab-separated): header lines (sheet marker + column row) are prepended
-    to every chunk so GPT-4o always has column context.
-
-    PDF / email (plain text): split by non-empty lines; no header prepended.
-
-    Returns a single-element list when no split is needed.
-    """
     lines = document_text.splitlines()
     is_excel = any(l.startswith('=== Sheet:') for l in lines[:5])
 
@@ -368,7 +160,7 @@ def _split_into_chunks(document_text: str, chunk_size: int = _CHUNK_SIZE) -> lis
                 header_lines.append(line)
                 found_data = False
             elif not found_data and line.strip():
-                header_lines.append(line)  # column header row
+                header_lines.append(line)
                 found_data = True
             else:
                 data_lines.append(line)
@@ -382,94 +174,68 @@ def _split_into_chunks(document_text: str, chunk_size: int = _CHUNK_SIZE) -> lis
             for i in range(0, len(data_lines), chunk_size)
         ]
     else:
-        # PDF / email - split by non-empty lines
         non_empty = [l for l in lines if l.strip()]
         if len(non_empty) <= chunk_size:
             return [document_text]
-
         return [
             '\n'.join(non_empty[i:i + chunk_size])
             for i in range(0, len(non_empty), chunk_size)
         ]
 
 
-def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> list[dict]:
-    """Call GPT-4o on one chunk of document text. Returns raw item dicts (not validated)."""
-    user_msg = (
-        f'Document type: {source_type}\n\n'
-        f'--- DOCUMENT CONTENT START ---\n'
-        f'{chunk_text}\n'
-        f'--- DOCUMENT CONTENT END ---'
-    )
+def _get_redis():
+    url = os.environ.get('REDIS_URL')
+    if not url:
+        return None
     try:
-        stream = openai_client.chat.completions.create(
-            model='gpt-4o-mini',
+        import redis
+        return redis.from_url(url, decode_responses=True, socket_connect_timeout=2)
+    except Exception:
+        return None
+
+
+def _cache_key(content: str) -> str:
+    return f'gq:smart:{hashlib.sha256(content.encode()).hexdigest()[:20]}'
+
+
+def _call_single_chunk(openai_client, chunk_text: str, source_type: str) -> list[dict]:
+    """Call gpt-4o-mini on one chunk of document text. Returns raw item dicts (not validated)."""
+    user_msg = f'Document type: {source_type}\n\n--- DOCUMENT ---\n{chunk_text}\n--- END ---'
+    try:
+        resp = openai_client.chat.completions.create(
+            model='gpt-4o',
             temperature=0,
             response_format={'type': 'json_object'},
             messages=[
-                {'role': 'system', 'content': _SMART_PARSE_SYSTEM_PROMPT},
+                {'role': 'system', 'content': _SYSTEM_PROMPT},
                 {'role': 'user', 'content': user_msg},
             ],
             timeout=120,
             max_tokens=8192,
-            stream=True,
         )
-        chunks_received = []
-        finish_reason = None
-        for event in stream:
-            delta = event.choices[0].delta
-            if delta.content:
-                chunks_received.append(delta.content)
-            if event.choices[0].finish_reason:
-                finish_reason = event.choices[0].finish_reason
-        response_text = ''.join(chunks_received)
+        content = resp.choices[0].message.content or '{}'
+        finish_reason = resp.choices[0].finish_reason
     except UnicodeEncodeError:
         raise SmartParseError(
-            'Your OpenAI API key contains an invisible non-ASCII character '
-            '(likely a narrow no-break space from copy-pasting). '
-            'Clear the key in the sidebar, retype or re-paste it, and try again.'
+            'API key contains a non-ASCII character. Clear the key, retype it, and try again.'
         )
     except Exception as e:
         err = str(e)
         if 'rate_limit' in err.lower() or '429' in err:
-            raise SmartParseError(
-                'OpenAI rate limit reached - too many requests. '
-                'Wait 60 seconds then try again, or switch to Classic mode.'
-            )
+            raise SmartParseError('OpenAI rate limit reached. Wait 60 seconds and try again.')
         if 'authentication' in err.lower() or '401' in err or 'invalid api key' in err.lower():
-            raise SmartParseError(
-                'Invalid OpenAI API key. Check that the key in the sidebar starts with "sk-" '
-                'and has not expired.'
-            )
+            raise SmartParseError('Invalid OpenAI API key. Check the key in the sidebar.')
         if 'timeout' in err.lower() or 'timed out' in err.lower():
-            raise SmartParseError(
-                'GPT-4o call timed out after 180 seconds. '
-                'Check your internet connection and try again.'
-            )
-        if 'connection' in err.lower() or 'network' in err.lower():
-            raise SmartParseError(
-                f'Network error reaching OpenAI API: {err}. '
-                'Check your internet connection and try again.'
-            )
-        if 'ascii' in err.lower() and 'encode' in err.lower():
-            raise SmartParseError(
-                'Your OpenAI API key contains an invisible non-ASCII character '
-                '(likely a narrow no-break space from copy-pasting). '
-                'Clear the key in the sidebar, retype or re-paste it, and try again.'
-            )
-        raise SmartParseError(f'GPT-4o API call failed: {err}')
+            raise SmartParseError('Request timed out. Check your internet connection and try again.')
+        raise SmartParseError(f'OpenAI API call failed: {err}')
 
     if finish_reason == 'length':
-        raise SmartParseError(
-            'GPT-4o output was cut off mid-response. '
-            'This chunk is too large - reduce CHUNK_SIZE or split the file.'
-        )
+        raise SmartParseError('Response cut off — chunk too large. Try splitting the file.')
 
-    raw_content = response_text or '{}'
     try:
-        parsed = json.loads(raw_content)
+        parsed = json.loads(content)
     except json.JSONDecodeError as e:
-        raise SmartParseError(f'GPT-4o returned malformed JSON: {e}')
+        raise SmartParseError(f'Model returned malformed JSON: {e}')
 
     if isinstance(parsed, list):
         return parsed
@@ -477,59 +243,117 @@ def _gpt4o_single_chunk(openai_client, chunk_text: str, source_type: str) -> lis
         for v in parsed.values():
             if isinstance(v, list):
                 return v
-        raise SmartParseError(f'GPT-4o returned a JSON object with no list. Keys: {list(parsed.keys())}')
-    raise SmartParseError(f'GPT-4o returned unexpected structure: {type(parsed).__name__}')
+    raise SmartParseError('Unexpected response structure from model.')
 
 
-def _call_gpt4o(
+def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
+    """Coerce raw LLM output to the schema that rules.py expects."""
+    KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
+    FLOAT_FIELDS = ('od_mm', 'id_mm', 'thickness_mm', 'rtj_hardness_bhn', 'kamm_core_thk', 'quantity')
+    INT_FIELDS = ('line_no',)
+    UPPER_FIELDS = ('gasket_type', 'size_type', 'face_type', 'rtj_groove_type', 'uom', 'confidence', 'isk_fire_safety')
+
+    result = []
+    skipped = 0
+    all_non_gasket = []
+
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        is_gasket = raw.get('is_gasket', True)
+        if is_gasket is False or str(is_gasket).lower() == 'false':
+            skipped += 1
+            all_non_gasket.append(raw)
+            continue
+
+        item = dict(raw)
+
+        # Normalize null strings
+        for k, v in item.items():
+            if k not in KEEP_AS_STRING and isinstance(v, str) and v.strip().lower() in ('null', 'none', ''):
+                item[k] = None
+
+        # Type coercions
+        for f in FLOAT_FIELDS:
+            if item.get(f) is not None:
+                try:
+                    item[f] = float(item[f])
+                except (TypeError, ValueError):
+                    item[f] = None
+
+        for f in INT_FIELDS:
+            if item.get(f) is not None:
+                try:
+                    item[f] = int(float(item[f]))
+                except (TypeError, ValueError):
+                    item[f] = None
+
+        item['dji_id_first'] = bool(item.get('dji_id_first', False))
+
+        # Defaults
+        if not item.get('uom'):
+            item['uom'] = 'NOS'
+        if not item.get('gasket_type'):
+            item['gasket_type'] = 'SOFT_CUT'
+        if not item.get('size_type'):
+            item['size_type'] = 'UNKNOWN'
+        if not item.get('confidence'):
+            item['confidence'] = 'MEDIUM'
+
+        for f in UPPER_FIELDS:
+            if isinstance(item.get(f), str):
+                item[f] = item[f].strip().upper()
+
+        result.append(item)
+
+    # Safety: if every item was filtered as non-gasket, un-filter them
+    if not result and all_non_gasket:
+        logger.warning('All items classified as non-gasket — returning unfiltered')
+        for raw in all_non_gasket:
+            item = dict(raw)
+            item['_all_filtered_fallback'] = True
+            result.append(item)
+        skipped = 0
+
+    return result, skipped
+
+
+def _call_llm_parallel(
     openai_client,
     document_text: str,
     source_type: str,
     progress_cb=None,
     on_chunk_items=None,
 ) -> tuple[list[dict], int]:
-    """
-    GPT-4o call with automatic chunking for large documents.
-    Processes chunks sequentially so results stream in as each completes.
-    on_chunk_items(items) is called with normalized items after each chunk.
-    Returns (all_items, skipped_count).
-    """
-    # Check Redis cache first (keyed on full document)
-    r = _get_redis_smart()
-    cache_key = _smart_cache_key(document_text)
+    r = _get_redis()
+    cache_key = _cache_key(document_text)
     if r:
         try:
             hit = r.get(cache_key)
             if hit:
                 cached = json.loads(hit)
-                print(f'[Smart Parse] cache hit ({len(cached)} items)', flush=True)
+                logger.info(f'Smart Parse: cache hit ({len(cached)} items)')
                 return cached, 0
         except Exception:
             pass
 
     chunks = _split_into_chunks(document_text)
-    print(f'[Smart Parse] {len(chunks)} chunk(s) for {source_type}, '
-          f'{len(document_text):,} chars', flush=True)
-
-    import concurrent.futures
-    import threading
+    logger.info(f'Smart Parse: {len(chunks)} chunk(s), {len(document_text):,} chars')
 
     all_raw: list[dict] = []
     done_count = 0
     lock = threading.Lock()
 
-    _MAX_WORKERS = 2  # safe concurrency for gpt-4o-mini rate limits
-
-    def _process_chunk(idx_chunk):
+    def _process(idx_chunk):
         idx, chunk = idx_chunk
-        print(f'[Smart Parse] calling chunk {idx}/{len(chunks)}...', flush=True)
-        raw = _gpt4o_single_chunk(openai_client, chunk, source_type)
-        print(f'[Smart Parse] chunk {idx}/{len(chunks)} done — {len(raw)} item(s)', flush=True)
+        logger.info(f'Smart Parse: chunk {idx}/{len(chunks)}...')
+        raw = _call_single_chunk(openai_client, chunk, source_type)
+        logger.info(f'Smart Parse: chunk {idx} done — {len(raw)} item(s)')
         return raw
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
         futures = {
-            executor.submit(_process_chunk, (i, chunk)): i
+            executor.submit(_process, (i, chunk)): i
             for i, chunk in enumerate(chunks, 1)
         }
         for future in concurrent.futures.as_completed(futures):
@@ -540,16 +364,16 @@ def _call_gpt4o(
 
             if on_chunk_items and chunk_raw:
                 try:
-                    chunk_items, _ = _validate_and_normalize_output(chunk_raw)
+                    chunk_items, _ = _normalize_items(chunk_raw)
                     on_chunk_items(chunk_items)
-                except SmartParseError:
+                except Exception:
                     pass
 
             if progress_cb:
                 with lock:
                     progress_cb(done_count, len(chunks))
 
-    result, skipped = _validate_and_normalize_output(all_raw)
+    result, skipped = _normalize_items(all_raw)
 
     if r:
         try:
@@ -557,13 +381,9 @@ def _call_gpt4o(
         except Exception:
             pass
 
-    print(f'[Smart Parse] done — {len(result)} item(s), {skipped} non-gasket skipped', flush=True)
+    logger.info(f'Smart Parse: done — {len(result)} items, {skipped} non-gasket skipped')
     return result, skipped
 
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
 
 def read_document_smart(
     source,
@@ -573,15 +393,9 @@ def read_document_smart(
     on_chunk_items=None,
 ) -> tuple[list[dict], int]:
     """
-    Main Smart Parse entry point.
-
-    Converts raw input to text, sends one GPT-4o call that reads the entire
-    document, and returns (items, skipped_count) where items are structured
-    gasket-only dicts ready for rules.py and skipped_count is the number of
-    non-gasket items that were filtered out.
-
-    Raises:
-        SmartParseError: triggers Classic mode fallback in the caller
+    Main entry point. Converts input to text, calls LLM in parallel chunks,
+    returns (items, skipped_count).
+    Raises SmartParseError on failure.
     """
     if progress_cb:
         progress_cb(1, 10)
@@ -589,23 +403,16 @@ def read_document_smart(
     document_text, metadata = _prepare_document_text(source, source_type)
 
     if metadata.get('was_truncated'):
-        row_count = metadata.get('row_count', '')
-        row_info = f' ({row_count} rows read)' if row_count else ''
-        logger.warning(
-            f'Smart Parse: document truncated{row_info} - '
-            f'{metadata["char_count"]:,} chars sent to GPT-4o. '
-            f'Consider splitting the file if items are missing.'
-        )
+        logger.warning(f'Document truncated at {metadata["char_count"]:,} chars')
 
     if progress_cb:
         progress_cb(3, 10)
 
     def _chunk_progress(done, total):
-        # Map chunk completion (0→total) onto the 3→9 slice of the outer scale
         if progress_cb:
             progress_cb(3 + int(done / total * 6), 10)
 
-    items, skipped_non_gasket = _call_gpt4o(
+    items, skipped = _call_llm_parallel(
         openai_client, document_text, source_type,
         progress_cb=_chunk_progress,
         on_chunk_items=on_chunk_items,
@@ -617,4 +424,4 @@ def read_document_smart(
     if metadata.get('was_truncated') and items:
         items[0]['_doc_was_truncated'] = True
 
-    return items, skipped_non_gasket
+    return items, skipped

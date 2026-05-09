@@ -26,7 +26,6 @@ if _raw_key:
 
 from core.rules import apply_rules, STATUS_READY, STATUS_CHECK, STATUS_MISSING, STATUS_REGRET
 from core.formatter import format_description
-from core.exporter import build_excel
 
 st.set_page_config(
     page_title='Gasket Quote Processor',
@@ -454,7 +453,7 @@ _HISTORY_LIMIT = 25
 # Load history from Redis once per session
 if not st.session_state._history_loaded:
     import json as _json
-    from core.extractor import _get_redis as _get_redis_client
+    from core.document_reader import _get_redis as _get_redis_client
     loaded_history = None
     _r = _get_redis_client()
     if _r:
@@ -490,7 +489,7 @@ def _save_history_to_redis():
         _HISTORY_PATH.write_text(history_json, encoding='utf-8')
     except Exception:
         pass
-    from core.extractor import _get_redis as _get_redis_client
+    from core.document_reader import _get_redis as _get_redis_client
     _r = _get_redis_client()
     if _r:
         try:
@@ -1004,7 +1003,7 @@ with st.sidebar:
                         key=f'hist_pdf_{run_idx}',
                     )
                 if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
-                    from core.extractor import _get_redis, _cache_key
+                    from core.document_reader import _get_redis, _cache_key
                     r = _get_redis()
                     if r:
                         descs = {
@@ -1182,7 +1181,6 @@ def _reprocess_customer_descriptions(items, display_indices, edited_df, visible_
 
     import os as _os2
     from core.document_reader import read_document_smart, SmartParseError
-    from core.llm_validator import validate_with_regex
 
     api_key = _os2.environ.get('OPENAI_API_KEY')
     if not api_key:
@@ -1214,7 +1212,6 @@ def _reprocess_customer_descriptions(items, display_indices, edited_df, visible_
         reprocessed, _ = read_document_smart(
             '\n'.join(desc_lines), 'email', _rp_client
         )
-        reprocessed = validate_with_regex(reprocessed)
     except SmartParseError as e:
         st.warning(f'Re-process failed: {e}')
         return 0
@@ -1489,10 +1486,9 @@ tab_email, tab_excel, tab_pdf, tab_manual, tab_conv = st.tabs(
 def _process_and_append(source, source_type: str):
     """
     Extract, apply rules, and append processed items to working_items.
-    Pipeline: document_reader (GPT-4o) → llm_validator → rules → formatter
+    Pipeline: document_reader (GPT-4o-mini) → rules → formatter
     """
     from core.document_reader import read_document_smart, SmartParseError
-    from core.llm_validator import validate_with_regex
 
     status_text = st.empty()
     progress_bar = st.progress(0)
@@ -1522,8 +1518,6 @@ def _process_and_append(source, source_type: str):
     ]
 
     def _on_chunk_items(chunk_items):
-        from core.llm_validator import validate_with_regex as _vwr
-        chunk_items = _vwr(chunk_items)
         for item in chunk_items:
             item = apply_rules(item)
             item['ggpl_description'] = format_description(item)
@@ -1582,12 +1576,6 @@ def _process_and_append(source, source_type: str):
 
     if n_skipped:
         st.info(f'{n_skipped} non-gasket item(s) automatically filtered out.')
-    status_text.text('Validating with regex guard rails...')
-    progress_bar.progress(85)
-    extracted_items = validate_with_regex(extracted_items)
-    n_overrides = sum(len(it.get('_override_log', [])) for it in extracted_items)
-    if n_overrides:
-        logger.info(f'Smart validator: {n_overrides} overrides across {len(extracted_items)} items')
 
     # ── Common tail: rules + formatter ────────────────────────────────────
     progress_bar.progress(88)
