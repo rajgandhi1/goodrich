@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _SMART_CACHE_TTL = 7 * 24 * 3600
 _CHUNK_SIZE = 30
-_MAX_WORKERS = 2  # keep parallel calls low to avoid rate limits
+_MAX_WORKERS = 1  # sequential — avoids burst rate limits on gpt-4o (30K TPM tier 1)
 
 
 class SmartParseError(Exception):
