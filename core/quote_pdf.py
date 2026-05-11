@@ -304,7 +304,7 @@ def _description_cell(item: dict):
     return Paragraph(ggpl, _PS_DESC)
 
 
-def _make_items_table(items_slice: list[dict], prices_slice: list[float]) -> Table:
+def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1) -> Table:
     """Build a platypus Table for a slice of items."""
     header = [
         Paragraph("Sl.<br/>No.",            _PS_HDR),
@@ -321,7 +321,7 @@ def _make_items_table(items_slice: list[dict], prices_slice: list[float]) -> Tab
         qty   = _num(item.get("quantity"))
         total = qty * unit
         rows.append([
-            str(i + 1),                    # Sl. No.
+            str(start_serial + i),         # Sl. No. — continuous across pages
             "",                            # Cust SL.NO (blank)
             "",                            # Item Code  (blank)
             _description_cell(item),       # GGPL desc + customer ref
@@ -356,6 +356,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
         candidate = _make_items_table(
             items[start : start + count],
             _prices_for(count),
+            start_serial=start + 1,
         )
         _, candidate_h = candidate.wrapOn(c, TABLE_W, AVAIL_H)
         if candidate_h > AVAIL_H:
@@ -368,7 +369,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     prices_slice = _prices_for(n_fit)
 
     # ── Build & draw the table ───────────────────────────────────────────────
-    t = _make_items_table(items_slice, prices_slice)
+    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1)
     _, tbl_h = t.wrapOn(c, TABLE_W, AVAIL_H)
 
     tbl_pdf_y = _top(_TBL_TOP) - tbl_h             # lower-left in PDF coords
