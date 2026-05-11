@@ -9,6 +9,7 @@ import json
 import hashlib
 import logging
 import os
+import re
 import concurrent.futures
 import threading
 
@@ -37,7 +38,7 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
 - thickness_mm (number): default 3 for SOFT_CUT, 4.5 for SPIRAL_WOUND if not stated
 - standard: "ASME B16.21" (SOFT_CUT, # rating), "EN 1514-1" (SOFT_CUT, PN rating), "ASME B16.20" (SW/RTJ)
   NPS ≥26": use "ASME B16.47" instead of B16.21
-- od_mm, id_mm (numbers): when size is given as OD×ID in mm; for "A×B mm" use larger value as od_mm
+- od_mm, id_mm (numbers): only when value is already given in mm. Otherwise leave both blank and put the OD/ID exactly as written (any unit — inches, feet-inches, fractions) into `size`, with size_type="OD_ID". Code will handle unit conversion.
 - special: genuine technical notes only — ignore plant tag numbers, MR/RFQ references, area codes
 
 SPIRAL_WOUND — always extract all four material fields:
@@ -331,6 +332,60 @@ def _call_single_chunk(openai_client, chunk_text: str, source_type: str) -> list
     raise SmartParseError('Unexpected response structure from model.')
 
 
+_FT_IN_RE = re.compile(
+    r"(\d+)\s*[’'`]\s*-?\s*(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*[”\"]?"
+)
+_IN_RE = re.compile(r"(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*[”\"]")
+_MM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*mm", re.I)
+_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)")
+
+
+def _token_to_mm(token: str) -> float | None:
+    """Parse one dimension token (mm, inches, feet-inches, with optional fraction) to mm."""
+    if not token:
+        return None
+    s = str(token).strip()
+    m = _MM_RE.search(s)
+    if m:
+        return float(m.group(1))
+    m = _FT_IN_RE.search(s)
+    if m:
+        ft = int(m.group(1)); inch = int(m.group(2))
+        if m.group(3) and m.group(4):
+            inch += int(m.group(3)) / int(m.group(4))
+        return round((ft * 12 + inch) * 25.4, 3)
+    m = _IN_RE.search(s)
+    if m:
+        inch = int(m.group(1))
+        if m.group(2) and m.group(3):
+            inch += int(m.group(2)) / int(m.group(3))
+        return round(inch * 25.4, 3)
+    m = _NUM_RE.search(s)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _parse_od_id(size_str: str) -> tuple[float | None, float | None]:
+    """Extract (od_mm, id_mm) from a free-form size string containing OD and ID."""
+    if not size_str:
+        return None, None
+    s = str(size_str)
+    # Labelled OD/ID — match the value immediately preceding the label
+    label = r"[\d\.\s/'’`\"”-]+"
+    od = re.search(rf"({label})\s*(?:O\.?\s*D\.?|OD\b)", s, re.I)
+    id_ = re.search(rf"({label})\s*(?:I\.?\s*D\.?|ID\b)", s, re.I)
+    if od and id_:
+        return _token_to_mm(od.group(1)), _token_to_mm(id_.group(1))
+    # Unlabelled "A x B" — assume larger is OD
+    m = re.search(r"(.+?)\s*[xX×]\s*(.+)", s)
+    if m:
+        a, b = _token_to_mm(m.group(1)), _token_to_mm(m.group(2))
+        if a and b:
+            return (max(a, b), min(a, b))
+    return None, None
+
+
 def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
     """Coerce raw LLM output to the schema that rules.py expects."""
     KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
@@ -374,6 +429,16 @@ def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
                     item[f] = None
 
         item['dji_id_first'] = bool(item.get('dji_id_first', False))
+
+        # Fill od_mm/id_mm from `size` when LLM left them blank (handles inches, feet-inches, fractions)
+        if item.get('od_mm') is None or item.get('id_mm') is None:
+            size_str = item.get('size') or ''
+            if 'OD' in size_str.upper() or 'ID' in size_str.upper() or '×' in size_str or 'X' in size_str.upper():
+                od, id_ = _parse_od_id(size_str)
+                if item.get('od_mm') is None and od is not None:
+                    item['od_mm'] = od
+                if item.get('id_mm') is None and id_ is not None:
+                    item['id_mm'] = id_
 
         # Defaults
         if not item.get('uom'):
