@@ -31,7 +31,13 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
 - size (string, keep as found), size_type ("NPS"/"NB"/"DN"/"OD_ID"/"UNKNOWN")
 - rating: normalise to "150#"/"300#"/"600#" etc. or "PN 10"/"PN 16" etc.
   Variants: "# 150", "#  300", "CL 150", "Class 300" → "150#", "300#"; "PN16", "PN-16" → "PN 16"
-- gasket_type: "SOFT_CUT" / "SPIRAL_WOUND" / "RTJ" / "KAMM" / "DJI" / "ISK"
+- gasket_type — choose by PHYSICAL CONSTRUCTION described, not by the standard the customer cites (customers often cite the wrong standard):
+    * SOFT_CUT — flat sheet cut to shape, single homogeneous material (rubber, CNAF, PTFE, graphite sheet)
+    * SPIRAL_WOUND — alternating metal strip wound with soft filler ("spiral wound", "SW", winding + filler mentioned)
+    * RTJ — solid metal ring sitting in a groove (ring joint, oval/octagonal/BX, R-/RX-/BX- number)
+    * KAMM — metal core/insert with thin soft sealing layer on both faces ("kammprofile", "profile gasket … metal core/insert", "grooved metal core")
+    * DJI — double-jacketed: metal jacket fully enclosing a soft filler (heat exchanger style)
+    * ISK — insulating gasket kit / flange insulation kit (includes sleeves, washers, kit components)
 - moc: for SOFT_CUT only — the sealing material (EPDM, NEOPRENE, CNAF, PTFE, VITON, etc.)
   Unspecified rubber with no clear type → omit moc, set special="MOC ambiguous - confirm rubber type"
 - face_type: "RF" or "FF" — for SOFT_CUT and ISK only
