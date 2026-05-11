@@ -5,7 +5,6 @@ Parses customer enquiry inputs (email text or Excel) into a uniform list of raw 
 """
 import re
 import io
-import json
 import logging
 import openpyxl
 
@@ -36,92 +35,8 @@ def worksheet_rows_with_merged_values(ws, max_row: int | None = None) -> list[tu
     return [tuple(row) for row in rows]
 
 
-_AI_EMAIL_PARSE_PROMPT = """\
-You are extracting gasket procurement line items from a customer email body.
-
-Email text:
-{email_text}
-
-Return ONLY valid JSON (no markdown, no explanation) — a list of objects, one per gasket line item:
-[
-  {{
-    "line_no": <integer serial / item number from the email, or null>,
-    "description": <full gasket description string exactly as written by the customer>,
-    "quantity": <numeric quantity, or null if not stated>,
-    "uom": <"NOS" | "M" — use "M" only if unit is meters/m, otherwise "NOS">
-  }},
-  ...
-]
-
-Rules:
-- Include ONLY gasket-related items. Skip headers, cover-note text, totals, and non-gasket items.
-- Preserve the customer's description verbatim — do not paraphrase or normalize.
-- If quantity is missing from a line, set it to null.
-- Return an empty list [] if no gasket line items are found.
-"""
-
-
-def _ai_parse_email_text(text: str, openai_client) -> list[dict] | None:
-    """Use gpt-4o-mini to extract line items from email text. Returns None on failure."""
-    prompt = _AI_EMAIL_PARSE_PROMPT.format(email_text=text[:12000])
-    try:
-        response = openai_client.chat.completions.create(
-            model='gpt-4o-mini',
-            temperature=0,
-            response_format={'type': 'json_object'},
-            messages=[{'role': 'user', 'content': prompt}],
-            timeout=30,
-        )
-        raw = response.choices[0].message.content or ''
-        # gpt-4o-mini with json_object mode wraps arrays in an object — unwrap
-        parsed = json.loads(raw)
-        if isinstance(parsed, list):
-            items = parsed
-        elif isinstance(parsed, dict):
-            items = next((v for v in parsed.values() if isinstance(v, list)), [])
-        else:
-            return None
-        result = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            desc = str(item.get('description') or '').strip()
-            if not desc:
-                continue
-            qty_raw = item.get('quantity')
-            try:
-                qty = float(qty_raw) if qty_raw is not None else None
-            except (TypeError, ValueError):
-                qty = None
-            uom = _normalize_uom(str(item.get('uom') or 'NOS'))
-            line_no = item.get('line_no')
-            result.append({
-                'line_no': int(line_no) if line_no else None,
-                'description': desc,
-                'quantity': qty,
-                'uom': uom,
-            })
-        logger.info('AI email parse: %d items extracted', len(result))
-        return result if result else None
-    except Exception as exc:
-        logger.warning('AI email parse failed, falling back to regex: %s', exc)
-        return None
-
-
-def parse_email_text(text: str, openai_client=None) -> list[dict]:
-    """Extract line items from pasted email body text.
-
-    If openai_client is provided, uses gpt-4o-mini first (mirrors how
-    parse_excel_file handles Classic mode), then falls back to regex.
-    """
-    if openai_client is not None:
-        ai_items = _ai_parse_email_text(text, openai_client)
-        if ai_items:
-            for i, item in enumerate(ai_items, 1):
-                if not item.get('line_no'):
-                    item['line_no'] = i
-            return ai_items
-
+def parse_email_text(text: str) -> list[dict]:
+    """Extract line items from pasted email body text via regex/rule-based parsing."""
     items = []
     lines = _merge_continuation_lines([l.strip() for l in text.splitlines() if l.strip()])
     for line in lines:
@@ -256,234 +171,13 @@ def _normalize_uom(uom: str) -> str:
     return 'NOS'
 
 
-_AI_LAYOUT_PROMPT = """\
-You are analysing a customer Excel sheet that contains gasket procurement enquiries.
-
-Below are the first rows of one worksheet (each object has "row" = 1-based row index and "cells" = list of cell values left-to-right, empty string for blank cells).
-
-{preview_json}
-
-Your task: identify the layout so downstream code can extract every gasket line item.
-
-Return ONLY valid JSON (no markdown, no explanation) matching this schema exactly:
-{{
-  "header_row": <1-based integer row that contains column headers, or null if no header>,
-  "format_type": "description_column" | "structured_columns",
-  "columns": {{
-    "description":    <0-based column index of the full-text gasket description, or null>,
-    "component_name": <0-based column index whose DATA values indicate the gasket TYPE (e.g. "Gasket SPW", "Spiral Wound Gasket", "RTJ Ring", "Soft Cut Gasket") — short type-label cells, not full specs; or null>,
-    "size":           <0-based column index for nominal size (NB/DN/NPS/inch), or null>,
-    "rating":         <0-based column index for pressure rating/class, or null>,
-    "moc":            <0-based column index for material / MOC, or null>,
-    "thickness":      <0-based column index for thickness (mm), or null>,
-    "od_mm":          <0-based column index for OD in mm, or null>,
-    "id_mm":          <0-based column index for ID in mm, or null>,
-    "face_type":      <0-based column index for face type (RF/FF), or null>,
-    "quantity":       <0-based column index for quantity / qty, or null>,
-    "uom":            <0-based column index for unit of measure, or null>,
-    "line_no":        <0-based column index for serial / item number, or null>
-  }}
-}}
-
-IMPORTANT — choose format_type by looking at the ACTUAL DATA VALUES, not just column headers:
-
-"description_column" — use this when a column's DATA contains long, complete gasket
-specifications (full phrases with size + rating + material + type together), e.g.:
-  "6 inch 150# CNAF RF Gasket"
-  "Spiral wound graphite SS316 gasket 10\\" 300#"
-  "8in, Gasket Spiral Wound, 4.5mm Thk, CL150, WD-SS316, IR-Graphite, OR-CS, ASME B16.20"
-Map that column as "description". Also map quantity, uom, line_no from their columns.
-Even if other columns (size, moc, qty) also exist, prefer "description_column" when one
-column already contains the complete specification.
-
-"structured_columns" — use this ONLY when NO column contains the full spec in one cell,
-and separate columns each carry one field (size in one col, rating in another, moc in another).
-
-Key rules:
-- Look at the actual cell values in data rows to decide: long comma-separated text → description_column.
-- Short type-label values (like "Gasket SPW", "Spiral Wound", "RTJ") → map as "component_name"
-  (not "description") so the gasket type is preserved even in structured_columns mode.
-- Set a column index only when you are confident it maps to that field; null otherwise.
-- The header_row may be in rows 1–15; data rows start immediately after.
-"""
-
-
-def _ai_detect_sheet_layout(ws, openai_client) -> dict | None:
-    """Send the first 20 rows to the LLM and return the column layout dict, or None on failure."""
-    preview_rows = []
-    for row_idx, row in enumerate(worksheet_rows_with_merged_values(ws, max_row=20), 1):
-        cells = [str(c) if c is not None else '' for c in row]
-        if any(s.strip() for s in cells):
-            preview_rows.append({'row': row_idx, 'cells': cells})
-
-    if not preview_rows:
-        return None
-
-    prompt = _AI_LAYOUT_PROMPT.format(preview_json=json.dumps(preview_rows, ensure_ascii=False))
-    try:
-        response = openai_client.chat.completions.create(
-            model='gpt-4o-mini',
-            temperature=0,
-            response_format={'type': 'json_object'},
-            messages=[{'role': 'user', 'content': prompt}],
-            timeout=30,
-        )
-        raw = response.choices[0].message.content or ''
-        layout = json.loads(raw)
-        # Basic sanity: must have 'columns' dict
-        if not isinstance(layout.get('columns'), dict):
-            return None
-        logger.info('AI sheet layout detected: %s', layout)
-        return layout
-    except Exception as exc:
-        logger.warning('AI sheet layout detection failed: %s', exc)
-        return None
-
-
-def _extract_items_from_ai_layout(ws, layout: dict) -> list[dict]:
-    """Given an AI-detected layout, extract all gasket line items from the worksheet."""
-    header_row = layout.get('header_row') or 1
-    fmt = layout.get('format_type', 'description_column')
-    cols = layout.get('columns', {})
-
-    def ci(field):
-        """Return 0-based column index for a field, or None."""
-        v = cols.get(field)
-        return int(v) if v is not None else None
-
-    items = []
-
-    if fmt == 'description_column':
-        desc_col = ci('description')
-        if desc_col is None:
-            return []
-        qty_col = ci('quantity')
-        uom_col = ci('uom')
-        line_col = ci('line_no')
-        moc_col = ci('moc')
-
-        rows = worksheet_rows_with_merged_values(ws)
-        for row in rows[header_row:]:
-            desc = _cell_str(row, desc_col)
-            if not desc or not _looks_like_gasket(desc):
-                continue
-            if moc_col is not None:
-                moc_val = _cell_str(row, moc_col)
-                if moc_val and moc_val.upper() != desc.upper():
-                    desc = desc + ' MOC: ' + moc_val
-            qty = _cell_float(row, qty_col) if qty_col is not None else None
-            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
-            line_no = _cell_float(row, line_col) if line_col is not None else None
-            items.append({
-                'line_no': int(line_no) if line_no else None,
-                'description': desc,
-                'quantity': qty,
-                'uom': uom,
-            })
-
-    else:  # structured_columns
-        size_col = ci('size')
-        rating_col = ci('rating')
-        moc_col = ci('moc')
-        thk_col = ci('thickness')
-        od_col = ci('od_mm')
-        id_col = ci('id_mm')
-        face_col = ci('face_type')
-        qty_col = ci('quantity')
-        uom_col = ci('uom')
-        line_col = ci('line_no')
-        comp_col = ci('component_name')
-
-        last_moc = None
-        last_comp = None
-
-        rows = worksheet_rows_with_merged_values(ws)
-        for row in rows[header_row:]:
-            # Fill-down MOC and component_name (often repeated only in first row)
-            mat_val = _cell_str(row, moc_col) if moc_col is not None else None
-            if mat_val:
-                last_moc = mat_val
-            else:
-                mat_val = last_moc
-
-            comp_val = _cell_str(row, comp_col) if comp_col is not None else None
-            if comp_val:
-                last_comp = comp_val
-            else:
-                comp_val = last_comp
-
-            # Build synthetic description
-            desc_parts = []
-
-            # Prepend component type label (e.g. "Gasket SPW") so gasket type
-            # is preserved for the extractor — this is the most important field
-            if comp_val:
-                desc_parts.append(comp_val)
-
-            if od_col is not None and id_col is not None:
-                od = _cell_str(row, od_col)
-                id_ = _cell_str(row, id_col)
-                if od and id_:
-                    thk = _cell_str(row, thk_col) if thk_col is not None else None
-                    thk_part = f' X {thk}MM THK' if thk else ''
-                    desc_parts.append(f'OD {od}MM X ID {id_}MM{thk_part}')
-            elif size_col is not None:
-                size_raw = _cell_str(row, size_col)
-                if size_raw:
-                    try:
-                        sv = float(size_raw)
-                        size_str = f'{int(sv)}"' if sv == int(sv) else f'{sv}"'
-                    except ValueError:
-                        size_str = size_raw
-                    rating_raw = _cell_str(row, rating_col) if rating_col is not None else None
-                    thk = _cell_str(row, thk_col) if thk_col is not None else None
-                    thk_part = f' {thk}MM THK' if thk else ''
-                    rating_part = f' {rating_raw}' if rating_raw else ''
-                    desc_parts.append(f'{size_str}{rating_part}{thk_part}')
-
-            # Need at least a size/dimension — comp_val alone is not enough
-            has_dimension = len(desc_parts) > (1 if comp_val else 0)
-            if not has_dimension:
-                continue
-
-            if mat_val:
-                desc_parts.append(f'MOC: {mat_val}')
-            if face_col is not None:
-                face_val = _cell_str(row, face_col)
-                if face_val:
-                    desc_parts.append(face_val)
-
-            desc = ' '.join(desc_parts)
-            # Append GASKET suffix only if no gasket-type keyword already present
-            if 'gasket' not in desc.lower():
-                desc += ' GASKET'
-            if not _looks_like_gasket(desc):
-                continue
-
-            qty = _cell_float(row, qty_col) if qty_col is not None else None
-            uom = _normalize_uom(_cell_str(row, uom_col) or 'NOS')
-            line_no = _cell_float(row, line_col) if line_col is not None else None
-            items.append({
-                'line_no': int(line_no) if line_no else None,
-                'description': desc,
-                'quantity': qty,
-                'uom': uom,
-            })
-
-    return items
-
-
-def parse_excel_file(file_bytes: bytes, openai_client=None) -> list[dict]:
-    """Parse an uploaded Excel file into raw line items.
-
-    If openai_client is provided, uses AI to detect column layout for each sheet
-    (robust against any column naming). Falls back to rule-based detection otherwise.
-    """
+def parse_excel_file(file_bytes: bytes) -> list[dict]:
+    """Parse an uploaded Excel file into raw line items via rule-based detection."""
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     items = []
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        sheet_items = _parse_sheet(ws, openai_client=openai_client)
+        sheet_items = _parse_sheet(ws)
         if sheet_items:
             items.extend(sheet_items)
     for i, item in enumerate(items, 1):
@@ -509,31 +203,11 @@ def excel_requires_smart_parse(file_bytes: bytes) -> bool:
     return False
 
 
-def _parse_sheet(ws, openai_client=None) -> list[dict]:
-    """Detect header row and extract line items from a worksheet.
-
-    With openai_client: uses AI to identify column layout — works for any format.
-    Without openai_client: falls back to keyword-based detection.
-    """
-    # --- AI-powered layout detection (preferred) ---
-    if openai_client is not None:
-        layout = _ai_detect_sheet_layout(ws, openai_client)
-        if layout:
-            try:
-                items = _extract_items_from_ai_layout(ws, layout)
-            except Exception as exc:
-                logger.warning('AI item extraction failed, falling back to rule-based: %s', exc)
-                items = []
-            if items:
-                return items
-            # AI detected a layout but found no items — fall through to rule-based
-
-    # --- Rule-based fallback: description-based format ---
+def _parse_sheet(ws) -> list[dict]:
+    """Detect header row and extract line items from a worksheet (rule-based)."""
     items = _parse_description_sections(ws)
     if items:
         return items
-
-    # --- Rule-based fallback: structured column format ---
     return _parse_structured_sheet(ws)
 
 

@@ -316,7 +316,7 @@ def ask_llm(doc_context: str, history: list[dict], question: str) -> str:
 
     try:
         resp = _openai_client().chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1-mini",
             messages=messages,
             temperature=0.1,
             max_tokens=2048,
@@ -359,7 +359,7 @@ with st.sidebar:
     if api_key:
         st.markdown(
             '<div class="da-status-row da-on">'
-            '<div class="da-dot da-dot-on"></div>GPT-4o ready'
+            '<div class="da-dot da-dot-on"></div>LLM ready'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -452,7 +452,7 @@ st.markdown("""
     <p class="da-hero-title">Document Q&amp;A Assistant</p>
     <p class="da-hero-sub">Upload any technical document and ask questions in plain English</p>
   </div>
-  <span class="da-hero-badge">GPT-4o</span>
+  <span class="da-hero-badge">LLM</span>
 </div>
 """, unsafe_allow_html=True)
 

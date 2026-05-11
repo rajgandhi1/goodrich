@@ -1656,7 +1656,7 @@ def _process_and_append(source, source_type: str):
             _line_offset_ref[0] += 1
             item['line_no'] = _line_offset_ref[0]
             _streamed.append(item)
-        status_text.text(f'GPT-4o processing... {len(_streamed)} item(s) extracted so far')
+        status_text.text(f'LLM processing... {len(_streamed)} item(s) extracted so far')
         preview_ph.dataframe(_build_preview_df(_streamed), use_container_width=True, hide_index=True)
 
     def _on_progress(done, total):
@@ -1765,7 +1765,7 @@ with tab_email:
         label_visibility='visible',
         key=f'email_text_{st.session_state._input_reset_seq}',
     )
-    st.caption(f'**Smart Parse active** — GPT-4o reads the full email in one pass. {_wl_hint}')
+    st.caption(f'**Smart Parse active** — LLM reads the full email in one pass. {_wl_hint}')
     if st.button('⚡  Process & Add to List', type='primary', key='process_email_btn'):
         if not email_text.strip():
             st.warning('Please paste some email text first.')
@@ -1781,7 +1781,7 @@ with tab_excel:
         help='Supports multi-sheet enquiry files',
         key=f'excel_upload_{st.session_state._input_reset_seq}',
     )
-    st.caption(f'**Smart Parse active** — GPT-4o reads all sheets at once. {_wl_hint}')
+    st.caption(f'**Smart Parse active** — LLM reads all sheets at once. {_wl_hint}')
     if st.button('⚡  Process & Add to List', type='primary', key='process_excel_btn'):
         if uploaded_file:
             file_bytes = uploaded_file.read()
@@ -2403,7 +2403,7 @@ if st.session_state.get('chat_loading'):
         _hx = [{'role': 'system', 'content': _sys}]
         _hx += [{'role': m['role'], 'content': m['content']} for m in st.session_state.chat_messages]
         _r = _cl.chat.completions.create(
-            model='gpt-4o-mini', messages=_hx, temperature=0.2, max_tokens=350,
+            model='gpt-4.1-mini', messages=_hx, temperature=0.2, max_tokens=350,
         )
         st.session_state.chat_messages.append(
             {'role': 'assistant', 'content': _r.choices[0].message.content.strip()}
