@@ -448,28 +448,28 @@ if 'chat_open' not in st.session_state:
 if 'chat_loading' not in st.session_state:
     st.session_state.chat_loading = False
 _HISTORY_PATH = Path(__file__).resolve().parent / 'data' / 'quote_history.json'
-_HISTORY_LIMIT = 25
+_HISTORY_LIMIT = 100
 
-# Load history from Redis once per session
+# Load history once per session — Supabase first, local JSON as fallback
 if not st.session_state._history_loaded:
     import json as _json
-    from core.document_reader import _get_redis as _get_redis_client
+    from services import storage as _storage
     loaded_history = None
-    _r = _get_redis_client()
-    if _r:
+
+    if _storage.is_connected():
         try:
-            _raw = _r.get('gq:run_history')
-            if _raw:
-                loaded_history = _json.loads(_raw)
+            loaded_history = _storage.load_quotes(limit=_HISTORY_LIMIT)
         except Exception:
-            pass
-    if loaded_history is None and _HISTORY_PATH.exists():
+            loaded_history = None
+
+    if not loaded_history and _HISTORY_PATH.exists():
         try:
             loaded_history = _json.loads(_HISTORY_PATH.read_text(encoding='utf-8'))
         except Exception:
             loaded_history = None
+
     if isinstance(loaded_history, list):
-        st.session_state.run_history = loaded_history[-_HISTORY_LIMIT:]
+        st.session_state.run_history = loaded_history
     st.session_state._history_loaded = True
 
 import os as _os
@@ -482,20 +482,16 @@ logger = logging.getLogger(__name__)
 _LOGO_PATH = _os.path.join(_os.path.dirname(__file__), 'logo.png')
 
 
-def _save_history_to_redis():
-    history_json = _json.dumps(st.session_state.run_history)
+def _save_history_local(entry: dict | None = None):
+    """Write full history list to local JSON (local dev fallback)."""
     try:
         _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _HISTORY_PATH.write_text(history_json, encoding='utf-8')
+        _HISTORY_PATH.write_text(
+            _json.dumps(st.session_state.run_history[-_HISTORY_LIMIT:]),
+            encoding='utf-8',
+        )
     except Exception:
         pass
-    from core.document_reader import _get_redis as _get_redis_client
-    _r = _get_redis_client()
-    if _r:
-        try:
-            _r.set('gq:run_history', history_json)
-        except Exception:
-            pass
 
 
 def _make_history_entry(items, quote_data=None, quote_pdf=None):
@@ -527,9 +523,14 @@ def _make_history_entry(items, quote_data=None, quote_pdf=None):
 
 
 def _append_history(entry):
-    st.session_state.run_history.append(entry)
-    st.session_state.run_history = st.session_state.run_history[-_HISTORY_LIMIT:]
-    _save_history_to_redis()
+    from services import storage as _storage
+    uid = _storage.save_quote(entry)
+    if uid:
+        entry['supabase_id'] = uid
+    else:
+        _save_history_local()
+    st.session_state.run_history.insert(0, entry)  # newest first, matches Supabase order
+    st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
 
 
 def _restore_history_entry(run):
@@ -1015,21 +1016,12 @@ with st.sidebar:
                         key=f'hist_pdf_{run_idx}',
                     )
                 if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
-                    from core.document_reader import _get_redis, _cache_key
-                    r = _get_redis()
-                    if r:
-                        descs = {
-                            item.get('raw_description', '')
-                            for item in run.get('items', [])
-                            if item.get('raw_description')
-                        }
-                        for desc in descs:
-                            try:
-                                r.delete(_cache_key(desc))
-                            except Exception:
-                                pass
+                    from services import storage as _storage
+                    supabase_id = run.get('supabase_id')
+                    if supabase_id:
+                        _storage.delete_quote(supabase_id)
                     st.session_state.run_history.pop(run_idx)
-                    _save_history_to_redis()
+                    _save_history_local()
                     st.rerun()
 
 
