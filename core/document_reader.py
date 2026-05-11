@@ -42,8 +42,13 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
   Unspecified rubber with no clear type → omit moc, set special="MOC ambiguous - confirm rubber type"
 - face_type: "RF" or "FF" — for SOFT_CUT and ISK only
 - thickness_mm (number): default 3 for SOFT_CUT, 4.5 for SPIRAL_WOUND if not stated
-- standard: "ASME B16.21" (SOFT_CUT, # rating), "EN 1514-1" (SOFT_CUT, PN rating), "ASME B16.20" (SW/RTJ)
-  NPS ≥26": use "ASME B16.47" instead of B16.21
+- standard — this is the GASKET standard, not the flange standard. The two are different:
+    * Real gasket standards: ASME B16.20 (metallic — SW/RTJ/jacketed), ASME B16.21 (non-metallic soft cut), API 6A (BX/R/RX wellhead rings), EN 1514-1..8, DIN 2690..2698, JIS B 2404
+    * Flange standards (NOT gasket standards — ignore as the `standard`): ASME B16.5, ASME B16.47, API 6B, API 6BX, API 17D
+    * If customer cites API 6B / API 6BX (flange type) for an RTJ → the gasket standard is API 6A
+    * If customer cites ASME B16.5 (flange std) for a SW/RTJ → the gasket standard is ASME B16.20
+    * If the customer cites a real gasket standard, use it verbatim
+    * If no real gasket standard is cited, default: SOFT_CUT # → ASME B16.21 (≥26" → ASME B16.47); SOFT_CUT PN → EN 1514-1; SPW/RTJ → ASME B16.20
 - od_mm, id_mm (numbers): only when value is already given in mm. Otherwise leave both blank and put the OD/ID exactly as written (any unit — inches, feet-inches, fractions) into `size`, with size_type="OD_ID". Code will handle unit conversion.
 - special: genuine technical notes only — ignore plant tag numbers, MR/RFQ references, area codes
 

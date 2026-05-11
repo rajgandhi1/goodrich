@@ -713,6 +713,13 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
             flags.append('Ring number not in lookup table — enter manually (check ASME B16.20)')
             item['ring_no'] = None
 
+    # Normalize flange-style API codes (API 6B, API 6BX are flange types, not gasket standards;
+    # the actual gasket standard for wellhead RTJ rings is API 6A)
+    cited_std_upper = (item.get('standard') or '').upper().replace('-', ' ')
+    cited_std_upper = ' '.join(cited_std_upper.split())  # collapse whitespace
+    if cited_std_upper in ('API 6BX', 'API 6B', 'API 6 BX', 'API 6 B'):
+        item['standard'] = 'API 6A'
+
     # Set standard based on ring prefix, rating, or bore size
     rn_upper = (item.get('ring_no') or '').upper()
     rating = item.get('rating') or ''
