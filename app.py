@@ -15,9 +15,22 @@ try:
 except ImportError:
     pass
 
+import os as _os
+
+# Pull any secrets from st.secrets into os.environ so the rest of the code
+# can use os.environ.get() uniformly regardless of where the secret was set.
+try:
+    import streamlit as _st_secrets_loader
+    for _secret_key in ('OPENAI_API_KEY', 'SUPABASE_URL', 'SUPABASE_KEY'):
+        if not _os.environ.get(_secret_key):
+            _val = str(_st_secrets_loader.secrets.get(_secret_key, '') or '').strip()
+            if _val:
+                _os.environ[_secret_key] = _val
+except Exception:
+    pass
+
 # Strip invisible non-ASCII characters (e.g. narrow no-break space from copy-paste)
 # from the API key however it arrived (Streamlit Secrets, .env, or shell env).
-import os as _os
 _raw_key = _os.environ.get('OPENAI_API_KEY', '')
 if _raw_key:
     _clean_key = _raw_key.encode('ascii', errors='ignore').decode('ascii').strip()
@@ -957,6 +970,25 @@ with st.sidebar:
             _os.environ['OPENAI_API_KEY'] = clean_key
             st.rerun()
 
+    # Supabase status
+    from services import storage as _storage_status
+    if _storage_status.is_connected():
+        st.markdown(
+            '<div class="gq-ai-status gq-ai-on">'
+            '<div class="gq-ai-dot gq-ai-dot-on"></div>'
+            'History: cloud storage'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="gq-ai-status gq-ai-off">'
+            '<div class="gq-ai-dot gq-ai-dot-off"></div>'
+            'History: session only'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
     st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
     st.markdown('<div class="gq-sidebar-title">Tools</div>', unsafe_allow_html=True)
     st.markdown(
@@ -1209,14 +1241,8 @@ def _build_extraction_summary(items: list[dict]) -> list[str]:
 # Helper — build display rows
 # ---------------------------------------------------------------------------
 def _build_preview_df(items):
-    STATUS_ICON = {'ready': '✅', 'check': '🟡', 'missing': '🔴'}
-    return pd.DataFrame([{
-        '#':                    item.get('line_no', ''),
-        'S':                    STATUS_ICON.get(item.get('status', ''), ''),
-        'Customer Description': (item.get('raw_description') or '')[:80],
-        'GGPL Description':     item.get('ggpl_description', ''),
-        'Notes':                '; '.join((item.get('flags') or [])[:2]),
-    } for item in items])
+    """Same columns as the working list so users can review during extraction."""
+    return pd.DataFrame(_build_rows(items))
 
 
 def _build_rows(items):
@@ -1657,7 +1683,12 @@ def _process_and_append(source, source_type: str):
             item['line_no'] = _line_offset_ref[0]
             _streamed.append(item)
         status_text.text(f'LLM processing... {len(_streamed)} item(s) extracted so far')
-        preview_ph.dataframe(_build_preview_df(_streamed), use_container_width=True, hide_index=True)
+        preview_ph.dataframe(
+            _build_preview_df(_streamed),
+            use_container_width=False,
+            hide_index=True,
+            height=min(80 + 35 * len(_streamed), 400),
+        )
 
     def _on_progress(done, total):
         progress_bar.progress(10 + int(done / total * 75))
@@ -1733,8 +1764,9 @@ def _process_and_append(source, source_type: str):
             status_text.text(f'Applying business rules... {i}/{n} items')
             preview_ph.dataframe(
                 _build_preview_df(processed),
-                width='stretch',
+                use_container_width=False,
                 hide_index=True,
+                height=min(80 + 35 * len(processed), 400),
             )
 
     progress_bar.empty()

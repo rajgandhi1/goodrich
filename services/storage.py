@@ -16,15 +16,35 @@ _client = None
 _init_attempted = False
 
 
+def _get_credentials() -> tuple[str, str]:
+    """Return (url, key) from env vars or Streamlit secrets, whichever is set."""
+    url = os.environ.get('SUPABASE_URL', '').strip()
+    key = os.environ.get('SUPABASE_KEY', '').strip()
+    if url and key:
+        return url, key
+    try:
+        import streamlit as st
+        url = str(st.secrets.get('SUPABASE_URL', '') or '').strip()
+        key = str(st.secrets.get('SUPABASE_KEY', '') or '').strip()
+    except Exception:
+        pass
+    return url, key
+
+
 def _get_client():
     global _client, _init_attempted
+    # If already connected, return cached client.
+    if _client is not None:
+        return _client
+    # If we already tried and got no credentials, retry on each call
+    # so secrets set after module import are picked up.
+    url, key = _get_credentials()
+    if not url or not key:
+        return None
+    # Only attempt connection once per process to avoid repeated failures.
     if _init_attempted:
         return _client
     _init_attempted = True
-    url = os.environ.get('SUPABASE_URL', '').strip()
-    key = os.environ.get('SUPABASE_KEY', '').strip()
-    if not url or not key:
-        return None
     try:
         from supabase import create_client
         _client = create_client(url, key)
