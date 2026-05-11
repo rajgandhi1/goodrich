@@ -241,7 +241,7 @@ def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
 
 # ── Items table — built with reportlab.platypus.Table ───────────────────────
 # Column x-dividers; col widths derived automatically
-ITEM_COLS   = [20, 45.5, 83.8, 177.8, 345.5, 404.8, 437.8, 503.8, 575.2]
+ITEM_COLS   = [20, 45.5, 83.8, 177.8, 365.5, 424.8, 457.8, 513.8, 575.2]
 _ITEM_COL_W = [ITEM_COLS[i+1] - ITEM_COLS[i] for i in range(len(ITEM_COLS)-1)]
 
 _TBL_TOP = 358   # "top" coord of table top edge
@@ -304,17 +304,17 @@ def _description_cell(item: dict):
     return Paragraph(ggpl, _PS_DESC)
 
 
-def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1) -> Table:
+def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1, currency: str = "INR") -> Table:
     """Build a platypus Table for a slice of items."""
     header = [
-        Paragraph("Sl.<br/>No.",            _PS_HDR),
-        Paragraph("Cust<br/>SL.NO",         _PS_HDR),
-        Paragraph("Customer<br/>Item Code",  _PS_HDR),
-        Paragraph("Material Description",    _PS_HDR),
-        Paragraph("Quantity",                _PS_HDR),
-        Paragraph("UOM",                     _PS_HDR),
-        Paragraph("Unit Price<br/>INR",      _PS_HDR),
-        Paragraph("TOTAL PRICE<br/>INR",     _PS_HDR),
+        Paragraph("Sl.<br/>No.",                       _PS_HDR),
+        Paragraph("Cust<br/>SL.NO",                    _PS_HDR),
+        Paragraph("Customer<br/>Item Code",             _PS_HDR),
+        Paragraph("Material Description",               _PS_HDR),
+        Paragraph("Quantity",                           _PS_HDR),
+        Paragraph("UOM",                                _PS_HDR),
+        Paragraph(f"Unit Price<br/>{currency}",         _PS_HDR),
+        Paragraph(f"TOTAL PRICE<br/>{currency}",        _PS_HDR),
     ]
     rows = [header]
     for i, (item, unit) in enumerate(zip(items_slice, prices_slice)):
@@ -339,11 +339,11 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     _draw_buyer_block(c, quote_data)
 
     unit_prices = quote_data.get("unit_prices", [])
-    TABLE_X = ITEM_COLS[0]                         # 20 pt
-    TABLE_W = ITEM_COLS[-1] - ITEM_COLS[0]         # 555.2 pt
+    currency    = quote_data.get("currency", "INR")
+    TABLE_X = ITEM_COLS[0]
+    TABLE_W = ITEM_COLS[-1] - ITEM_COLS[0]
     AVAIL_H = _TBL_BTM - _TBL_TOP
 
-    # ── Measure actual ReportLab table heights to use the page fully ────────
     def _prices_for(count: int) -> list[float]:
         return [
             _num(unit_prices[start + i] if start + i < len(unit_prices) else 0)
@@ -351,25 +351,24 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
         ]
 
     n_fit = 0
-    tbl_h = 0
     for count in range(1, len(items) - start + 1):
         candidate = _make_items_table(
             items[start : start + count],
             _prices_for(count),
             start_serial=start + 1,
+            currency=currency,
         )
         _, candidate_h = candidate.wrapOn(c, TABLE_W, AVAIL_H)
         if candidate_h > AVAIL_H:
             break
         n_fit = count
-        tbl_h = candidate_h
     n_fit = max(1, n_fit)
 
     items_slice  = items[start : start + n_fit]
     prices_slice = _prices_for(n_fit)
 
     # ── Build & draw the table ───────────────────────────────────────────────
-    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1)
+    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1, currency=currency)
     _, tbl_h = t.wrapOn(c, TABLE_W, AVAIL_H)
 
     tbl_pdf_y = _top(_TBL_TOP) - tbl_h             # lower-left in PDF coords
@@ -414,6 +413,7 @@ def _gst_rows(quote_data: dict, gst_amt: float):
 
 def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     total_qty, subtotal, _, __, gst_amt, grand_total = _totals(items, quote_data)
+    currency = quote_data.get("currency", "INR")
 
     c.setStrokeColorRGB(*BLACK)
 
@@ -451,11 +451,16 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     GST_ROW_H = 17
 
     gst_y = 186     # first GST row text y (in pdfplumber-style top coords)
-    for name, pct, amount in _gst_rows(quote_data, gst_amt):
-        _draw(c, GST_X1, gst_y, name, size=8)
-        _draw(c, GST_X2, gst_y, f"{pct:.2f}", size=8, align="right")
-        _draw(c, GST_X3, gst_y, "%", size=8)
-        _draw(c, GST_X4, gst_y, _fmt_amount(amount, comma=True), size=8, align="right")
+    if currency == "INR":
+        for name, pct, amount in _gst_rows(quote_data, gst_amt):
+            _draw(c, GST_X1, gst_y, name, size=8)
+            _draw(c, GST_X2, gst_y, f"{pct:.2f}", size=8, align="right")
+            _draw(c, GST_X3, gst_y, "%", size=8)
+            _draw(c, GST_X4, gst_y, _fmt_amount(amount, comma=True), size=8, align="right")
+            gst_y += GST_ROW_H
+    else:
+        _draw(c, GST_X1, gst_y, f"Tax / Duty ({currency})", size=8)
+        _draw(c, GST_X4, gst_y, _fmt_amount(gst_amt, comma=True), size=8, align="right")
         gst_y += GST_ROW_H
 
     # Thin rule above TOTAL, then bold TOTAL row
@@ -472,7 +477,7 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
         ("2. Validity",             f"{quote_data.get('validity_days', '7')} DAYS"),
         ("3. Packing &\nforwarding charges", quote_data.get("packing", "INCLUSIVE")),
         ("4. Freight",              quote_data.get("freight", "INCLUSIVE")),
-        ("5. Taxes and Duties",     f"Taxes and duties shall be paid at actuals as applicable at the time of shipment-present GST is {_num(quote_data.get('gst_pct'), 18):g}%"),
+        ("5. Taxes and Duties",     f"Taxes and duties shall be paid at actuals as applicable at the time of shipment" + (f"-present GST is {_num(quote_data.get('gst_pct'), 18):g}%" if currency == "INR" else "")),
         ("6. Payment Terms",        quote_data.get("payment_terms", "30% ADVANCE & 70% BALANCE BEFORE DISPATCH OF MATERIAL")),
         ("7. Bank Charges",         quote_data.get("bank_charges", "Bank Charges at the customer side, shall to be customer account, unless agreed prior by Goodrich .")),
         ("8. Delivery Terms",       quote_data.get("delivery", "")),

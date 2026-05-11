@@ -138,19 +138,15 @@ st.markdown("""
 .gq-regret  { background: #eeeeee; color: #666666; }
 .gq-regret .lbl { color: #888888; }
 
-/* ── Sidebar history entries ────────────────────────────────── */
-.gq-hist-meta { font-size: 0.78rem; opacity: 0.7; margin: 2px 0 6px; }
-.gq-hist-pills { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-.gq-pill {
-    font-size: 0.7rem;
-    padding: 1px 7px;
-    border-radius: 20px;
-    font-weight: 600;
+/* ── Sidebar status strip ───────────────────────────────────── */
+.gq-status-strip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.75rem; opacity: 0.8;
 }
-.gq-pill-ready   { background: #1a7a3c; color: #fff; }
-.gq-pill-check   { background: #9a6800; color: #fff; }
-.gq-pill-missing { background: #b91c1c; color: #fff; }
-.gq-pill-regret  { background: #888888; color: #fff; }
+.gq-ai-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.gq-ai-dot-on  { background: #4caf50; box-shadow: 0 0 5px #4caf50; }
+.gq-ai-dot-off { background: #7a8eaa; }
 
 /* ── Sidebar section title ──────────────────────────────────── */
 .gq-sidebar-title {
@@ -161,22 +157,58 @@ st.markdown("""
     margin: 0.5rem 0 0.4rem;
 }
 
-/* ── Status indicator in sidebar ───────────────────────────── */
-.gq-ai-status {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.55rem 0.8rem;
-    border-radius: 8px;
+/* ── History date-group label ───────────────────────────────── */
+.gq-hist-group {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    opacity: 0.45;
+    margin: 0.8rem 0 0.2rem;
+    padding-left: 2px;
+}
+
+/* ── History row item ───────────────────────────────────────── */
+.gq-hist-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0.38rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
     font-size: 0.82rem;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
+    transition: background 0.12s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gq-hist-row:hover  { background: #2e4470; }
+.gq-hist-row.active { background: #3d5a8a; }
+.gq-hist-row-label  { flex:1; overflow:hidden; text-overflow:ellipsis; }
+.gq-hist-row-pending { opacity: 0.55; font-style: italic; font-size: 0.72rem; }
+
+/* ── History expanded detail ────────────────────────────────── */
+.gq-hist-detail {
+    background: #1e2d48;
+    border-radius: 6px;
+    padding: 0.5rem 0.6rem;
+    margin: 0.15rem 0 0.4rem;
+    font-size: 0.78rem;
+}
+.gq-hist-meta { font-size: 0.75rem; opacity: 0.65; margin-bottom: 4px; }
+.gq-hist-pills { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.gq-pill {
+    font-size: 0.68rem; padding: 1px 6px;
+    border-radius: 20px; font-weight: 600;
+}
+.gq-pill-ready   { background: #1a7a3c; color: #fff; }
+.gq-pill-check   { background: #9a6800; color: #fff; }
+.gq-pill-missing { background: #b91c1c; color: #fff; }
+.gq-pill-regret  { background: #888888; color: #fff; }
+
+/* ── Status indicator (legacy, kept for compat) ─────────────── */
+.gq-ai-status {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.55rem 0.8rem; border-radius: 8px;
+    font-size: 0.82rem; font-weight: 500; margin-bottom: 0.5rem;
 }
 .gq-ai-on  { background: #1a4a2e; }
 .gq-ai-off { background: #2e3a52; }
-.gq-ai-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-.gq-ai-dot-on  { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
-.gq-ai-dot-off { background: #7a8eaa; }
 
 /* ── Process button ─────────────────────────────────────────── */
 [data-testid="stButton"] > button[kind="primary"] {
@@ -444,6 +476,8 @@ if 'run_history' not in st.session_state:
     st.session_state.run_history = []
 if '_history_loaded' not in st.session_state:
     st.session_state._history_loaded = False
+if '_hist_selected' not in st.session_state:
+    st.session_state._hist_selected = None  # index of expanded history item
 if '_show_confirm' not in st.session_state:
     st.session_state._show_confirm = False
 if '_show_quote_page' not in st.session_state:
@@ -711,7 +745,7 @@ def _render_quote_page():
     <div class="gq-step">
       <div class="gq-step-label">
         <span class="gq-step-badge">4</span>
-        <p class="gq-step-title">Item Pricing (INR)</p>
+        <p class="gq-step-title">Item Pricing</p>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -723,26 +757,27 @@ def _render_quote_page():
     if len(prev_prices) != len(items):
         prev_prices = list(prev_prices) + [0.0] * (len(items) - len(prev_prices))
 
+    _cur = qd.get('currency', 'INR')
+    _up_col = f'Unit Price ({_cur})'
+    _tot_col = f'Total ({_cur})'
+
     pricing_rows = []
     for i, item in enumerate(items):
         status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴', 'regret': '⛔'}.get(
             item.get('status', ''), '')
         pricing_rows.append({
-            '#':                   item.get('line_no', i + 1),
-            'Status':              status_icon,
+            '#':                    item.get('line_no', i + 1),
+            'Status':               status_icon,
+            'GGPL Description':     item.get('ggpl_description', ''),
             'Customer Description': (item.get('raw_description') or '')[:120],
-            'GGPL Description':    item.get('ggpl_description', ''),
-            'Qty':                 float(item.get('quantity') or 0),
-            'UOM':                 item.get('uom') or 'NOS',
-            'Unit Price (INR)':    float(prev_prices[i]) if prev_prices[i] else 0.0,
-            'Total (INR)':         0.0,  # computed below
+            'Qty':                  float(item.get('quantity') or 0),
+            'UOM':                  item.get('uom') or 'NOS',
+            _up_col:                float(prev_prices[i]) if prev_prices[i] else 0.0,
+            _tot_col:               0.0,
         })
 
     pricing_df = pd.DataFrame(pricing_rows)
-    # pre-compute totals for display
-    pricing_df['Total (INR)'] = (
-        pricing_df['Qty'].astype(float) * pricing_df['Unit Price (INR)'].astype(float)
-    )
+    pricing_df[_tot_col] = pricing_df['Qty'].astype(float) * pricing_df[_up_col].astype(float)
 
     edited_pricing = st.data_editor(
         pricing_df,
@@ -752,15 +787,15 @@ def _render_quote_page():
         column_config={
             '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
             'Status':               st.column_config.TextColumn('S', width='small', disabled=True),
-            'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'GGPL Description':     st.column_config.TextColumn('GGPL Description', width='large', disabled=True),
+            'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0,
                                         help='Edit to override extracted quantity'),
             'UOM':                  st.column_config.TextColumn('UOM', width='small', disabled=True),
-            'Unit Price (INR)':     st.column_config.NumberColumn('Unit Price (INR)', width='medium',
+            _up_col:                st.column_config.NumberColumn(_up_col, width='medium',
                                         min_value=0, format='%.2f',
-                                        help='Enter unit price in INR'),
-            'Total (INR)':          st.column_config.NumberColumn('Total (INR)', width='medium',
+                                        help=f'Enter unit price in {_cur}'),
+            _tot_col:               st.column_config.NumberColumn(_tot_col, width='medium',
                                         disabled=True, format='%.2f'),
         },
         key='qp_pricing_editor',
@@ -776,11 +811,9 @@ def _render_quote_page():
                 pass
 
     # Recompute totals from edited prices
-    edited_pricing['Total (INR)'] = (
-        edited_pricing['Qty'].astype(float) * edited_pricing['Unit Price (INR)'].astype(float)
-    )
-    qd['unit_prices'] = edited_pricing['Unit Price (INR)'].tolist()
-    subtotal = edited_pricing['Total (INR)'].sum()
+    edited_pricing[_tot_col] = edited_pricing['Qty'].astype(float) * edited_pricing[_up_col].astype(float)
+    qd['unit_prices'] = edited_pricing[_up_col].tolist()
+    subtotal = edited_pricing[_tot_col].sum()
 
     # GST preview
     gst_type_live = qd.get('gst_type', 'IGST')
@@ -811,9 +844,13 @@ def _render_quote_page():
     """, unsafe_allow_html=True)
 
     gst_c1, gst_c2, gst_c3, gst_c4 = st.columns(4)
+    _CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'KWD', 'SAR', 'SGD', 'AUD', 'CAD', 'JPY', 'CNY']
+    _cur_val = qd.get('currency', 'INR')
+    if _cur_val not in _CURRENCIES:
+        _CURRENCIES = [_cur_val] + _CURRENCIES
     qd['currency'] = gst_c1.selectbox(
-        'Currency', ['INR', 'USD'],
-        index=['INR', 'USD'].index(qd.get('currency', 'INR')),
+        'Currency', _CURRENCIES,
+        index=_CURRENCIES.index(_cur_val),
         key='qp_currency',
     )
     qd['gst_type'] = gst_c2.selectbox(
@@ -975,124 +1012,165 @@ def _render_quote_page():
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="gq-sidebar-title">System Status</div>', unsafe_allow_html=True)
-    if _os.environ.get('OPENAI_API_KEY'):
-        st.markdown(
-            '<div class="gq-ai-status gq-ai-on">'
-            '<div class="gq-ai-dot gq-ai-dot-on"></div>'
-            'AI extraction active'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="gq-ai-status gq-ai-off">'
-            '<div class="gq-ai-dot gq-ai-dot-off"></div>'
-            'Rule-based mode only'
-            '</div>',
-            unsafe_allow_html=True,
-        )
+    # -- Compact status strip --------------------------------------------------
+    from services import storage as _storage_status
+    _ai_on = bool(_os.environ.get('OPENAI_API_KEY'))
+    _db_on = _storage_status.is_connected()
+    _ai_color = '#22c55e' if _ai_on else '#ef4444'
+    _db_color = '#22c55e' if _db_on else '#f59e0b'
+    _ai_txt = 'AI on' if _ai_on else 'Rule-based'
+    _db_txt = 'Cloud' if _db_on else 'Local'
+    st.markdown(
+        '<div class="gq-status-strip">'
+        f'<span style="color:{_ai_color};font-size:0.7rem">&#x25cf;</span> <span>{_ai_txt}</span>'
+        '<span style="margin:0 0.5rem;opacity:0.3">|</span>'
+        f'<span style="color:{_db_color};font-size:0.7rem">&#x25cf;</span> <span>{_db_txt}</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not _ai_on:
         api_key_input = st.text_input(
             'OpenAI API Key', type='password', placeholder='sk-...', label_visibility='collapsed',
             help='Paste your key to enable AI extraction',
         )
         if api_key_input:
-            # Strip any invisible Unicode spaces (e.g.  ) that sneak in from copy-paste
             clean_key = api_key_input.encode('ascii', errors='ignore').decode('ascii').strip()
             _os.environ['OPENAI_API_KEY'] = clean_key
             st.rerun()
 
-    # Supabase status
-    from services import storage as _storage_status
-    if _storage_status.is_connected():
-        st.markdown(
-            '<div class="gq-ai-status gq-ai-on">'
-            '<div class="gq-ai-dot gq-ai-dot-on"></div>'
-            'History: cloud storage'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            '<div class="gq-ai-status gq-ai-off">'
-            '<div class="gq-ai-dot gq-ai-dot-off"></div>'
-            'History: session only'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
-    st.markdown('<div class="gq-sidebar-title">Tools</div>', unsafe_allow_html=True)
+    # Doc Assistant link (compact)
     st.markdown(
         '<a href="/Doc_Assistant" target="_blank" style="'
-        'display:flex;align-items:center;gap:0.5rem;'
+        'display:flex;align-items:center;gap:0.4rem;'
         'background:#2e4470;color:#e8ecf1 !important;text-decoration:none;'
         'border:1px solid #3d5a8a;border-radius:6px;'
-        'padding:0.45rem 0.9rem;font-size:0.84rem;font-weight:500;'
-        'transition:background 0.15s;margin-bottom:0.5rem;width:100%;box-sizing:border-box;"'
+        'padding:0.35rem 0.75rem;font-size:0.8rem;font-weight:500;'
+        'margin:0.5rem 0;width:100%;box-sizing:border-box;"'
         ' onmouseover="this.style.background=\'#3d5a8a\'"'
         ' onmouseout="this.style.background=\'#2e4470\'">'
-        '📄&nbsp; Doc Assistant&nbsp;<span style="opacity:0.6;font-size:0.78rem">↗</span>'
+        '&#128196;&nbsp; Doc Assistant&nbsp;<span style="opacity:0.6;font-size:0.75rem">&#8599;</span>'
         '</a>',
         unsafe_allow_html=True,
     )
-    st.markdown('<hr style="margin:0.8rem 0;border-color:#2e4470">', unsafe_allow_html=True)
-    st.markdown('<div class="gq-sidebar-title">Quote History</div>', unsafe_allow_html=True)
+
+    st.markdown('<hr style="margin:0.5rem 0;border-color:#2e4470">', unsafe_allow_html=True)
+
+    # -- Quote History ---------------------------------------------------------
+    st.markdown('<div class="gq-sidebar-title" style="margin-bottom:0.3rem">Quote History</div>',
+                unsafe_allow_html=True)
 
     history = st.session_state.run_history
     if not history:
         st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No quotes saved yet.</p>',
                     unsafe_allow_html=True)
     else:
-        for run_idx, run in enumerate(history):  # history is newest-first
-            quote_no = run.get('quote_no') or ''
-            pdf_ready = run.get('pdf_ready', True)  # entries before this feature default True
-            label = quote_no or run.get('customer') or run.get('project_ref') or f'Enquiry {run_idx + 1}'
-            suffix = '' if pdf_ready else ' *(pending)*'
-            with st.expander(f'**{label}**{suffix}', expanded=(run_idx == 0)):
-                n_regret_h = run.get('n_regret', 0)
-                pdf_status = '📋 Enquiry saved — quotation not prepared' if not pdf_ready else ''
-                st.markdown(
-                    f'<div class="gq-hist-meta">{run.get("timestamp", "")}</div>'
-                    f'<div class="gq-hist-meta">{run.get("customer") or "No customer"}'
-                    f'{" | " + run.get("project_ref") if run.get("project_ref") else ""}</div>'
-                    + (f'<div class="gq-hist-meta" style="opacity:0.7">{pdf_status}</div>' if pdf_status else '')
-                    + '<div class="gq-hist-pills">'
-                    f'<span class="gq-pill gq-pill-ready">✅ {run.get("n_ready", 0)}</span>'
-                    f'<span class="gq-pill gq-pill-check">🟡 {run.get("n_check", 0)}</span>'
-                    f'<span class="gq-pill gq-pill-missing">🔴 {run.get("n_missing", 0)}</span>'
-                    + (f'<span class="gq-pill gq-pill-regret">⛔ {n_regret_h}</span>' if n_regret_h else '')
-                    + '</div>',
-                    unsafe_allow_html=True,
-                )
-                btn_col, quote_col, del_col = st.columns(3)
-                if btn_col.button('Restore', key=f'restore_{run_idx}'):
-                    _restore_history_entry(run)
-                    st.rerun()
-                if quote_col.button('Quote Form', key=f'quote_form_{run_idx}'):
-                    _restore_history_entry(run)
-                    st.session_state._show_quote_page = True
-                    st.rerun()
-                pdf_bytes = _history_pdf_bytes(run)
-                if pdf_bytes:
-                    st.download_button(
-                        'Download PDF',
-                        data=pdf_bytes,
-                        file_name=run.get('quote_pdf_name') or 'quotation.pdf',
-                        mime='application/pdf',
-                        key=f'hist_pdf_{run_idx}',
-                    )
-                if del_col.button('Delete', key=f'delete_{run_idx}', type='secondary'):
-                    from services import storage as _storage
-                    supabase_id = run.get('supabase_id')
-                    if supabase_id:
-                        _storage.delete_quote(supabase_id)
-                    st.session_state.run_history.pop(run_idx)
-                    if run is st.session_state.get('_active_hist_entry'):
-                        st.session_state.pop('_active_hist_entry', None)
-                    _save_history_local()
+        import datetime as _dt
+
+        def _age_group(ts: str) -> str:
+            if not ts:
+                return 'Older'
+            try:
+                d = _dt.date.fromisoformat(ts[:10])
+            except Exception:
+                return 'Older'
+            today = _dt.date.today()
+            delta = (today - d).days
+            if delta == 0:
+                return 'Today'
+            if delta == 1:
+                return 'Yesterday'
+            if delta <= 7:
+                return 'Last 7 days'
+            if delta <= 30:
+                return 'Last 30 days'
+            return d.strftime('%B %Y')
+
+        # Group runs by age
+        _groups: dict[str, list] = {}
+        _group_order: list[str] = []
+        for _run in history:
+            _g = _age_group(_run.get('timestamp', ''))
+            if _g not in _groups:
+                _groups[_g] = []
+                _group_order.append(_g)
+            _groups[_g].append(_run)
+
+        _sel = st.session_state.get('_hist_selected')
+
+        for _grp in _group_order:
+            st.markdown(f'<div class="gq-hist-group">{_grp}</div>', unsafe_allow_html=True)
+            for _run in _groups[_grp]:
+                _run_idx = history.index(_run)
+                _pdf_ready = _run.get('pdf_ready', True)
+                _label = (_run.get('quote_no') or _run.get('customer') or
+                          _run.get('project_ref') or f'Enquiry {_run_idx + 1}')
+                _is_sel = _sel == _run_idx
+                _arrow = '▾' if _is_sel else '▸'
+                _dot = ' ·' if not _pdf_ready else ''
+                if st.button(
+                    f'{_arrow} {_label}{_dot}',
+                    key=f'hist_row_{_run_idx}',
+                    help='Click to expand' if not _is_sel else 'Click to collapse',
+                    use_container_width=True,
+                ):
+                    st.session_state._hist_selected = None if _is_sel else _run_idx
                     st.rerun()
 
+                if _is_sel:
+                    _n_regret_h = _run.get('n_regret', 0)
+                    _pdf_status = 'Enquiry saved - quotation not prepared' if not _pdf_ready else ''
+                    _cust = _run.get('customer') or 'No customer'
+                    _proj = _run.get('project_ref') or ''
+                    _proj_html = f' | {_proj}' if _proj else ''
+                    _status_html = (f'<div class="gq-hist-meta" style="opacity:0.7">{_pdf_status}</div>'
+                                    if _pdf_status else '')
+                    _regret_html = (f'<span class="gq-pill gq-pill-regret">Regret: {_n_regret_h}</span>'
+                                    if _n_regret_h else '')
+                    st.markdown(
+                        f'<div class="gq-hist-detail">'
+                        f'<div class="gq-hist-meta">{_run.get("timestamp", "")}</div>'
+                        f'<div class="gq-hist-meta">{_cust}{_proj_html}</div>'
+                        f'{_status_html}'
+                        f'<div class="gq-hist-pills">'
+                        f'<span class="gq-pill gq-pill-ready">Ready: {_run.get("n_ready", 0)}</span>'
+                        f'<span class="gq-pill gq-pill-check">Check: {_run.get("n_check", 0)}</span>'
+                        f'<span class="gq-pill gq-pill-missing">Missing: {_run.get("n_missing", 0)}</span>'
+                        f'{_regret_html}'
+                        f'</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                    _d1, _d2 = st.columns(2)
+                    if _d1.button('Restore', key=f'restore_{_run_idx}'):
+                        _restore_history_entry(_run)
+                        st.session_state._hist_selected = None
+                        st.rerun()
+                    if _d2.button('Quote Form', key=f'quote_form_{_run_idx}'):
+                        _restore_history_entry(_run)
+                        st.session_state._show_quote_page = True
+                        st.session_state._hist_selected = None
+                        st.rerun()
+                    _pdf_bytes = _history_pdf_bytes(_run)
+                    if _pdf_bytes:
+                        st.download_button(
+                            'Download PDF',
+                            data=_pdf_bytes,
+                            file_name=_run.get('quote_pdf_name') or 'quotation.pdf',
+                            mime='application/pdf',
+                            key=f'hist_pdf_{_run_idx}',
+                            use_container_width=True,
+                        )
+                    if st.button('Delete', key=f'delete_{_run_idx}', type='secondary', use_container_width=True):
+                        from services import storage as _storage
+                        _supabase_id = _run.get('supabase_id')
+                        if _supabase_id:
+                            _storage.delete_quote(_supabase_id)
+                        st.session_state.run_history.pop(_run_idx)
+                        if _run is st.session_state.get('_active_hist_entry'):
+                            st.session_state.pop('_active_hist_entry', None)
+                        st.session_state._hist_selected = None
+                        _save_history_local()
+                        st.rerun()
 
 
 # ---------------------------------------------------------------------------
