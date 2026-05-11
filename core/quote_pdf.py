@@ -78,8 +78,22 @@ def _top(y: float) -> float:
     return PAGE_H - y
 
 
+def _y(glyph_top: float, size: float) -> float:
+    """Convert a glyph-top top-coord (as in the reference PDF) to the
+    baseline top-coord that _draw() expects.  Times ascender ≈ 0.78×size."""
+    return glyph_top + size * 0.78
+
+
+def _draw_page_outer_border(c: canvas.Canvas):
+    """Single thick outer rect matching the reference PDF exactly."""
+    c.setStrokeColorRGB(*BLACK)
+    c.setLineWidth(1.5)
+    # Reference: x0=20.2 y0=40.2 x1=575.2 y1=819.5  (PDF coords, y=0 at bottom)
+    c.rect(20.2, 40.2, 555.0, 779.3)
+
+
 def _draw(c: canvas.Canvas, x: float, top: float, text: str, size=8, bold=False, align="left"):
-    font = "Helvetica-Bold" if bold else "Helvetica"
+    font = "Times-Bold" if bold else "Times-Roman"
     c.setFont(font, size)
     text = str(text or "")
     y = _top(top)
@@ -91,7 +105,7 @@ def _draw(c: canvas.Canvas, x: float, top: float, text: str, size=8, bold=False,
         c.drawString(x, y, text)
 
 
-def _wrap(text: str, width: float, font="Helvetica", size=8) -> list[str]:
+def _wrap(text: str, width: float, font="Times-Roman", size=8) -> list[str]:
     words = _clean(text).split()
     if not words:
         return [""]
@@ -111,7 +125,7 @@ def _wrap(text: str, width: float, font="Helvetica", size=8) -> list[str]:
 
 
 def _draw_wrapped(c, x, top, text, width, size=8, leading=11, bold=False, max_lines=None):
-    font = "Helvetica-Bold" if bold else "Helvetica"
+    font = "Times-Bold" if bold else "Times-Roman"
     lines = _wrap(text, width, font, size)
     if max_lines:
         lines = lines[:max_lines]
@@ -123,143 +137,140 @@ def _draw_wrapped(c, x, top, text, width, size=8, leading=11, bold=False, max_li
 def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show_pan: bool = True):
     c.setStrokeColorRGB(*BLACK)
 
-    # ── Layout constants ────────────────────────────────────────────────────
-    LEFT,  RIGHT  = 20,  575          # page left / right edges
-    H_TOP, H_BTM  = 10,  148          # "top" coords of header top / bottom
-    DIVX          = 377               # vertical divider: left section | SALES QUOTATION
-    ADDR_X        = 178               # address text left edge (right of logo)
+    # ── Layout constants — matched to reference PDF measurements ─────────────
+    LEFT,   RIGHT    = 20.2,  575.2    # page content left / right
+    H_TOP,  H_BTM   = 21.5,  147.3    # header top / bottom (top-coords)
+    LOGO_DIV         = 132.5           # vertical: logo column | company column
+    DIVX             = 387.5           # vertical: company column | SALES QUOTATION
+    ADDR_X           = 136.0           # address text left edge
 
-    # ── Outer border box (full header) ──────────────────────────────────────
-    c.setLineWidth(0.6)
-    c.rect(LEFT, _top(H_BTM), RIGHT - LEFT, H_BTM - H_TOP)
-
-    # ── Vertical divider ────────────────────────────────────────────────────
-    c.line(DIVX, _top(H_TOP), DIVX, _top(H_BTM))
-
-    # ── Horizontal line in right section, below "SALES QUOTATION" title ────
-    c.line(DIVX, _top(50), RIGHT, _top(50))
-
-    c.setLineWidth(0.4)
+    # ── Internal header lines (no separate header rect — outer drawn per-page) ─
+    c.setLineWidth(1.0)
+    c.line(LEFT,     _top(H_BTM),  RIGHT,    _top(H_BTM))   # header bottom
+    c.line(LOGO_DIV, _top(H_TOP),  LOGO_DIV, _top(H_BTM))   # logo | company divider
+    c.line(DIVX,     _top(H_TOP),  DIVX,     _top(H_BTM))   # company | quote divider
+    c.line(DIVX,     _top(49.8),   RIGHT,    _top(49.8))     # below "SALES QUOTATION"
 
     # ── Logo ────────────────────────────────────────────────────────────────
     if logo_path and os.path.exists(logo_path):
         try:
             image = ImageReader(logo_path)
             iw, ih = image.getSize()
-            w = 150
+            w_max = LOGO_DIV - LEFT - 8           # ~104px wide
+            h_max = H_BTM - H_TOP - 8             # ~118px tall
+            w = w_max
             h = w * ih / iw
-            if h > 104:
-                h = 104
+            if h > h_max:
+                h = h_max
                 w = h * iw / ih
-            c.drawImage(image, 24, _top(127), width=w, height=h,
+            img_bottom = _top(H_BTM - 4)          # 4px above header bottom line
+            c.drawImage(image, LEFT + 4, img_bottom, width=w, height=h,
                         preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
 
-    # ── Company name – centred in the address section (right of logo) ───────
-    addr_center = (ADDR_X + DIVX) / 2          # ≈ 246
-    _draw(c, addr_center, 26, COMPANY_NAME, size=10.5, bold=True, align="center")
+    # ── Company name – auto-shrink to fit within the centre column ───────────
+    addr_center = (ADDR_X + DIVX) / 2             # ≈ 261.75
+    max_name_w  = DIVX - ADDR_X - 16
+    name_size   = 11.5
+    while name_size > 8 and pdfmetrics.stringWidth(COMPANY_NAME, "Times-Bold", name_size) > max_name_w:
+        name_size -= 0.5
+    _draw(c, addr_center, _y(27.5, name_size), COMPANY_NAME, size=name_size, bold=True, align="center")
 
-    # ── Address lines ────────────────────────────────────────────────────────
+    # ── Address lines – 9 lines, 12px fixed spacing (matches reference) ───────
     for i, line in enumerate(ADDRESS_LINES):
-        _draw(c, ADDR_X, 39 + i * 11.5, line, size=7.5)
+        _draw(c, ADDR_X, _y(40.7 + i * 12, 8.5), line, size=8.5)
 
-    # ── Right section: "SALES QUOTATION" centred in its box ─────────────────
-    right_center = (DIVX + RIGHT) / 2          # ≈ 476
-    _draw(c, right_center - 20, 33, "SALES QUOTATION", size=8.5, bold=True, align="center")
+    # ── Right section: "SALES QUOTATION" ─────────────────────────────────────
+    right_center = (DIVX + RIGHT) / 2             # ≈ 481.35
+    _draw(c, right_center, _y(32.7, 9.5), "SALES QUOTATION", size=9.5, bold=True, align="center")
 
-    # ── Quote details (below the horizontal separator at top=50) ────────────
-    lx = DIVX + 8                              # labels left edge  ≈ 385
-    _draw(c, lx,      65, "QUOTE :",  size=8, bold=True)
-    _draw(c, lx,      79, quote_data.get("quote_no", ""),    size=8)
-    _draw(c, lx,      98, "DATE :",   size=8, bold=True)
-    _draw(c, lx + 43, 98, quote_data.get("quote_date", ""), size=8)
-    _draw(c, lx,     113, "REVNO:",   size=8, bold=True)
-    _draw(c, lx + 43,113, quote_data.get("rev_no", "0"),    size=8)
-    _draw(c, lx,     130, "REVDATE:", size=8, bold=True)
-    _draw(c, lx + 52,130, quote_data.get("rev_date", ""),   size=8)
+    # ── Quote details (y-positions matched to reference glyph-tops) ───────────
+    lx = DIVX + 7                                 # ≈ 394.5
+    _draw(c, lx,      _y(57.2, 9), "QUOTE :",  size=9, bold=True)
+    _draw(c, lx,      _y(70.7, 9), quote_data.get("quote_no", ""),    size=9)
+    _draw(c, lx,      _y(91.4, 9), "DATE :",   size=9, bold=True)
+    _draw(c, lx + 43, _y(91.4, 9), quote_data.get("quote_date", ""), size=9)
+    _draw(c, lx,     _y(107.9, 9), "REVNO:",   size=9, bold=True)
+    _draw(c, lx + 43,_y(107.9, 9), quote_data.get("rev_no", "0"),    size=9)
+    _draw(c, lx,     _y(126.4, 9), "REVDATE:", size=9, bold=True)
+    _draw(c, lx + 52,_y(126.4, 9), quote_data.get("rev_date", ""),   size=9)
 
-    # ── PAN / CIN / GSTIN line ───────────────────────────────────────────────
+    # ── PAN / CIN / GSTIN (glyph-top matched to reference y=155.4) ───────────
     if show_pan:
-        _draw(c,  31, 163, "IT PAN No.:AABCG2902K",       size=7.5)
-        _draw(c, 216, 163, "CIN : U27209TN1987PTC014031", size=7.5)
-        _draw(c, 424, 163, "GSTIN NO : 33AABCG2902K1ZY",  size=7.5)
-        pass  # PAN separator drawn by _draw_buyer_block's outer rect
+        _draw(c,  31, _y(155.4, 8.5), "IT PAN No.:AABCG2902K",       size=8.5)
+        _draw(c, 216, _y(155.4, 8.5), "CIN : U27209TN1987PTC014031", size=8.5)
+        _draw(c, 424, _y(155.4, 8.5), "GSTIN NO : 33AABCG2902K1ZY",  size=8.5)
 
 
-_HDR_BTM   = 148   # "top" coord of header box bottom
-_BUYER_BTM = 358   # "top" coord of buyer-block bottom (= items table top)
-_PAN_SEP   = 170   # separator below the PAN line
-_FIELD_SEP = 262   # separator above the customer-fields rows
-_COL_DIV   = 318   # vertical divider between left and right field columns
+_HDR_BTM   = 147.3  # "top" coord of header bottom (matches reference)
+_BUYER_BTM = 358.3  # "top" coord of buyer-block bottom / table top
+_PAN_SEP   = 166.1  # separator below the PAN line (matches reference)
+_FIELD_SEP = 261.5  # separator above customer-fields (matches reference)
+_COL_DIV   = 318    # vertical divider in buyer block (left | right fields)
 
-L, R = 20, 575.2   # page left / right margins (match items table)
+L, R = 20.2, 575.2  # page left / right (match outer rect)
 
 
 def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
     c.setStrokeColorRGB(*BLACK)
 
-    # ── Outer border for the entire PAN + buyer section ────────────────────
-    # Closed box: left wall, right wall, top (= header bottom), bottom (= table top)
-    c.setLineWidth(0.5)
-    c.rect(L, _top(_BUYER_BTM), R - L, _BUYER_BTM - _HDR_BTM)
+    # ── Internal lines only — outer rect is drawn once per page ─────────────
+    c.setLineWidth(1.0)
+    c.line(L, _top(_BUYER_BTM), R, _top(_BUYER_BTM))   # buyer block bottom
+    c.line(L, _top(_PAN_SEP),   R, _top(_PAN_SEP))      # below PAN row
+    c.line(L, _top(_FIELD_SEP), R, _top(_FIELD_SEP))    # above customer-fields
+    c.line(_COL_DIV, _top(_FIELD_SEP), _COL_DIV, _top(_BUYER_BTM))  # column divider
 
-    # ── Internal horizontal dividers ────────────────────────────────────────
-    c.setLineWidth(0.4)
-    c.line(L, _top(_PAN_SEP),   R, _top(_PAN_SEP))    # below PAN row
-    c.line(L, _top(_FIELD_SEP), R, _top(_FIELD_SEP))  # above customer-fields
-
-    # ── Vertical divider between left and right field columns ───────────────
-    c.setLineWidth(0.4)
-    c.line(_COL_DIV, _top(_FIELD_SEP), _COL_DIV, _top(_BUYER_BTM))
-
-    # ── Content ─────────────────────────────────────────────────────────────
-    _draw(c, 25,  180, "Name & Address of the Buyer :", size=8)
-    _draw(c, 555, 180, "GGPL/MKT/REC03", size=8, align="right")
+    # ── Content (all y-coords are reference glyph-tops, converted via _y()) ─────
+    _draw(c, 25,  _y(171.2, 9), "Name & Address of the Buyer :", size=9)
+    _draw(c, 555, _y(171.2, 9), "GGPL/MKT/REC03", size=9, align="right")
 
     buyer_lines = str(quote_data.get("buyer_name_address", "")).splitlines()
-    for i, (ytop, line) in enumerate(zip([194, 211, 228, 244, 260], buyer_lines)):
-        _draw(c, 26, ytop, line, size=8)
+    for ref_top, line in zip([185.7, 202.7, 219.7, 236.7, 253.7], buyer_lines):
+        _draw(c, 26, _y(ref_top, 9), line, size=9)
 
     label_x, value_x = 24, 109
+    # Reference glyph-tops for each field row
     rows = [
-        (270, "Customer Enq No", quote_data.get("customer_enq_no", ""), "Followed By",  quote_data.get("rep_name", "")),
-        (287, "Kind Attention",  quote_data.get("attention", ""),        "Designation",  quote_data.get("rep_designation", "")),
-        (306, "Designation",     quote_data.get("designation", ""),      "Contact No",   quote_data.get("rep_contact", "")),
-        (325, "Contact No",      quote_data.get("contact_no", ""),       "Email ID",     quote_data.get("rep_email", "")),
-        (343, "Email ID",        quote_data.get("email", ""),            "",             ""),
+        (266.7, "Customer Enq No", quote_data.get("customer_enq_no", ""), "Followed By",  quote_data.get("rep_name", "")),
+        (285.0, "Kind Attention",  quote_data.get("attention", ""),        "Designation",  quote_data.get("rep_designation", "")),
+        (304.7, "Designation",     quote_data.get("designation", ""),      "Contact No",   quote_data.get("rep_contact", "")),
+        (324.0, "Contact No",      quote_data.get("contact_no", ""),       "Email ID",     quote_data.get("rep_email", "")),
+        (341.5, "Email ID",        quote_data.get("email", ""),            "",             ""),
     ]
-    for top, label, value, rlabel, rvalue in rows:
-        _draw(c, label_x,  top, label, size=8)
-        _draw(c, 101,      top, ":",   size=8)
-        _draw_wrapped(c, value_x, top, value, 200, size=8, leading=9, max_lines=1)
+    for ref_top, label, value, rlabel, rvalue in rows:
+        top = _y(ref_top, 9)
+        _draw(c, label_x,  top, label, size=9)
+        _draw(c, 101,      top, ":",   size=9)
+        _draw_wrapped(c, value_x, top, value, 200, size=9, leading=10, max_lines=1)
         if rlabel:
-            _draw(c, _COL_DIV + 6,  top, rlabel, size=8)
-            _draw(c, _COL_DIV + 75, top, ":",    size=8)
-            _draw_wrapped(c, _COL_DIV + 82, top, rvalue, 160, size=8, leading=9, max_lines=2)
+            _draw(c, _COL_DIV + 6,  top, rlabel, size=9)
+            _draw(c, _COL_DIV + 75, top, ":",    size=9)
+            _draw_wrapped(c, _COL_DIV + 82, top, rvalue, 160, size=9, leading=10, max_lines=2)
 
 
 # ── Items table — built with reportlab.platypus.Table ───────────────────────
 # Column x-dividers; col widths derived automatically
-ITEM_COLS   = [20, 45.5, 83.8, 177.8, 365.5, 424.8, 457.8, 513.8, 575.2]
+ITEM_COLS   = [20.2, 45.5, 83.8, 177.8, 345.5, 404.8, 437.8, 503.8, 575.2]
 _ITEM_COL_W = [ITEM_COLS[i+1] - ITEM_COLS[i] for i in range(len(ITEM_COLS)-1)]
 
 _TBL_TOP = 358   # "top" coord of table top edge
 _TBL_BTM = 785   # "top" coord of table bottom edge
 _PAGE_TURN_Y = 805
 
-_PS_HDR  = ParagraphStyle('hdr',  fontName='Helvetica-Bold', fontSize=8,
-                           leading=10, alignment=TA_CENTER)
-_PS_DESC = ParagraphStyle('desc', fontName='Helvetica',      fontSize=8,
-                           leading=10, alignment=TA_LEFT)
-_PS_CUST = ParagraphStyle('cust', fontName='Helvetica-Oblique', fontSize=6.5,
-                           leading=9,  alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
+_PS_HDR  = ParagraphStyle('hdr',  fontName='Times-Bold',    fontSize=9,
+                           leading=11, alignment=TA_CENTER)
+_PS_DESC = ParagraphStyle('desc', fontName='Times-Roman',   fontSize=9,
+                           leading=11, alignment=TA_LEFT)
+_PS_CUST = ParagraphStyle('cust', fontName='Times-Italic',  fontSize=7.5,
+                           leading=10, alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
 
 _ITEM_TSTYLE = TableStyle([
     # Fonts
-    ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
-    ('FONTNAME',      (0, 1), (-1, -1), 'Helvetica'),
-    ('FONTSIZE',      (0, 0), (-1, -1), 8),
+    ('FONTNAME',      (0, 0), (-1,  0), 'Times-Bold'),
+    ('FONTNAME',      (0, 1), (-1, -1), 'Times-Roman'),
+    ('FONTSIZE',      (0, 0), (-1, -1), 9),
     # Per-column horizontal alignment
     ('ALIGN',  (0, 0), (0, -1), 'CENTER'),   # Sl. No.
     ('ALIGN',  (1, 0), (2, -1), 'CENTER'),   # Cust SL.NO, Item Code
@@ -270,10 +281,10 @@ _ITEM_TSTYLE = TableStyle([
     ('ALIGN',  (6, 0), (7, -1), 'RIGHT'),    # Unit Price & Total
     # Vertical alignment — middle of cell
     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    # Grid: thin lines for data cells, slightly thicker for header borders
-    ('GRID',       (0, 0), (-1, -1), 0.3, colors.black),
-    ('LINEABOVE',  (0, 0), (-1,  0), 0.5, colors.black),
-    ('LINEBELOW',  (0, 0), (-1,  0), 0.5, colors.black),
+    # Grid: 1.0 throughout to match reference PDF
+    ('GRID',       (0, 0), (-1, -1), 1.0, colors.black),
+    ('LINEABOVE',  (0, 0), (-1,  0), 1.0, colors.black),
+    ('LINEBELOW',  (0, 0), (-1,  0), 1.0, colors.black),
     # Cell padding (matches reference PDF look)
     ('TOPPADDING',    (0, 0), (-1, -1), 5),
     ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
@@ -379,7 +390,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
 
     # ── Bottom border of the whole table area ────────────────────────────────
     if next_start < len(items):
-        _draw(c, 298, _PAGE_TURN_Y, "PAGE TURN OVER", size=8, bold=True, align="center")
+        _draw(c, 298, _PAGE_TURN_Y, "PAGE TURN OVER", size=9, bold=True, align="center")
     return next_start
 
 
@@ -425,23 +436,18 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     SIG_TOP  = 717              # top of signature area
     SIG_BTM  = 785              # bottom of signature area (footer is below)
 
-    # ── ONE outer rect spanning header-bottom → signature-bottom ──────────────
-    # (header itself already drew its own rect; this continues the left/right walls)
-    c.setLineWidth(0.5)
-    c.rect(PL, _top(SIG_BTM), PR - PL, SIG_BTM - HDR_BTM)
-
-    # ── Internal horizontal section separators ────────────────────────────────
-    c.setLineWidth(0.4)
+    # ── Internal horizontal section separators (outer border drawn per-page) ────
+    c.setLineWidth(1.0)
     c.line(PL, _top(TOT_TOP), PR, _top(TOT_TOP))   # totals band top
     c.line(PL, _top(TOT_BTM), PR, _top(TOT_BTM))   # totals band bottom
     c.line(PL, _top(SIG_TOP), PR, _top(SIG_TOP))   # signature area top
 
     # ── Totals row (centred in the totals band) ────────────────────────────────
     mid_y = (TOT_TOP + TOT_BTM) / 2 + 3            # ≈ 164
-    _draw(c, 352, mid_y, "Total Qty :",    size=8, bold=True, align="right")
-    _draw(c, 431, mid_y, _fmt_qty(total_qty),               size=8, align="right")
-    _draw(c, 501, mid_y, "Total Amount :", size=8, bold=True, align="right")
-    _draw(c, 552, mid_y, _fmt_amount(subtotal, comma=True), size=8, align="right")
+    _draw(c, 352, mid_y, "Total Qty :",    size=9, bold=True, align="right")
+    _draw(c, 431, mid_y, _fmt_qty(total_qty),               size=9, align="right")
+    _draw(c, 501, mid_y, "Total Amount :", size=9, bold=True, align="right")
+    _draw(c, 552, mid_y, _fmt_amount(subtotal, comma=True), size=9, align="right")
 
     # ── GST table (right column, no inner borders — matches reference) ─────────
     GST_X1 = 392    # name column left
@@ -453,24 +459,24 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     gst_y = 186     # first GST row text y (in pdfplumber-style top coords)
     if currency == "INR":
         for name, pct, amount in _gst_rows(quote_data, gst_amt):
-            _draw(c, GST_X1, gst_y, name, size=8)
-            _draw(c, GST_X2, gst_y, f"{pct:.2f}", size=8, align="right")
-            _draw(c, GST_X3, gst_y, "%", size=8)
-            _draw(c, GST_X4, gst_y, _fmt_amount(amount, comma=True), size=8, align="right")
+            _draw(c, GST_X1, gst_y, name, size=9)
+            _draw(c, GST_X2, gst_y, f"{pct:.2f}", size=9, align="right")
+            _draw(c, GST_X3, gst_y, "%", size=9)
+            _draw(c, GST_X4, gst_y, _fmt_amount(amount, comma=True), size=9, align="right")
             gst_y += GST_ROW_H
     else:
-        _draw(c, GST_X1, gst_y, f"Tax / Duty ({currency})", size=8)
-        _draw(c, GST_X4, gst_y, _fmt_amount(gst_amt, comma=True), size=8, align="right")
+        _draw(c, GST_X1, gst_y, f"Tax / Duty ({currency})", size=9)
+        _draw(c, GST_X4, gst_y, _fmt_amount(gst_amt, comma=True), size=9, align="right")
         gst_y += GST_ROW_H
 
     # Thin rule above TOTAL, then bold TOTAL row
     c.setLineWidth(0.3)
     c.line(383, _top(gst_y), PR, _top(gst_y))
-    _draw(c, 501, gst_y + 9, "TOTAL", size=8, bold=True, align="right")
-    _draw(c, GST_X4, gst_y + 9, _fmt_amount(grand_total, comma=True), size=8, bold=True, align="right")
+    _draw(c, 501, gst_y + 9, "TOTAL", size=9, bold=True, align="right")
+    _draw(c, GST_X4, gst_y + 9, _fmt_amount(grand_total, comma=True), size=9, bold=True, align="right")
 
     # ── Terms & Conditions (left column, beside GST table) ────────────────────
-    _draw(c, 32, 180, "Terms & Conditions :", size=7.5, bold=True)
+    _draw(c, 32, 180, "Terms & Conditions :", size=8.5, bold=True)
 
     terms = [
         ("1. Price Basis",          quote_data.get("price_basis", "FOR BASIS")),
@@ -494,34 +500,34 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     for label, value in terms:
         label_lines = str(label).splitlines()
         for i, line in enumerate(label_lines):
-            _draw(c, 30, top + i * 10, line, size=8)
-        _draw(c, 148, top, ":", size=8)
+            _draw(c, 30, top + i * 12, line, size=9)
+        _draw(c, 148, top, ":", size=9)
         # Narrower text area while we're beside the GST table
         txt_width = (383 - 170) if top < GST_END_Y else 390
-        used = _draw_wrapped(c, 166, top, value, txt_width, size=8, leading=10, max_lines=4)
-        top += max(14, 10 * max(len(label_lines), used))
+        used = _draw_wrapped(c, 166, top, value, txt_width, size=9, leading=13, max_lines=4)
+        top += max(18, 13 * max(len(label_lines), used))
 
     # ── Part of Quote + Technical Notes + General Terms ───────────────────────
-    top += 8
-    _draw(c, 274, top, "Part of Quote", size=8, align="center")
-    top += 18
-    _draw(c, 31, top, "Technical Notes :", size=8, bold=True)
-    top += 13
+    top += 12
+    _draw(c, 274, top, "Part of Quote", size=9, align="center")
+    top += 20
+    _draw(c, 31, top, "Technical Notes :", size=9, bold=True)
+    top += 17
     tech_notes = quote_data.get("technical_notes") or (
         "1. Cerifications : MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n"
         "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealablity test and Chemical test certificate."
     )
     for raw in str(tech_notes).splitlines():
-        for line in _wrap(raw, 535, "Helvetica", 8):
-            _draw(c, 31, top, line, size=8)
-            top += 10
+        for line in _wrap(raw, 535, "Times-Roman", 9):
+            _draw(c, 31, top, line, size=9)
+            top += 16
 
-    top += 8
-    _draw(c, 31, top, "GENERAL TERMS OF QUOTATION:", size=8, bold=True)
-    top += 12
+    top += 20
+    _draw(c, 31, top, "GENERAL TERMS OF QUOTATION:", size=9, bold=True)
+    top += 27
     for line in GENERAL_TERMS:
-        _draw(c, 31, top, line, size=7.5)
-        top += 10
+        _draw(c, 31, top, line, size=8.5)
+        top += 12
 
     # ── Signature area (between SIG_TOP and SIG_BTM) ──────────────────────────
     sig_div = PL + (PR - PL) * 2 / 3   # vertical divider ≈ x=390
@@ -530,12 +536,12 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     c.line(sig_div, _top(SIG_TOP), sig_div, _top(SIG_BTM))
 
     sig_mid_x = (sig_div + PR) / 2
-    _draw(c, sig_mid_x, SIG_TOP + 18, "For Goodrich Gasket Pvt. Ltd.", size=8, bold=True, align="center")
-    _draw(c, sig_mid_x, SIG_TOP + 54, "Authorised Signatory",         size=8, bold=True, align="center")
+    _draw(c, sig_mid_x, SIG_TOP + 18, "For Goodrich Gasket Pvt. Ltd.", size=9, bold=True, align="center")
+    _draw(c, sig_mid_x, SIG_TOP + 54, "Authorised Signatory",         size=9, bold=True, align="center")
 
     # ── Footer (outside all borders) ─────────────────────────────────────────
-    _draw(c, 30,  SIG_BTM + 12, "Record Created on.:        Revision No :03        Revision Date : 10.10.2019", size=7)
-    _draw(c, 298, SIG_BTM + 24, "This is a Computer Generated Document Signature not Required", size=7, align="center")
+    _draw(c, 30,  SIG_BTM + 12, "Record Created on.:        Revision No :03        Revision Date : 10.10.2019", size=8)
+    _draw(c, 298, SIG_BTM + 24, "This is a Computer Generated Document Signature not Required", size=8, align="center")
 
 
 def build_quotation_pdf(
@@ -556,11 +562,13 @@ def build_quotation_pdf(
     while True:
         _draw_header(c, quote_data, logo_path)
         idx = _draw_items_page(c, items, quote_data, idx)
+        _draw_page_outer_border(c)
         c.showPage()
         if idx >= len(items):
             break
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
     _draw_terms_page(c, items, quote_data)
+    _draw_page_outer_border(c)
     c.save()
     return buf.getvalue()
