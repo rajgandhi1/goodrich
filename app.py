@@ -682,13 +682,14 @@ def _render_quote_page():
         status_icon = {'ready': '✅', 'check': '🟡', 'missing': '🔴', 'regret': '⛔'}.get(
             item.get('status', ''), '')
         pricing_rows.append({
-            '#':          item.get('line_no', i + 1),
-            'Status':     status_icon,
-            'GGPL Description': item.get('ggpl_description', ''),
-            'Qty':        item.get('quantity') or 0,
-            'UOM':        item.get('uom') or 'NOS',
-            'Unit Price (INR)': float(prev_prices[i]) if prev_prices[i] else 0.0,
-            'Total (INR)': 0.0,  # computed below
+            '#':                   item.get('line_no', i + 1),
+            'Status':              status_icon,
+            'Customer Description': (item.get('raw_description') or '')[:120],
+            'GGPL Description':    item.get('ggpl_description', ''),
+            'Qty':                 float(item.get('quantity') or 0),
+            'UOM':                 item.get('uom') or 'NOS',
+            'Unit Price (INR)':    float(prev_prices[i]) if prev_prices[i] else 0.0,
+            'Total (INR)':         0.0,  # computed below
         })
 
     pricing_df = pd.DataFrame(pricing_rows)
@@ -703,19 +704,30 @@ def _render_quote_page():
         hide_index=True,
         height=min(80 + 35 * len(items), 520),
         column_config={
-            '#':               st.column_config.NumberColumn('#', width='small', disabled=True),
-            'Status':          st.column_config.TextColumn('S', width='small', disabled=True),
-            'GGPL Description': st.column_config.TextColumn('GGPL Description', width='large', disabled=True),
-            'Qty':             st.column_config.NumberColumn('Qty', width='small', disabled=True),
-            'UOM':             st.column_config.TextColumn('UOM', width='small', disabled=True),
-            'Unit Price (INR)': st.column_config.NumberColumn('Unit Price (INR)', width='medium',
-                                    min_value=0, format='%.2f',
-                                    help='Enter unit price in INR'),
-            'Total (INR)':     st.column_config.NumberColumn('Total (INR)', width='medium',
-                                    disabled=True, format='%.2f'),
+            '#':                    st.column_config.NumberColumn('#', width='small', disabled=True),
+            'Status':               st.column_config.TextColumn('S', width='small', disabled=True),
+            'Customer Description': st.column_config.TextColumn('Customer Description', width='large', disabled=True),
+            'GGPL Description':     st.column_config.TextColumn('GGPL Description', width='large', disabled=True),
+            'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0,
+                                        help='Edit to override extracted quantity'),
+            'UOM':                  st.column_config.TextColumn('UOM', width='small', disabled=True),
+            'Unit Price (INR)':     st.column_config.NumberColumn('Unit Price (INR)', width='medium',
+                                        min_value=0, format='%.2f',
+                                        help='Enter unit price in INR'),
+            'Total (INR)':          st.column_config.NumberColumn('Total (INR)', width='medium',
+                                        disabled=True, format='%.2f'),
         },
         key='qp_pricing_editor',
     )
+
+    # Propagate edited quantities back to items (so PDF uses the updated qty)
+    for i, item in enumerate(items):
+        if i < len(edited_pricing):
+            new_qty = edited_pricing.iloc[i]['Qty']
+            try:
+                item['quantity'] = float(new_qty) if new_qty not in (None, '') else item.get('quantity')
+            except (TypeError, ValueError):
+                pass
 
     # Recompute totals from edited prices
     edited_pricing['Total (INR)'] = (
@@ -1071,6 +1083,134 @@ with ref_c2:
     project_ref = st.text_input('Project / PO reference', key='inp_project_ref', placeholder='e.g. HPCL Vizag Refinery')
 
 st.markdown('<div style="height:0.3rem"></div>', unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Helper — extraction summary
+# ---------------------------------------------------------------------------
+def _build_extraction_summary(items: list[dict]) -> list[str]:
+    """Return deduplicated summary lines grouped by unique gasket spec."""
+    rtj_groups: dict = {}    # (groove, moc, bhn, api_flag) → count
+    spw_groups: dict = {}    # (winding, filler, inner, outer) → set[rating]
+    soft_groups: dict = {}   # (moc, face) → set[rating]
+    kamm_groups: dict = {}   # (core, surface) → count
+    dji_groups: dict = {}    # (filler,) → count
+    isk_groups: dict = {}    # (isk_type, isk_gasket_material) → count
+
+    for item in items:
+        if item.get('status') == STATUS_REGRET:
+            continue
+        gtype = (item.get('gasket_type') or 'SOFT_CUT').upper()
+        rating = (item.get('rating') or '').strip()
+
+        if gtype == 'RTJ':
+            groove = (item.get('rtj_groove_type') or 'OCT').upper()
+            moc = (item.get('moc') or '').upper()
+            bhn = item.get('rtj_hardness_bhn')
+            std = (item.get('standard') or '').upper()
+            api_flag = 'API-6A TYPE' if 'API 6A' in std else ''
+            key = (groove, moc, bhn, api_flag)
+            rtj_groups[key] = rtj_groups.get(key, 0) + 1
+
+        elif gtype == 'SPIRAL_WOUND':
+            winding = (item.get('sw_winding_material') or '').upper()
+            filler  = (item.get('sw_filler') or '').upper()
+            inner   = (item.get('sw_inner_ring') or '').upper()
+            outer   = (item.get('sw_outer_ring') or '').upper()
+            key = (winding, filler, inner, outer)
+            if key not in spw_groups:
+                spw_groups[key] = set()
+            if rating:
+                spw_groups[key].add(rating)
+
+        elif gtype == 'SOFT_CUT':
+            moc  = (item.get('moc') or '').upper()
+            face = (item.get('face_type') or '').upper()
+            key = (moc, face)
+            if key not in soft_groups:
+                soft_groups[key] = set()
+            if rating:
+                soft_groups[key].add(rating)
+
+        elif gtype == 'KAMM':
+            core = (item.get('kamm_core_material') or '').upper()
+            surf = (item.get('kamm_surface_material') or '').upper()
+            key = (core, surf)
+            kamm_groups[key] = kamm_groups.get(key, 0) + 1
+
+        elif gtype == 'DJI':
+            filler = (item.get('dji_filler') or '').upper()
+            key = (filler,)
+            dji_groups[key] = dji_groups.get(key, 0) + 1
+
+        elif gtype == 'ISK':
+            isk_type = (item.get('isk_type') or '').upper()
+            isk_mat  = (item.get('isk_gasket_material') or '').upper()
+            key = (isk_type, isk_mat)
+            isk_groups[key] = isk_groups.get(key, 0) + 1
+
+    lines: list[str] = []
+
+    for (groove, moc, bhn, api_flag) in rtj_groups:
+        parts = ['RTJ', groove]
+        if moc:
+            parts.append(moc)
+        if bhn is not None:
+            parts.append(f'{int(float(bhn))} BHN HARDNESS MAX')
+        if api_flag:
+            parts.append(api_flag)
+        lines.append(' ,'.join(parts))
+
+    for (winding, filler, inner, outer), ratings in spw_groups.items():
+        mat = f'{winding}/{filler}' if winding and filler else (winding or filler)
+        suffix = ''
+        if inner:
+            suffix += f'+{inner}IR'
+        if outer:
+            suffix += f'&{outer}OR'
+        desc = mat + suffix
+        if ratings:
+            _rating_order = {'150#': 0, '300#': 1, '600#': 2, '900#': 3, '1500#': 4, '2500#': 5}
+            sorted_ratings = sorted(ratings, key=lambda r: _rating_order.get(r, 99))
+            desc += ',' + ','.join(sorted_ratings)
+        lines.append(desc)
+
+    for (moc, face), ratings in soft_groups.items():
+        parts = ['SOFT CUT']
+        if moc:
+            parts.append(moc)
+        if face:
+            parts.append(face)
+        desc = ' ,'.join(parts)
+        if ratings:
+            _rating_order = {'150#': 0, '300#': 1, '600#': 2, '900#': 3, '1500#': 4, '2500#': 5}
+            sorted_ratings = sorted(ratings, key=lambda r: _rating_order.get(r, 99))
+            desc += ' ,' + ' ,'.join(sorted_ratings)
+        lines.append(desc)
+
+    for (core, surf) in kamm_groups:
+        parts = ['KAMMPROFILE']
+        if core:
+            parts.append(f'CORE: {core}')
+        if surf:
+            parts.append(f'SURFACE: {surf}')
+        lines.append(' ,'.join(parts))
+
+    for (filler,) in dji_groups:
+        desc = 'DOUBLE JACKET'
+        if filler:
+            desc += f' ,{filler}'
+        lines.append(desc)
+
+    for (isk_type, isk_mat) in isk_groups:
+        parts = ['ISK']
+        if isk_type:
+            parts.append(isk_type)
+        if isk_mat:
+            parts.append(isk_mat)
+        lines.append(' ,'.join(parts))
+
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1945,6 +2085,13 @@ if st.session_state.working_items:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Extraction summary
+    _summary_lines = _build_extraction_summary(items)
+    if _summary_lines:
+        with st.expander(f'📋 Enquiry Summary — {len(_summary_lines)} unique gasket type{"s" if len(_summary_lines) != 1 else ""}', expanded=False):
+            for i, line in enumerate(_summary_lines, 1):
+                st.markdown(f'**{i}.** `{line}`')
 
     # Filter
     filter_col, spacer = st.columns([4, 6])

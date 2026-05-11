@@ -252,6 +252,8 @@ _PS_HDR  = ParagraphStyle('hdr',  fontName='Helvetica-Bold', fontSize=8,
                            leading=10, alignment=TA_CENTER)
 _PS_DESC = ParagraphStyle('desc', fontName='Helvetica',      fontSize=8,
                            leading=10, alignment=TA_LEFT)
+_PS_CUST = ParagraphStyle('cust', fontName='Helvetica-Oblique', fontSize=6.5,
+                           leading=9,  alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
 
 _ITEM_TSTYLE = TableStyle([
     # Fonts
@@ -280,10 +282,26 @@ _ITEM_TSTYLE = TableStyle([
 ])
 
 
-def _item_description(item: dict) -> str:
+def _description_cell(item: dict):
+    """Return a Paragraph for the Material Description cell.
+
+    Shows the GGPL description in normal text, with the customer's original
+    description below it in small italic as a reference.
+    """
+    from reportlab.platypus import KeepInFrame
     if item.get("status") == "regret":
-        return "REGRET - CANNOT PRODUCE"
-    return item.get("ggpl_description") or item.get("description") or ""
+        return Paragraph("REGRET - CANNOT PRODUCE", _PS_DESC)
+    ggpl = _clean(item.get("ggpl_description") or item.get("description") or "")
+    cust = _clean(item.get("raw_description") or "")
+    if cust and cust != ggpl:
+        cust_short = cust[:150] + ("…" if len(cust) > 150 else "")
+        from reportlab.platypus import KeepInFrame
+        from reportlab.lib.units import mm
+        return KeepInFrame(0, 0, [
+            Paragraph(ggpl, _PS_DESC),
+            Paragraph(f"Ref: {cust_short}", _PS_CUST),
+        ], mode='shrink')
+    return Paragraph(ggpl, _PS_DESC)
 
 
 def _make_items_table(items_slice: list[dict], prices_slice: list[float]) -> Table:
@@ -303,14 +321,14 @@ def _make_items_table(items_slice: list[dict], prices_slice: list[float]) -> Tab
         qty   = _num(item.get("quantity"))
         total = qty * unit
         rows.append([
-            str(i + 1),                              # Sl. No.
-            "",                                      # Cust SL.NO (blank)
-            "",                                      # Item Code  (blank)
-            Paragraph(_item_description(item), _PS_DESC),  # wraps automatically
-            _fmt_qty(qty),                           # Quantity
-            item.get("uom") or "NOS",                # UOM
-            _fmt_amount(unit),                       # Unit Price
-            _fmt_amount(total),                      # Total Price
+            str(i + 1),                    # Sl. No.
+            "",                            # Cust SL.NO (blank)
+            "",                            # Item Code  (blank)
+            _description_cell(item),       # GGPL desc + customer ref
+            _fmt_qty(qty),                 # Quantity
+            item.get("uom") or "NOS",      # UOM
+            _fmt_amount(unit),             # Unit Price
+            _fmt_amount(total),            # Total Price
         ])
     t = Table(rows, colWidths=_ITEM_COL_W, repeatRows=1)
     t.setStyle(_ITEM_TSTYLE)
