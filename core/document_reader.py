@@ -344,9 +344,9 @@ def _call_single_chunk(openai_client, chunk_text: str, source_type: str) -> list
 
 
 _FT_IN_RE = re.compile(
-    r"(\d+)\s*[’'`]\s*-?\s*(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*[”\"]?"
+    r'(\d+)\s*[\'`]\s*-?\s*(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*"?'
 )
-_IN_RE = re.compile(r"(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*[”\"]")
+_IN_RE = re.compile(r'(\d+)(?:\s+(\d+)\s*/\s*(\d+))?\s*"')
 _MM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*mm", re.I)
 _NUM_RE = re.compile(r"(\d+(?:\.\d+)?)")
 
@@ -378,25 +378,27 @@ def _token_to_mm(token: str) -> float | None:
 
 
 def _parse_od_id(size_str: str) -> tuple[float | None, float | None]:
-    """Extract (od_mm, id_mm) from a free-form size string containing OD and ID."""
+    """Simple fallback to extract od_mm/id_mm when the LLM leaves them blank."""
     if not size_str:
         return None, None
     s = str(size_str)
-    # Labelled OD/ID — match the value immediately preceding the label
-    label = r"[\d\.\s/'’`\"”-]+"
-    od = re.search(rf"({label})\s*(?:O\.?\s*D\.?|OD\b)", s, re.I)
-    id_ = re.search(rf"({label})\s*(?:I\.?\s*D\.?|ID\b)", s, re.I)
-    if od and id_:
-        return _token_to_mm(od.group(1)), _token_to_mm(id_.group(1))
-    # Unlabelled "A x B" — assume larger is OD
-    m = re.search(r"(.+?)\s*[xX×]\s*(.+)", s)
-    if m:
-        a, b = _token_to_mm(m.group(1)), _token_to_mm(m.group(2))
-        if a and b:
-            return (max(a, b), min(a, b))
+
+    def _find(label: str) -> float | None:
+        # number before label: "48 MM OD", "48.5OD"
+        m = re.search(rf'(\d+(?:\.\d+)?)\s*(?:mm)?\s*{label}', s, re.I)
+        if m:
+            return float(m.group(1))
+        # label before number: "OD 584MM", "OD: 48"
+        m = re.search(rf'{label}\s*[:\s]\s*(\d+(?:\.\d+)?)', s, re.I)
+        if m:
+            return float(m.group(1))
+        return None
+
+    od = _find(r'O\.?D\.?')
+    id_ = _find(r'I\.?D\.?')
+    if od is not None and id_ is not None:
+        return od, id_
     return None, None
-
-
 def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
     """Coerce raw LLM output to the schema that rules.py expects."""
     KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
@@ -441,15 +443,21 @@ def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
 
         item['dji_id_first'] = bool(item.get('dji_id_first', False))
 
-        # Fill od_mm/id_mm from `size` when LLM left them blank (handles inches, feet-inches, fractions)
+        # Fill od_mm/id_mm from `size` (or raw_description as last resort) when LLM left them blank.
+        # Also handles cases where LLM returned od_mm/id_mm as strings-with-units that failed float coercion.
         if item.get('od_mm') is None or item.get('id_mm') is None:
-            size_str = item.get('size') or ''
-            if 'OD' in size_str.upper() or 'ID' in size_str.upper() or '×' in size_str or 'X' in size_str.upper():
-                od, id_ = _parse_od_id(size_str)
-                if item.get('od_mm') is None and od is not None:
-                    item['od_mm'] = od
-                if item.get('id_mm') is None and id_ is not None:
-                    item['id_mm'] = id_
+            for _src in (item.get('size') or '', item.get('raw_description') or ''):
+                if not _src:
+                    continue
+                _up = _src.upper()
+                if 'OD' in _up or 'I.D' in _up or 'I D' in _up or ('ID' in _up and 'X' in _up):
+                    od, id_ = _parse_od_id(_src)
+                    if item.get('od_mm') is None and od is not None:
+                        item['od_mm'] = od
+                    if item.get('id_mm') is None and id_ is not None:
+                        item['id_mm'] = id_
+                if item.get('od_mm') is not None and item.get('id_mm') is not None:
+                    break
 
         # Defaults
         if not item.get('uom'):
