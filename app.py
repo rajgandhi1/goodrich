@@ -537,13 +537,45 @@ def _make_history_entry(items, quote_data=None, quote_pdf=None):
 
 def _append_history(entry):
     from services import storage as _storage
+    # If there's a pending extraction entry for this session, update it instead of inserting.
+    active = st.session_state.get('_active_hist_entry')
+    if active is not None and active in st.session_state.run_history:
+        active.update(entry)
+        active['pdf_ready'] = True
+        uid = _storage.save_quote(active)
+        if uid:
+            active['supabase_id'] = uid
+        else:
+            _save_history_local()
+        st.session_state.pop('_active_hist_entry', None)
+        return
+    # No pending entry — fresh insert.
     uid = _storage.save_quote(entry)
     if uid:
         entry['supabase_id'] = uid
     else:
         _save_history_local()
-    st.session_state.run_history.insert(0, entry)  # newest first, matches Supabase order
+    st.session_state.run_history.insert(0, entry)
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
+
+
+def _save_extraction_history():
+    """Save a history entry immediately after LLM extraction (no PDF yet)."""
+    items = st.session_state.working_items
+    if not items:
+        return
+    entry = _make_history_entry(items, st.session_state.get('_quote_data') or {}, quote_pdf=None)
+    entry['pdf_ready'] = False
+    from services import storage as _storage
+    uid = _storage.save_quote(entry)
+    if uid:
+        entry['supabase_id'] = uid
+    else:
+        _save_history_local()
+    st.session_state.run_history.insert(0, entry)
+    st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
+    # Keep a reference so _append_history can update this entry when PDF is ready.
+    st.session_state._active_hist_entry = entry
 
 
 def _restore_history_entry(run):
@@ -1012,17 +1044,20 @@ with st.sidebar:
         st.markdown('<p style="font-size:0.8rem;opacity:0.5;margin:0.4rem 0">No quotes saved yet.</p>',
                     unsafe_allow_html=True)
     else:
-        for idx, run in enumerate(reversed(history)):
-            run_idx = len(history) - 1 - idx
+        for run_idx, run in enumerate(history):  # history is newest-first
             quote_no = run.get('quote_no') or ''
-            label = quote_no or run.get('customer') or run.get('project_ref') or f'Quote {run_idx + 1}'
-            with st.expander(f'**{label}**', expanded=False):
+            pdf_ready = run.get('pdf_ready', True)  # entries before this feature default True
+            label = quote_no or run.get('customer') or run.get('project_ref') or f'Enquiry {run_idx + 1}'
+            suffix = '' if pdf_ready else ' *(pending)*'
+            with st.expander(f'**{label}**{suffix}', expanded=(run_idx == 0)):
                 n_regret_h = run.get('n_regret', 0)
+                pdf_status = '📋 Enquiry saved — quotation not prepared' if not pdf_ready else ''
                 st.markdown(
                     f'<div class="gq-hist-meta">{run.get("timestamp", "")}</div>'
                     f'<div class="gq-hist-meta">{run.get("customer") or "No customer"}'
                     f'{" | " + run.get("project_ref") if run.get("project_ref") else ""}</div>'
-                    f'<div class="gq-hist-pills">'
+                    + (f'<div class="gq-hist-meta" style="opacity:0.7">{pdf_status}</div>' if pdf_status else '')
+                    + '<div class="gq-hist-pills">'
                     f'<span class="gq-pill gq-pill-ready">✅ {run.get("n_ready", 0)}</span>'
                     f'<span class="gq-pill gq-pill-check">🟡 {run.get("n_check", 0)}</span>'
                     f'<span class="gq-pill gq-pill-missing">🔴 {run.get("n_missing", 0)}</span>'
@@ -1053,6 +1088,8 @@ with st.sidebar:
                     if supabase_id:
                         _storage.delete_quote(supabase_id)
                     st.session_state.run_history.pop(run_idx)
+                    if run is st.session_state.get('_active_hist_entry'):
+                        st.session_state.pop('_active_hist_entry', None)
                     _save_history_local()
                     st.rerun()
 
@@ -1804,6 +1841,7 @@ with tab_email:
         elif not _os.environ.get('OPENAI_API_KEY'):
             st.error('OpenAI API key required. Enter it in the sidebar to process enquiries.')
         elif _process_and_append(source=email_text, source_type='email'):
+            _save_extraction_history()
             st.rerun()
 
 with tab_excel:
@@ -1820,6 +1858,7 @@ with tab_excel:
             if not _os.environ.get('OPENAI_API_KEY'):
                 st.error('OpenAI API key required. Enter it in the sidebar to process enquiries.')
             elif _process_and_append(source=file_bytes, source_type='excel'):
+                _save_extraction_history()
                 st.rerun()
         else:
             st.warning('Please upload an Excel file first.')
@@ -1846,6 +1885,7 @@ with tab_pdf:
             else:
                 pdf_bytes = pdf_file.read()
                 if _process_and_append(source=pdf_bytes, source_type='pdf'):
+                    _save_extraction_history()
                     st.rerun()
         else:
             st.warning('Please upload a PDF file first.')
