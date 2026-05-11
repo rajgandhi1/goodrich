@@ -2193,14 +2193,26 @@ if st.session_state.working_items:
             st.session_state._selected_rows = set(range(len(display_indices)))
         if sa2.button('Deselect All', key='desel_all_btn'):
             st.session_state._selected_rows = set()
-        if sa3.button('＋ Add Row', key='add_row_btn'):
+        sel_rows = st.session_state._selected_rows
+        insert_hint = 'after selected row' if len(sel_rows) == 1 else 'at end of list'
+        if sa3.button('＋ Add Row', key='add_row_btn', help=f'Insert a blank row {insert_hint}'):
             new_item = apply_rules({
-                'line_no': len(items) + 1,
+                'line_no': 0,
                 'raw_description': '',
                 'gasket_type': 'SOFT_CUT',
             })
             new_item['ggpl_description'] = format_description(new_item)
-            st.session_state.working_items.append(new_item)
+            wl = st.session_state.working_items
+            if len(sel_rows) == 1:
+                # Insert after the selected display row
+                sel_display_idx = next(iter(sel_rows))
+                insert_after = display_indices[sel_display_idx]  # index in wl
+                wl.insert(insert_after + 1, new_item)
+            else:
+                wl.append(new_item)
+            # Renumber line_no sequentially
+            for i, it in enumerate(wl, 1):
+                it['line_no'] = i
             st.session_state.pop('_bulk_df', None)
             st.session_state._selected_rows = set()
             st.rerun(scope='app')
