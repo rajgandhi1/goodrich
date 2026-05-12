@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 _SMART_CACHE_TTL = 7 * 24 * 3600
 _CHUNK_SIZE = 30
-_MAX_WORKERS = 1  # sequential — avoids burst rate limits on gpt-4o (30K TPM tier 1)
+_MAX_WORKERS = max(1, int(os.environ.get('SMART_PARSE_MAX_WORKERS', '1')))
+_MIN_CALL_INTERVAL_SEC = max(0.0, float(os.environ.get('SMART_PARSE_MIN_CALL_INTERVAL_SEC', '1.0')))
 
 
 class SmartParseError(Exception):
@@ -28,6 +29,7 @@ _SYSTEM_PROMPT = """You are an expert in industrial gasket procurement. Extract 
 
 FIELDS per item (omit a field entirely if value is unknown — never output null):
 - line_no (int), quantity (number), uom ("NOS" or "M"), raw_description (verbatim copy of input text), is_gasket (bool)
+- source_sheet (string), source_row (int), source_index (int) when columns with these names are present
 - size (string, keep as found), size_type ("NPS"/"NB"/"DN"/"OD_ID"/"UNKNOWN")
 - rating: normalise to "150#"/"300#"/"600#" etc. or "PN 10"/"PN 16" etc.
   Variants: "# 150", "#  300", "CL 150", "Class 300" → "150#", "300#"; "PN16", "PN-16" → "PN 16"
@@ -90,7 +92,7 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
         return ''
 
 
-def _excel_to_text(excel_bytes: bytes, max_rows: int = 400) -> tuple[str, bool, int]:
+def _excel_to_text(excel_bytes: bytes, max_rows: int | None = None) -> tuple[str, bool, int]:
     """Convert Excel to cleaned markdown tables for LLM input.
 
     Improvements over openpyxl approach:
@@ -128,23 +130,24 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 400) -> tuple[str, bool, 
 
         df = raw_df.map(_clean)  # type: ignore[arg-type]
 
-        # Remove fully-empty rows
-        df = df[df.apply(lambda r: any(c for c in r), axis=1)].reset_index(drop=True)
+        # Remove fully-empty rows, preserving the original 0-based Excel row index.
+        df = df[df.apply(lambda r: any(c for c in r), axis=1)]
         if df.empty:
             continue
 
         # Detect header row: first row with ≥3 non-empty cells
-        header_idx = 0
+        header_idx = df.index[0]
         for i, row in df.iterrows():
             if sum(1 for c in row if c) >= 3:
-                header_idx = int(i)  # type: ignore[arg-type]
+                header_idx = i
                 break
 
-        df.columns = df.iloc[header_idx].tolist()
-        df = df.iloc[header_idx + 1:].reset_index(drop=True)
+        df.columns = df.loc[header_idx].tolist()
+        df = df[df.index > header_idx].copy()
 
-        # Drop columns where >80% of values are empty
-        min_fill = max(1, int(len(df) * 0.20))
+        # Drop columns where >95% of values are empty. Keep sparse but meaningful
+        # columns such as MOC, remarks, ring material, or drawing references.
+        min_fill = max(1, int(len(df) * 0.05))
         df = df.loc[:, df.apply(lambda col: (col != '').sum() >= min_fill)]
 
         # Drop duplicate column names (keep first occurrence)
@@ -158,20 +161,26 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int = 400) -> tuple[str, bool, 
         df = df[keep_cols]
 
         # Remove rows that are entirely empty after column filtering
-        df = df[df.apply(lambda r: any(c for c in r), axis=1)].reset_index(drop=True)
+        df = df[df.apply(lambda r: any(c for c in r), axis=1)]
         if df.empty:
             continue
 
-        # Truncate to max_rows across all sheets
-        remaining = max_rows - total_rows
-        if remaining <= 0:
-            was_truncated = True
-            break
-        if len(df) > remaining:
-            df = df.iloc[:remaining]
-            was_truncated = True
+        # Optional explicit row cap for callers that need one; default is no cap.
+        if max_rows is not None:
+            remaining = max_rows - total_rows
+            if remaining <= 0:
+                was_truncated = True
+                break
+            if len(df) > remaining:
+                df = df.iloc[:remaining]
+                was_truncated = True
 
         total_rows += len(df)
+
+        df = df.copy()
+        df.insert(0, 'source_index', range(total_rows - len(df) + 1, total_rows + 1))
+        df.insert(0, 'source_row', [int(idx) + 1 for idx in df.index])
+        df.insert(0, 'source_sheet', sheet_name)
 
         # Render as markdown table
         headers = [str(c) for c in df.columns]
@@ -208,11 +217,8 @@ def _prepare_document_text(source, source_type: str) -> tuple[str, dict]:
             text = text[:50000]
             metadata['was_truncated'] = True
     elif source_type == 'excel':
-        text, was_truncated, row_count = _excel_to_text(source, max_rows=400)
+        text, was_truncated, row_count = _excel_to_text(source, max_rows=None)
         text = _sanitize_text(text)
-        if len(text) > 50000:
-            text = text[:50000]
-            was_truncated = True
         metadata['was_truncated'] = was_truncated
         metadata['row_count'] = row_count
     elif source_type == 'pdf':
@@ -245,34 +251,37 @@ def _split_into_chunks(document_text: str, chunk_size: int = _CHUNK_SIZE) -> lis
             for i in range(0, len(non_empty), chunk_size)
         ]
 
-    # Excel: markdown table format — sheet marker + col header + separator are repeated in each chunk
-    # Structure per sheet: "=== Sheet: X ===" / "| col | ... |" / "| --- | ... |" / data rows...
-    header_prefix: list[str] = []  # lines that repeat at top of every chunk
+    # Excel: markdown table format. Chunk each sheet independently and repeat
+    # that sheet's marker/header/separator in every chunk.
+    chunks: list[str] = []
+    sheet_marker: str | None = None
+    header: str | None = None
+    separator: str | None = None
     data_lines: list[str] = []
+
+    def _flush_sheet() -> None:
+        if not (sheet_marker and header and separator and data_lines):
+            return
+        prefix = '\n'.join([sheet_marker, header, separator])
+        for j in range(0, len(data_lines), chunk_size):
+            chunks.append(prefix + '\n' + '\n'.join(data_lines[j:j + chunk_size]))
+
     i = 0
     while i < len(lines):
         line = lines[i]
         if line.startswith('=== Sheet:'):
-            # Grab sheet marker + col header + separator (next 2 lines)
-            header_prefix = [line]
-            if i + 1 < len(lines):
-                header_prefix.append(lines[i + 1])  # | col | ... |
-            if i + 2 < len(lines):
-                header_prefix.append(lines[i + 2])  # | --- | ... |
+            _flush_sheet()
+            sheet_marker = line
+            header = lines[i + 1] if i + 1 < len(lines) else None
+            separator = lines[i + 2] if i + 2 < len(lines) else None
+            data_lines = []
             i += 3
         else:
             if line.strip():
                 data_lines.append(line)
             i += 1
-
-    if len(data_lines) <= chunk_size:
-        return [document_text]
-
-    prefix = '\n'.join(header_prefix)
-    return [
-        f'{prefix}\n' + '\n'.join(data_lines[j:j + chunk_size])
-        for j in range(0, len(data_lines), chunk_size)
-    ]
+    _flush_sheet()
+    return chunks or [document_text]
 
 
 def _get_redis():
