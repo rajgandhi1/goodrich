@@ -106,6 +106,17 @@ def process_and_append(source, source_type: str):
     if n_skipped:
         st.info(f'{n_skipped} non-gasket item(s) automatically filtered out.')
 
+    if extracted_items:
+        first_item = extracted_items[0]
+        if first_item.get('_doc_row_count'):
+            st.info(f'Processed {first_item["_doc_row_count"]} source row(s) from the uploaded Excel file.')
+        if first_item.get('_smart_parse_partial'):
+            failed = first_item.get('_smart_parse_failed_chunks') or []
+            st.warning(
+                f'Smart Parse completed partially: {len(failed)} chunk(s) failed after retries. '
+                'The extracted rows were added; retry the file or split the failed section if rows are missing.'
+            )
+
     # ── Common tail: rules + formatter ────────────────────────────────────
     progress_bar.progress(88)
     n = len(extracted_items)

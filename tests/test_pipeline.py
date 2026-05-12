@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-from core.document_reader import read_document_smart
+from core.document_reader import _excel_to_text, _split_into_chunks, read_document_smart
 from core.formatter import format_description
 from core.rules import STATUS_CHECK, STATUS_MISSING, STATUS_READY, apply_rules
 
@@ -113,3 +113,25 @@ def test_smart_parse_excel_pipeline(openai_client):
     assert len(items) == 2
     assert any(item.get('gasket_type') == 'SOFT_CUT' and item.get('moc') == 'NEOPRENE' for item in items)
     assert any(item.get('gasket_type') == 'SPIRAL_WOUND' and item.get('sw_outer_ring') == 'CS' for item in items)
+
+
+def test_excel_2000_rows_are_not_truncated_before_llm():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Large Enquiry'
+    ws.append(['Line', 'Description', 'Quantity', 'UOM'])
+    for i in range(1, 2001):
+        ws.append([i, f'{i % 24 + 1}" 150# CNAF RF gasket 3mm ASME B16.21', 1, 'Nos'])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    text, was_truncated, row_count = _excel_to_text(buf.getvalue())
+    chunks = _split_into_chunks(text)
+
+    assert row_count == 2000
+    assert was_truncated is False
+    assert len(chunks) >= 67
+    assert 'source_sheet' in chunks[0]
+    assert 'source_row' in chunks[0]
+    assert 'source_index' in chunks[0]

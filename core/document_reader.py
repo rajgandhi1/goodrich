@@ -554,9 +554,9 @@ def _normalise_llm_item_shape(item: dict) -> None:
 
 def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
     """Coerce raw LLM output to the schema that rules.py expects."""
-    KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
+    KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence', 'source_sheet'}
     FLOAT_FIELDS = ('od_mm', 'id_mm', 'thickness_mm', 'rtj_hardness_bhn', 'kamm_core_thk', 'quantity')
-    INT_FIELDS = ('line_no',)
+    INT_FIELDS = ('line_no', 'source_row', 'source_index')
     UPPER_FIELDS = ('gasket_type', 'size_type', 'face_type', 'rtj_groove_type', 'uom', 'confidence', 'isk_fire_safety')
 
     result = []
@@ -679,9 +679,12 @@ def _call_llm_parallel(
     chunks = _split_into_chunks(document_text)
     logger.info(f'Smart Parse: {len(chunks)} chunk(s), {len(document_text):,} chars')
 
-    all_raw: list[dict] = []
+    raw_by_chunk: dict[int, list[dict]] = {}
+    failures: list[dict] = []
     done_count = 0
     lock = threading.Lock()
+    call_lock = threading.Lock()
+    last_call_at = [0.0]
 
     def _process(idx_chunk):
         import time as _time
@@ -689,20 +692,30 @@ def _call_llm_parallel(
         logger.info(f'Smart Parse: chunk {idx}/{len(chunks)}...')
         for attempt in range(3):
             try:
+                with call_lock:
+                    if last_call_at[0] and _MIN_CALL_INTERVAL_SEC:
+                        elapsed = _time.monotonic() - last_call_at[0]
+                        if elapsed < _MIN_CALL_INTERVAL_SEC:
+                            _time.sleep(_MIN_CALL_INTERVAL_SEC - elapsed)
+                    last_call_at[0] = _time.monotonic()
                 raw = _call_single_chunk(openai_client, chunk, source_type)
                 logger.info(f'Smart Parse: chunk {idx} done — {len(raw)} item(s)')
-                return raw
+                return idx, raw, None
             except SmartParseError as e:
                 err = str(e).lower()
-                if 'timed out' in err and attempt < 2:
-                    logger.warning(f'Smart Parse: chunk {idx} timed out, retry {attempt + 1}...')
-                    _time.sleep(5)
-                elif 'rate limit' in err and attempt < 2:
+                if any(fatal in err for fatal in ('invalid openai api key', 'account quota exceeded', 'api key contains')):
+                    raise
+                if 'rate limit' in err and attempt < 2:
                     wait = 30 * (attempt + 1)
                     logger.warning(f'Smart Parse: chunk {idx} rate limited, waiting {wait}s...')
                     _time.sleep(wait)
+                elif attempt < 2:
+                    wait = 5 * (attempt + 1)
+                    logger.warning(f'Smart Parse: chunk {idx} failed, retry {attempt + 1} in {wait}s: {e}')
+                    _time.sleep(wait)
                 else:
-                    raise
+                    logger.error(f'Smart Parse: chunk {idx} failed permanently: {e}')
+                    return idx, [], str(e)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
         futures = {
@@ -710,9 +723,12 @@ def _call_llm_parallel(
             for i, chunk in enumerate(chunks, 1)
         }
         for future in concurrent.futures.as_completed(futures):
-            chunk_raw = future.result()
+            chunk_idx, chunk_raw, chunk_error = future.result()
             with lock:
-                all_raw.extend(chunk_raw)
+                if chunk_error:
+                    failures.append({'chunk': chunk_idx, 'error': chunk_error})
+                else:
+                    raw_by_chunk[chunk_idx] = chunk_raw
                 done_count += 1
 
             if on_chunk_items and chunk_raw:
@@ -726,9 +742,21 @@ def _call_llm_parallel(
                 with lock:
                     progress_cb(done_count, len(chunks))
 
-    result, skipped = _normalize_items(all_raw)
+    all_raw: list[dict] = []
+    for idx in sorted(raw_by_chunk):
+        all_raw.extend(raw_by_chunk[idx])
 
-    if r:
+    if failures and not all_raw:
+        detail = '; '.join(f'chunk {f["chunk"]}: {f["error"]}' for f in failures[:3])
+        raise SmartParseError(f'All {len(chunks)} Smart Parse chunk(s) failed. {detail}')
+
+    result, skipped = _normalize_items(all_raw)
+    if failures and result:
+        result[0]['_smart_parse_partial'] = True
+        result[0]['_smart_parse_failed_chunks'] = failures
+        result[0]['_smart_parse_total_chunks'] = len(chunks)
+
+    if r and not failures:
         try:
             r.setex(cache_key, _SMART_CACHE_TTL, json.dumps(result))
         except Exception:
@@ -776,5 +804,7 @@ def read_document_smart(
 
     if metadata.get('was_truncated') and items:
         items[0]['_doc_was_truncated'] = True
+    if metadata.get('row_count') and items:
+        items[0]['_doc_row_count'] = metadata['row_count']
 
     return items, skipped
