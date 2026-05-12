@@ -383,13 +383,41 @@ def _parse_od_id(size_str: str) -> tuple[float | None, float | None]:
         return None, None
     s = str(size_str)
 
-    def _find(label: str) -> float | None:
-        # number before label: "48 MM OD", "48.5OD"
-        m = re.search(rf'(\d+(?:\.\d+)?)\s*(?:mm)?\s*{label}', s, re.I)
+    labeled_patterns = [
+        (
+            r'O\.?D\.?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:mm)?\b.*?'
+            r'I\.?D\.?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:mm)?\b',
+            False,
+        ),
+        (
+            r'I\.?D\.?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:mm)?\b.*?'
+            r'O\.?D\.?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:mm)?\b',
+            True,
+        ),
+        (
+            r'(\d+(?:\.\d+)?)\s*(?:mm)?\s*O\.?D\.?\b.*?'
+            r'(\d+(?:\.\d+)?)\s*(?:mm)?\s*I\.?D\.?\b',
+            False,
+        ),
+        (
+            r'(\d+(?:\.\d+)?)\s*(?:mm)?\s*I\.?D\.?\b.*?'
+            r'(\d+(?:\.\d+)?)\s*(?:mm)?\s*O\.?D\.?\b',
+            True,
+        ),
+    ]
+    for pattern, reversed_order in labeled_patterns:
+        m = re.search(pattern, s, re.I)
         if m:
-            return float(m.group(1))
+            first, second = float(m.group(1)), float(m.group(2))
+            return (second, first) if reversed_order else (first, second)
+
+    def _find(label: str) -> float | None:
         # label before number: "OD 584MM", "OD: 48"
         m = re.search(rf'{label}\s*[:\s]\s*(\d+(?:\.\d+)?)', s, re.I)
+        if m:
+            return float(m.group(1))
+        # number before label: "48 MM OD", "48.5OD"
+        m = re.search(rf'(\d+(?:\.\d+)?)\s*(?:mm)?\s*{label}', s, re.I)
         if m:
             return float(m.group(1))
         return None
@@ -399,6 +427,122 @@ def _parse_od_id(size_str: str) -> tuple[float | None, float | None]:
     if od is not None and id_ is not None:
         return od, id_
     return None, None
+
+
+_GASKET_TYPE_ALIASES = {
+    'SOFTCUT': 'SOFT_CUT',
+    'SOFT CUT': 'SOFT_CUT',
+    'SOFT_CUT': 'SOFT_CUT',
+    'SPIRAL': 'SPIRAL_WOUND',
+    'SPIRAL WOUND': 'SPIRAL_WOUND',
+    'SPIRAL_WOUND': 'SPIRAL_WOUND',
+    'SW': 'SPIRAL_WOUND',
+    'SPW': 'SPIRAL_WOUND',
+    'RTJ': 'RTJ',
+    'RING JOINT': 'RTJ',
+    'RING_JOINT': 'RTJ',
+    'KAMM': 'KAMM',
+    'KAMMPROFILE': 'KAMM',
+    'CAMPROFILE': 'KAMM',
+    'DJI': 'DJI',
+    'DOUBLE JACKET': 'DJI',
+    'DOUBLE JACKETED': 'DJI',
+    'DOUBLE_JACKETED': 'DJI',
+    'ISK': 'ISK',
+    'INSULATING GASKET KIT': 'ISK',
+    'ISK_RTJ': 'ISK_RTJ',
+}
+
+_SIZE_TYPE_ALIASES = {
+    'NPS': 'NPS',
+    'INCH': 'NPS',
+    'IN': 'NPS',
+    'NB': 'NB',
+    'DN': 'DN',
+    'OD_ID': 'OD_ID',
+    'OD/ID': 'OD_ID',
+    'OD-ID': 'OD_ID',
+    'CUSTOM': 'OD_ID',
+    'UNKNOWN': 'UNKNOWN',
+}
+
+
+def _normalise_enum(value: object, aliases: dict[str, str], default: str) -> str:
+    if value is None:
+        return default
+    key = re.sub(r'[\s\-]+', ' ', str(value).strip().upper()).replace(' ', '_')
+    if key in aliases:
+        return aliases[key]
+    key_space = key.replace('_', ' ')
+    return aliases.get(key_space, default)
+
+
+def _normalise_uom(value: object) -> str:
+    if value is None:
+        return 'NOS'
+    uom = str(value).strip().upper()
+    if uom in ('M', 'MTR', 'MTRS', 'METER', 'METERS', 'METRE', 'METRES'):
+        return 'M'
+    return 'NOS'
+
+
+def _looks_like_nominal_size(size_text: str) -> bool:
+    return bool(re.search(r'["\']|\b(?:NPS|NB|DN|INCH|IN)\b', size_text, re.IGNORECASE))
+
+
+def _infer_size_type(item: dict) -> str:
+    current = _normalise_enum(item.get('size_type'), _SIZE_TYPE_ALIASES, 'UNKNOWN')
+    size_text = str(item.get('size') or '')
+    raw_text = str(item.get('raw_description') or '')
+
+    if item.get('od_mm') is not None and item.get('id_mm') is not None and not size_text:
+        return 'OD_ID'
+
+    if current == 'OD_ID':
+        if item.get('od_mm') is not None and item.get('id_mm') is not None:
+            return 'OD_ID'
+        if _looks_like_nominal_size(size_text):
+            return 'NPS'
+        return 'UNKNOWN'
+
+    if current != 'UNKNOWN':
+        return current
+
+    if re.search(r'\bO\.?D\.?\b|\bI\.?D\.?\b', size_text + ' ' + raw_text, re.IGNORECASE):
+        if item.get('od_mm') is not None and item.get('id_mm') is not None and not _looks_like_nominal_size(size_text):
+            return 'OD_ID'
+    if re.search(r'\bDN\b', size_text, re.IGNORECASE):
+        return 'DN'
+    if re.search(r'\bNB\b', size_text, re.IGNORECASE):
+        return 'NB'
+    if _looks_like_nominal_size(size_text):
+        return 'NPS'
+    return 'UNKNOWN'
+
+
+def _normalise_llm_item_shape(item: dict) -> None:
+    """Coerce variable LLM JSON into the stable internal schema."""
+    if not item.get('raw_description'):
+        item['raw_description'] = item.get('description') or ''
+
+    item['gasket_type'] = _normalise_enum(item.get('gasket_type'), _GASKET_TYPE_ALIASES, 'SOFT_CUT')
+    item['uom'] = _normalise_uom(item.get('uom'))
+    item['size_type'] = _infer_size_type(item)
+
+    if item.get('rtj_groove_type'):
+        groove = str(item['rtj_groove_type']).strip().upper()
+        item['rtj_groove_type'] = {'OVL': 'OVAL', 'OCT': 'OCTAGONAL'}.get(groove, groove)
+
+    for key in (
+        'moc', 'sw_winding_material', 'sw_filler', 'sw_inner_ring', 'sw_outer_ring',
+        'kamm_core_material', 'kamm_surface_material', 'dji_filler',
+        'isk_gasket_material', 'isk_core_material', 'isk_sleeve_material',
+        'isk_washer_material', 'isk_primary_seal', 'isk_insulating_washer',
+    ):
+        if isinstance(item.get(key), str):
+            item[key] = re.sub(r'\s+', ' ', item[key]).strip().upper()
+
+
 def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
     """Coerce raw LLM output to the schema that rules.py expects."""
     KEEP_AS_STRING = {'uom', 'raw_description', 'gasket_type', 'size_type', 'confidence'}
@@ -445,6 +589,11 @@ def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
 
         # Fill od_mm/id_mm from `size` (or raw_description as last resort) when LLM left them blank.
         # Also handles cases where LLM returned od_mm/id_mm as strings-with-units that failed float coercion.
+        raw_od, raw_id = _parse_od_id(item.get('raw_description') or '')
+        if raw_od is not None and raw_id is not None:
+            item['od_mm'] = raw_od
+            item['id_mm'] = raw_id
+
         if item.get('od_mm') is None or item.get('id_mm') is None:
             for _src in (item.get('size') or '', item.get('raw_description') or ''):
                 if not _src:
@@ -459,9 +608,19 @@ def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
                 if item.get('od_mm') is not None and item.get('id_mm') is not None:
                     break
 
-        # Defaults
-        if not item.get('uom'):
-            item['uom'] = 'NOS'
+        # The LLM sometimes marks plain NPS inch sizes such as `6"` as OD_ID
+        # because the prompt discusses OD/ID handling. If no OD/ID dimensions
+        # were actually extracted and the size is a normal nominal pipe size,
+        # reset the type so rules.py validates size/rating/moc instead.
+        if (
+            str(item.get('size_type') or '').upper() == 'OD_ID'
+            and item.get('od_mm') is None
+            and item.get('id_mm') is None
+        ):
+            size_text = str(item.get('size') or '')
+            if re.search(r'["\']|\b(?:NPS|NB|DN)\b', size_text, re.IGNORECASE):
+                item['size_type'] = 'NPS'
+
         if not item.get('gasket_type'):
             item['gasket_type'] = 'SOFT_CUT'
         if not item.get('size_type'):
@@ -472,6 +631,8 @@ def _normalize_items(raw_items: list) -> tuple[list[dict], int]:
         for f in UPPER_FIELDS:
             if isinstance(item.get(f), str):
                 item[f] = item[f].strip().upper()
+
+        _normalise_llm_item_shape(item)
 
         result.append(item)
 
