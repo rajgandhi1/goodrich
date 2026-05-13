@@ -89,6 +89,9 @@ def save_quote(entry: dict) -> str | None:
             'quote_data':     qdata_val if isinstance(qdata_val, dict) else json.loads(qdata_val),
             'quote_pdf_b64':  entry.get('quote_pdf_b64') or '',
             'quote_pdf_name': entry.get('quote_pdf_name') or '',
+            'stage':          entry.get('stage') or 'initial',
+            'stage_history':  entry.get('stage_history') or [],
+            'stage_meta':     entry.get('stage_meta') or {},
         }
         supabase_id = entry.get('supabase_id')
         if supabase_id:
@@ -135,9 +138,15 @@ def load_quotes(limit: int = 100) -> list[dict]:
                 'n_regret':    row.get('n_regret', 0),
                 'quote_pdf_b64':  row.get('quote_pdf_b64') or '',
                 'quote_pdf_name': row.get('quote_pdf_name') or '',
+                'stage':          row.get('stage') or 'initial',
             }
-            # items and quote_data come back as dicts/lists from jsonb — no parsing needed
-            for key, default in (('items', []), ('quote_data', {})):
+            # items, quote_data, stage_history, stage_meta come back as jsonb
+            for key, default in (
+                ('items', []),
+                ('quote_data', {}),
+                ('stage_history', []),
+                ('stage_meta', {}),
+            ):
                 val = row.get(key)
                 if isinstance(val, (list, dict)):
                     entry[key] = val

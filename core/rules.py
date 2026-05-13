@@ -541,9 +541,13 @@ _RTJ_HARDNESS_DEFAULTS = {
     'INCOLOY 825': 160,                          # Alloy 825 (UNS N08825)
     'INCOLOY 800': 160,                          # Alloy 800 (UNS N08800)
     '6MO': 200,                                  # UNS S31254 (6% Mo super austenitic)
-    # Chrome-moly
-    'F5': 130,                                   # 4–6% Cr, 0.5% Mo (ASME B16.20 Table 1)
+    # Chrome-moly (ASME B16.20 Table 1 / API 6A) — all 130 BHN max
+    'F5': 130,                                   # 4–6% Cr, 0.5% Mo
     '4-6% CR 0.5% MO': 130,
+    'F9': 130,                                   # 9% Cr, 1% Mo
+    'F11': 130,                                  # 1-1/4% Cr, 1/2% Mo
+    'F22': 130,                                  # 2-1/4% Cr, 1% Mo
+    'F91': 130,                                  # 9% Cr, 1% Mo, V (Grade 91)
     # UNS designations
     'UNS N06600': 160,  # Inconel 600
     'UNS N08825': 160,  # Incoloy 825
@@ -606,6 +610,11 @@ _RTJ_MOC_ALIASES = {
     'HASTELLOY C276': 'HASTELLOY C276', 'HAST ALLOY C276': 'HASTELLOY C276', 'C276': 'HASTELLOY C276',
     'HASTELLOY C22': 'HASTELLOY C22', 'C22': 'HASTELLOY C22',
     'F5': 'F5', '4-6% CR 0.5% MO': 'F5', '4-6CR 0.5MO': 'F5', 'CHROME MOLY': 'F5', 'CR-MO': 'F5',
+    'F9': 'F9', '9% CR 1% MO': 'F9', '9CR 1MO': 'F9',
+    'F11': 'F11', '1-1/4% CR 1/2% MO': 'F11', '1-1/4 CR - 1/2 MO': 'F11', '1.25 CR 0.5 MO': 'F11',
+    'F22': 'F22', '2-1/4% CR 1% MO': 'F22', '2-1/4 CR - 1 MO': 'F22', '2-1/4 CR 1 MO': 'F22',
+    '2 1/4 CR 1 MO': 'F22', '2.25 CR 1 MO': 'F22', '2-1/4CR-1MO': 'F22',
+    'F91': 'F91', '9% CR 1% MO V': 'F91', 'GRADE 91': 'F91', 'GR 91': 'F91',
     'ALLOY 20': 'ALLOY 20', 'ALLOY20': 'ALLOY 20', 'CARPENTER 20': 'ALLOY 20',
     '6MO': '6MO', '6 MO': '6MO',
     '254 SMO': 'UNS S31254', '254SMO': 'UNS S31254', 'AVESTA 254 SMO': 'UNS S31254',

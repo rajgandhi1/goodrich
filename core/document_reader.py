@@ -16,16 +16,18 @@ import threading
 logger = logging.getLogger(__name__)
 
 _SMART_CACHE_TTL = 7 * 24 * 3600
-_CHUNK_SIZE = 30
-_MAX_WORKERS = max(1, int(os.environ.get('SMART_PARSE_MAX_WORKERS', '1')))
-_MIN_CALL_INTERVAL_SEC = max(0.0, float(os.environ.get('SMART_PARSE_MIN_CALL_INTERVAL_SEC', '1.0')))
+_CHUNK_SIZE = 20
+_MAX_WORKERS = max(1, int(os.environ.get('SMART_PARSE_MAX_WORKERS', '3')))
+_MIN_CALL_INTERVAL_SEC = max(0.0, float(os.environ.get('SMART_PARSE_MIN_CALL_INTERVAL_SEC', '0')))
 
 
 class SmartParseError(Exception):
     """Raised when Smart Parse cannot complete."""
 
 
-_SYSTEM_PROMPT = """You are an expert in industrial gasket procurement. Extract every line item from the customer enquiry document and return ONLY valid JSON: {"items": [...]}.
+_SYSTEM_PROMPT = """You are an expert in industrial gasket procurement. Extract EVERY line item from the customer enquiry document and return ONLY valid JSON: {"items": [...]}.
+
+IMPORTANT — Treat every row independently. Do NOT skip rows that look similar to earlier ones. Do NOT collapse or deduplicate. The output must have exactly as many items as gasket rows in the input. Quality must be the same for the last row as the first.
 
 FIELDS per item (omit a field entirely if value is unknown — never output null):
 - line_no (int), quantity (number), uom ("NOS" or "M"), raw_description (verbatim copy of input text), is_gasket (bool)
@@ -36,11 +38,16 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
 - gasket_type — choose by PHYSICAL CONSTRUCTION described, not by the standard the customer cites (customers often cite the wrong standard):
     * SOFT_CUT — flat sheet cut to shape, single homogeneous material (rubber, CNAF, PTFE, graphite sheet)
     * SPIRAL_WOUND — alternating metal strip wound with soft filler ("spiral wound", "SW", winding + filler mentioned)
-    * RTJ — solid metal ring sitting in a groove (ring joint, oval/octagonal/BX, R-/RX-/BX- number)
+    * RTJ — solid metal ring sitting in a groove (ring joint / RJ / RTJ / ring gasket; oval / octagonal / BX profile)
     * KAMM — metal core/insert with thin soft sealing layer on both faces ("kammprofile", "profile gasket … metal core/insert", "grooved metal core")
     * DJI — double-jacketed: metal jacket fully enclosing a soft filler (heat exchanger style)
     * ISK — insulating gasket kit / flange insulation kit (includes sleeves, washers, kit components)
-- moc: for SOFT_CUT only — the sealing material (EPDM, NEOPRENE, CNAF, PTFE, VITON, etc.)
+- moc — the principal sealing/body material. Populate for EVERY gasket type when the source names a material:
+    * SOFT_CUT: the sheet material (EPDM, NEOPRENE, CNAF, PTFE, VITON, NBR, GRAPHITE SHEET, etc.)
+    * RTJ: the ring metal verbatim (e.g. "SOFT IRON", "F5", "F11", "F22", "2-1/4 Cr - 1 Mo", "SS316", "INCONEL 625")
+    * SPIRAL_WOUND: leave moc blank — materials live in sw_* fields
+    * KAMM / DJI: jacket or core metal (e.g. "SS316", "CS"); soft layers go in *_filler / *_surface
+    * ISK: gasket material when stated as a single grade (e.g. "G10", "PHENOLIC")
   Unspecified rubber with no clear type → omit moc, set special="MOC ambiguous - confirm rubber type"
 - face_type: "RF" or "FF" — for SOFT_CUT and ISK only
 - thickness_mm (number): default 3 for SOFT_CUT, 4.5 for SPIRAL_WOUND if not stated
@@ -49,28 +56,47 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
     * Flange standards (NOT gasket standards — ignore as the `standard`): ASME B16.5, ASME B16.47, API 6B, API 6BX, API 17D
     * If customer cites API 6B / API 6BX (flange type) for an RTJ → the gasket standard is API 6A
     * If customer cites ASME B16.5 (flange std) for a SW/RTJ → the gasket standard is ASME B16.20
-    * If the customer cites a real gasket standard, use it verbatim
+    * If the customer cites a real gasket standard, use it verbatim. If they cite BOTH (e.g. "ASME B16.20 (ASME B16.47 SR A)" or "ASME B16.20 / ASME B16.47 Series A") preserve the SR/Series A annotation in the standard string — it tells GGPL the flange is a large-bore B16.47 type.
     * If no real gasket standard is cited, default: SOFT_CUT # → ASME B16.21 (≥26" → ASME B16.47); SOFT_CUT PN → EN 1514-1; SPW/RTJ → ASME B16.20
 - od_mm, id_mm (numbers): only when value is already given in mm. Otherwise leave both blank and put the OD/ID exactly as written (any unit — inches, feet-inches, fractions) into `size`, with size_type="OD_ID". Code will handle unit conversion.
-- special: genuine technical notes only — ignore plant tag numbers, MR/RFQ references, area codes
+- special: genuine technical notes only (NACE MR0175, fire-safe, food-grade, oxygen service, certifications such as "NSF 61/ANSI 61-G", customer-side modifiers such as "MODIFIED" / "with steel insert"). Ignore plant tag numbers, MR / RFQ / PO reference codes, area / unit codes, drawing numbers.
 
-SPIRAL_WOUND — always extract all four material fields:
-- sw_winding_material: the metal strip (e.g. SS316, SS304, INCONEL 625, HASTELLOY C276)
+SPIRAL_WOUND — always extract all four material fields when present:
+- sw_winding_material: the metal strip (e.g. SS316, SS316L, SS304, INCONEL 625, HASTELLOY C276)
 - sw_filler: filler/sealing element (GRAPHITE, FLEXIBLE GRAPHITE, PTFE, MICA, CERAMIC)
-- sw_inner_ring: inner ring material if present (e.g. SS316, SS304, CS)
+- sw_inner_ring: inner ring material if present (e.g. SS316, SS316L, SS304, CS)
 - sw_outer_ring: outer centering ring material (e.g. CS, SS304, SS316) — often mandatory
+- Pattern hints (general — work in any order/wording): "<metal> + <filler>" or "<metal>/<filler>" = winding/filler; "<material> OUTER" / "OUTER RING <material>" = outer; "<material> INNER" / "INNER RING <material>" = inner. Keep extracting these for every SW row, not just the first.
 
-RTJ: ring_no (R-/RX-/BX- number), rtj_groove_type ("OCT"/"OVL"/"BX"), rtj_hardness_bhn (number)
-KAMM: kamm_core_material, kamm_surface_material, kamm_core_thk, kamm_integral_outer_ring
-DJI: dji_filler, dji_face_type, dji_id_first (bool — true when ID listed before OD in input)
-ISK: isk_style, isk_type, isk_fire_safety, isk_gasket_material, isk_core_material, isk_sleeve_material, isk_washer_material, isk_primary_seal, isk_insulating_washer
+RTJ:
+- ring_no — ONLY values that start with R- / RX- / BX- followed by digits (e.g. "R-23", "RX-46", "BX-156"). Any other token (E2E, D2A, A1A, area codes, drawing refs) is NOT a ring number — leave ring_no blank.
+- rtj_groove_type — use the literal short code:
+    * "OCT"  when source says octagonal / oct / 8-sided / "type O" / R-octagonal
+    * "OVL"  when source says oval / elliptical / "type R"
+    * "BX"   when source says BX / pressure-energised / "type BX"
+    * If only "R" / "ring joint" / "RTJ" is stated with no profile, omit rtj_groove_type
+- rtj_hardness_bhn (number) — only when an explicit BHN/HRBW number is in the source. Do NOT guess from material; the code applies material-based defaults afterwards.
+
+KAMM: kamm_core_material, kamm_surface_material (graphite / PTFE / mica covering), kamm_core_thk, kamm_integral_outer_ring (bool)
+DJI: dji_filler (soft inner filler), dji_face_type, dji_id_first (true when ID is listed BEFORE OD in input)
+ISK: isk_style ("Type-E" full face / "Type-F" raised / "Type-D" RTJ), isk_type, isk_fire_safety, isk_gasket_material, isk_core_material, isk_sleeve_material, isk_washer_material, isk_primary_seal, isk_insulating_washer
 
 NORMALISATION:
 - is_gasket=false for bolts, studs, nuts, flanges, fittings, pipes (still include the row)
-- Materials: SS 316 / 316SS / S.S.316L → SS316/SS316L; M.S./Mild Steel/Carbon Steel → CS; 304SS → SS304
-- Duplex → UNS S31803; Super Duplex/2507 → UNS S32750
-- Ignore plant area tags and procurement reference codes embedded in descriptions — they are not materials or sizes
-- uom "M" (metres) = sheet/roll supply, not individual gaskets
+- Materials — normalise common variants:
+    * SS 316 / 316SS / S.S.316 / AISI 316 / TYPE 316 → SS316; 316L variants → SS316L; 304 variants → SS304
+    * M.S. / Mild Steel / Carbon Steel / Low Carbon Steel → CS
+    * "Soft Iron", "S.I.", "SI" → SOFT IRON
+    * Chrome-moly grades — keep both the F-grade AND the composition when both appear, prefer the F-grade alone otherwise: "F5" / "5% Cr - 1/2 Mo" → F5; "F11" / "1-1/4 Cr - 1/2 Mo" → F11; "F22" / "2-1/4 Cr - 1 Mo" → F22; "F91" / "9% Cr 1 Mo V" → F91
+    * Duplex / 2205 / S31803 → UNS S31803; Super Duplex / 2507 / S32750 → UNS S32750
+    * INCONEL X / INCOLOY X / HASTELLOY X / MONEL X — keep as stated; normalise to UPPERCASE with grade
+- Ignore plant area tags, line numbers, equipment tags, MR / RFQ / PO references, drawing numbers — they are not materials, sizes, or ring numbers
+- uom "M" (metres) = sheet / roll supply, not individual gaskets
+
+REPETITION DISCIPLINE:
+- The document may contain many rows with nearly-identical descriptions differing only in size or rating. Extract every one as a separate item with its own size and rating.
+- Do NOT carry forward fields from a previous row by assumption — read every row's text on its own.
+- Material/filler fields stay fully populated for every spiral wound / kammprofile / DJI / ISK row, even when the source repeats the same construction for dozens of rows.
 """
 
 

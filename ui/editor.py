@@ -36,7 +36,17 @@ def _build_extraction_summary(items: list[dict]) -> list[str]:
             filler  = (item.get('sw_filler') or '').upper()
             inner   = (item.get('sw_inner_ring') or '').upper()
             outer   = (item.get('sw_outer_ring') or '').upper()
-            key = (winding, filler, inner, outer)
+            std     = (item.get('standard') or '').upper()
+            # Separate the B16.47 series variant from plain B16.20 — flange type
+            # is different even when the construction is identical.
+            if 'B16.47' in std or '16.47' in std:
+                if 'SR B' in std or 'SERIES B' in std:
+                    flange_flag = 'SERIES B'
+                else:
+                    flange_flag = 'SERIES A'
+            else:
+                flange_flag = ''
+            key = (winding, filler, inner, outer, flange_flag)
             if key not in spw_groups:
                 spw_groups[key] = set()
             if rating:
@@ -80,7 +90,7 @@ def _build_extraction_summary(items: list[dict]) -> list[str]:
             parts.append(api_flag)
         lines.append(' ,'.join(parts))
 
-    for (winding, filler, inner, outer), ratings in spw_groups.items():
+    for (winding, filler, inner, outer, flange_flag), ratings in spw_groups.items():
         mat = f'{winding}/{filler}' if winding and filler else (winding or filler)
         suffix = ''
         if inner:
@@ -92,6 +102,8 @@ def _build_extraction_summary(items: list[dict]) -> list[str]:
             _rating_order = {'150#': 0, '300#': 1, '600#': 2, '900#': 3, '1500#': 4, '2500#': 5}
             sorted_ratings = sorted(ratings, key=lambda r: _rating_order.get(r, 99))
             desc += ',' + ','.join(sorted_ratings)
+        if flange_flag:
+            desc += f' ({flange_flag})'
         lines.append(desc)
 
     for (moc, face), ratings in soft_groups.items():
@@ -207,6 +219,8 @@ def _delete_selected_items(items, display_indices):
     st.session_state.working_items = final
     st.session_state._selected_rows = set()
     st.session_state.pop('_bulk_df', None)
+    from ui.history import mark_active_review
+    mark_active_review()
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +298,8 @@ def _reprocess_customer_descriptions(items, display_indices, edited_df, visible_
     st.session_state.working_items = updated_full
     st.session_state._selected_rows = set()
     st.session_state.pop('_bulk_df', None)
+    from ui.history import mark_active_review
+    mark_active_review()
     return len(reprocessed)
 
 
@@ -487,6 +503,8 @@ def _editor_fragment(items, display_indices):
         st.session_state.working_items = updated_full
         st.session_state.pop('_bulk_df', None)
         st.session_state._selected_rows = set()
+        from ui.history import mark_active_review
+        mark_active_review()
         st.rerun(scope='app')
 
     # ── Delete Selected ──────────────────────────────────────────────────────
@@ -516,6 +534,8 @@ def _editor_fragment(items, display_indices):
         st.session_state.working_items = updated_full
         st.session_state._selected_rows = set()
         st.session_state.pop('_bulk_df', None)
+        from ui.history import mark_active_review
+        mark_active_review()
         st.rerun(scope='app')
 
 
