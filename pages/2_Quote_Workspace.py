@@ -30,7 +30,7 @@ from ui.editor import (
     _editor_fragment,
     _reset_enquiry_inputs,
 )
-from ui.history import _save_extraction_history, load_history, mark_active_quote_prep
+from ui.history import _save_extraction_history, _save_processing_stub, load_history, mark_active_quote_prep
 from ui.processing import process_and_append
 from ui.quote_page import render_quote_page
 from ui.sidebar import render_topbar
@@ -128,8 +128,10 @@ with tab_email:
             st.warning('Please paste some email text first.')
         elif not _os.environ.get('OPENAI_API_KEY'):
             st.error('OpenAI API key required — expand the key banner above to enter it.')
-        elif process_and_append(source=email_text, source_type='email'):
-            _save_extraction_history()
+        else:
+            _save_processing_stub(source_label=email_text.strip()[:60])
+            if process_and_append(source=email_text, source_type='email'):
+                _save_extraction_history()
             st.rerun()
 
 with tab_excel:
@@ -145,8 +147,10 @@ with tab_excel:
             file_bytes = uploaded_file.read()
             if not _os.environ.get('OPENAI_API_KEY'):
                 st.error('OpenAI API key required — expand the key banner above to enter it.')
-            elif process_and_append(source=file_bytes, source_type='excel'):
-                _save_extraction_history()
+            else:
+                _save_processing_stub(source_label=uploaded_file.name)
+                if process_and_append(source=file_bytes, source_type='excel'):
+                    _save_extraction_history()
                 st.rerun()
         else:
             st.warning('Please upload an Excel file first.')
@@ -172,9 +176,10 @@ with tab_pdf:
                 )
             else:
                 pdf_bytes = pdf_file.read()
+                _save_processing_stub(source_label=pdf_file.name)
                 if process_and_append(source=pdf_bytes, source_type='pdf'):
                     _save_extraction_history()
-                    st.rerun()
+                st.rerun()
         else:
             st.warning('Please upload a PDF file first.')
 

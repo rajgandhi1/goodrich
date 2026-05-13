@@ -266,18 +266,33 @@ def _append_history(entry):
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
 
 
-def _save_extraction_history():
-    """Save a history entry immediately after LLM extraction (no PDF yet)."""
-    items = st.session_state.working_items
-    if not items:
-        return
-    entry = _make_history_entry(items, st.session_state.get('_quote_data') or {}, quote_pdf=None)
-    entry['pdf_ready'] = False
-    # First persist a stamp at the initial stage.
-    entry['stage_history'] = [{
-        'stage': 'initial',
-        'at': _dt.datetime.now().strftime('%d %b %Y %H:%M'),
-    }]
+def _save_processing_stub(source_label: str = '') -> None:
+    """Create and persist a placeholder entry BEFORE the LLM call starts.
+
+    This makes the enquiry immediately visible on the dashboard even if the user
+    navigates away while processing. _save_extraction_history() will update this
+    same record with real items once the LLM finishes.
+    """
+    now = _dt.datetime.now().strftime('%d %b %Y %H:%M')
+    entry: dict = {
+        'timestamp':     now,
+        'customer':      source_label or 'New enquiry',
+        'project_ref':   '',
+        'quote_no':      '',
+        'custom_label':  '',
+        'quote_data':    {},
+        'n_items':       0,
+        'n_ready':       0,
+        'n_check':       0,
+        'n_missing':     0,
+        'n_regret':      0,
+        'items':         [],
+        'stage':         'initial',
+        'stage_history': [{'stage': 'initial', 'at': now}],
+        'stage_meta':    {},
+        'pdf_ready':     False,
+        'processing':    True,
+    }
     from services import storage as _storage
     try:
         uid = _storage.save_quote(entry)
@@ -289,7 +304,50 @@ def _save_extraction_history():
         entry['supabase_id'] = uid
     st.session_state.run_history.insert(0, entry)
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
-    # Keep a reference so _append_history can update this entry when PDF is ready.
+    # Keep reference so _save_extraction_history() updates this record.
+    st.session_state._active_hist_entry = entry
+
+
+def _save_extraction_history():
+    """Update the processing stub (or create a fresh entry) after LLM extraction."""
+    items = st.session_state.working_items
+    if not items:
+        return
+
+    # If a processing stub exists for this run, update it in place.
+    active = st.session_state.get('_active_hist_entry')
+    if active is not None and active in st.session_state.run_history and active.get('processing'):
+        prior_stage_history = active.get('stage_history') or []
+        prior_supabase_id   = active.get('supabase_id')
+        prior_stage         = active.get('stage') or 'initial'
+        prior_meta          = active.get('stage_meta') or {}
+        active.update(_make_history_entry(items, st.session_state.get('_quote_data') or {}, quote_pdf=None))
+        active['pdf_ready']     = False
+        active['processing']    = False
+        active['stage']         = prior_stage
+        active['stage_history'] = prior_stage_history
+        active['stage_meta']    = prior_meta
+        if prior_supabase_id:
+            active['supabase_id'] = prior_supabase_id
+        _persist_entry(active)
+        return
+
+    # No stub active — create a fresh entry (fallback / manual-add path).
+    entry = _make_history_entry(items, st.session_state.get('_quote_data') or {}, quote_pdf=None)
+    entry['pdf_ready']  = False
+    entry['processing'] = False
+    entry['stage_history'] = [{'stage': 'initial', 'at': _dt.datetime.now().strftime('%d %b %Y %H:%M')}]
+    from services import storage as _storage
+    try:
+        uid = _storage.save_quote(entry)
+    except Exception as exc:
+        st.toast(f'Database save failed — {exc}', icon='🚨')
+        uid = None
+        _save_history_local()
+    if uid:
+        entry['supabase_id'] = uid
+    st.session_state.run_history.insert(0, entry)
+    st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
     st.session_state._active_hist_entry = entry
 
 

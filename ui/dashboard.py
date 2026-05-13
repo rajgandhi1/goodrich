@@ -173,7 +173,8 @@ def _render_pipeline_card(run: dict, stage: str) -> None:
         f'margin-bottom:0.35rem;font-size:0.74rem;color:#e8ecf1">'
         f'<div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{label}</div>'
         f'<div style="opacity:0.65;font-size:0.7rem">{cust}</div>'
-        f'<div style="opacity:0.5;font-size:0.68rem">{ts} · {run.get("n_items", 0)} items</div>'
+        f'<div style="opacity:0.5;font-size:0.68rem">{ts} · '
+        f'{"⏳ processing" if run.get("processing") else str(run.get("n_items", 0)) + " items"}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -243,14 +244,18 @@ def _render_history_row(idx: int, run: dict) -> None:
             age_color = '#b91c1c' if age >= 7 else ('#9a6800' if age >= 3 else '#5a7aab')
             age_html = (f' · <span style="color:{age_color}">'
                         f'{_format_age(age)} in stage</span>')
+        if run.get('processing'):
+            items_html = '<span style="color:#9a6800">⏳ Processing…</span>'
+        else:
+            items_html = (
+                f'<b>{n_items}</b> items · '
+                f'<span style="color:#1a7a3c">✓{n_ready}</span> '
+                f'<span style="color:#9a6800">!{n_check}</span> '
+                f'<span style="color:#b91c1c">×{n_missing}</span>'
+            )
         cols[1].markdown(
             f'<span style="font-size:0.75rem;opacity:0.7">{ts}{age_html}</span>  \n'
-            f'<span style="font-size:0.72rem">'
-            f'<b>{n_items}</b> items · '
-            f'<span style="color:#1a7a3c">✓{n_ready}</span> '
-            f'<span style="color:#9a6800">!{n_check}</span> '
-            f'<span style="color:#b91c1c">×{n_missing}</span>'
-            f'</span>',
+            f'<span style="font-size:0.72rem">{items_html}</span>',
             unsafe_allow_html=True,
         )
         outcome_pill = ''
