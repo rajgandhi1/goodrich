@@ -129,10 +129,16 @@ with tab_email:
         elif not _os.environ.get('OPENAI_API_KEY'):
             st.error('OpenAI API key required — expand the key banner above to enter it.')
         else:
-            _save_processing_stub(source_label=email_text.strip()[:60])
-            if process_and_append(source=email_text, source_type='email'):
-                _save_extraction_history()
-            st.rerun()
+            stub = _save_processing_stub(source_label='')
+            if stub and stub.get('supabase_id'):
+                from services import jobs as _jobs
+                _jobs.submit(stub['supabase_id'], email_text, 'email',
+                             _os.environ['OPENAI_API_KEY'])
+                st.switch_page('app.py')
+            else:
+                if process_and_append(source=email_text, source_type='email'):
+                    _save_extraction_history()
+                st.rerun()
 
 with tab_excel:
     uploaded_file = st.file_uploader(
@@ -148,10 +154,16 @@ with tab_excel:
             if not _os.environ.get('OPENAI_API_KEY'):
                 st.error('OpenAI API key required — expand the key banner above to enter it.')
             else:
-                _save_processing_stub(source_label=uploaded_file.name)
-                if process_and_append(source=file_bytes, source_type='excel'):
-                    _save_extraction_history()
-                st.rerun()
+                stub = _save_processing_stub(source_label=uploaded_file.name.rsplit('.', 1)[0])
+                if stub and stub.get('supabase_id'):
+                    from services import jobs as _jobs
+                    _jobs.submit(stub['supabase_id'], file_bytes, 'excel',
+                                 _os.environ['OPENAI_API_KEY'])
+                    st.switch_page('app.py')
+                else:
+                    if process_and_append(source=file_bytes, source_type='excel'):
+                        _save_extraction_history()
+                    st.rerun()
         else:
             st.warning('Please upload an Excel file first.')
 
@@ -176,10 +188,16 @@ with tab_pdf:
                 )
             else:
                 pdf_bytes = pdf_file.read()
-                _save_processing_stub(source_label=pdf_file.name)
-                if process_and_append(source=pdf_bytes, source_type='pdf'):
-                    _save_extraction_history()
-                st.rerun()
+                stub = _save_processing_stub(source_label=pdf_file.name.rsplit('.', 1)[0])
+                if stub and stub.get('supabase_id'):
+                    from services import jobs as _jobs
+                    _jobs.submit(stub['supabase_id'], pdf_bytes, 'pdf',
+                                 _os.environ['OPENAI_API_KEY'])
+                    st.switch_page('app.py')
+                else:
+                    if process_and_append(source=pdf_bytes, source_type='pdf'):
+                        _save_extraction_history()
+                    st.rerun()
         else:
             st.warning('Please upload a PDF file first.')
 

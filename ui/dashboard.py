@@ -16,6 +16,7 @@ from ui.history import (
     set_outcome,
     time_to_sent_days,
     _history_pdf_bytes,
+    _persist_entry,
     _restore_history_entry,
 )
 
@@ -76,9 +77,19 @@ def _avg_time_to_sent(history: list[dict]) -> float | None:
 
 
 def _label_for(run: dict) -> str:
-    return (run.get('custom_label') or run.get('quote_no')
-            or run.get('customer') or run.get('project_ref')
-            or f"Enquiry {run.get('timestamp', '')}")
+    if run.get('custom_label'):
+        return run['custom_label']
+    parts = []
+    if run.get('quote_no'):
+        parts.append(run['quote_no'])
+    if run.get('customer'):
+        parts.append(run['customer'])
+    if run.get('project_ref'):
+        parts.append(run['project_ref'])
+    if parts:
+        return ' — '.join(parts)
+    ts = run.get('timestamp', '')
+    return f"Enquiry — {ts}" if ts else "New Enquiry"
 
 
 def _render_metric_row(history: list[dict]) -> None:
@@ -232,13 +243,20 @@ def _render_history_row(idx: int, run: dict) -> None:
     outcome = get_outcome(run)
     age = current_stage_age_days(run)
 
+    renaming = st.session_state.get(f'_renaming_{idx}', False)
     with st.container():
         cols = st.columns([3, 3, 1.4, 2, 2])
-        cols[0].markdown(
-            f'**{label}**  \n<span style="font-size:0.75rem;opacity:0.7">{cust}'
-            f'{" · " + proj if proj else ""}</span>',
-            unsafe_allow_html=True,
-        )
+        with cols[0]:
+            lc, ec = st.columns([5, 1])
+            lc.markdown(
+                f'**{label}**  \n<span style="font-size:0.75rem;opacity:0.7">{cust}'
+                f'{" · " + proj if proj else ""}</span>',
+                unsafe_allow_html=True,
+            )
+            if ec.button('✏', key=f'dash_rename_btn_{idx}',
+                         help='Rename this enquiry', use_container_width=True):
+                st.session_state[f'_renaming_{idx}'] = not renaming
+                st.rerun()
         age_html = ''
         if age is not None:
             age_color = '#b91c1c' if age >= 7 else ('#9a6800' if age >= 3 else '#5a7aab')
@@ -293,7 +311,7 @@ def _render_history_row(idx: int, run: dict) -> None:
                     st.rerun()
 
         with cols[4]:
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns(3)
             if b1.button('Open', key=f'dash_open_{idx}', use_container_width=True):
                 _restore_history_entry(run)
                 if _has_workspace_page():
@@ -310,6 +328,38 @@ def _render_history_row(idx: int, run: dict) -> None:
                     key=f'dash_pdf_{idx}',
                     use_container_width=True,
                 )
+            del_confirmed = st.session_state.get(f'_del_confirm_{idx}', False)
+            if not del_confirmed:
+                if b3.button('🗑', key=f'dash_del_{idx}', use_container_width=True,
+                             help='Delete this enquiry'):
+                    st.session_state[f'_del_confirm_{idx}'] = True
+                    st.rerun()
+            else:
+                if b3.button('Confirm?', key=f'dash_del_confirm_{idx}',
+                             use_container_width=True, type='primary',
+                             help='Click again to permanently delete'):
+                    _delete_history_entry(idx, run)
+                    st.rerun()
+
+        # Inline rename form
+        if renaming:
+            rc1, rc2, rc3, _ = st.columns([4, 1, 1, 4])
+            new_name = rc1.text_input(
+                'Name', value=run.get('custom_label') or '',
+                placeholder='e.g. NRL Enquiry May 2026',
+                key=f'dash_rename_input_{idx}',
+                label_visibility='collapsed',
+            )
+            if rc2.button('Save', key=f'dash_rename_save_{idx}', type='primary',
+                          use_container_width=True):
+                run['custom_label'] = new_name.strip()
+                _persist_entry(run)
+                st.session_state.pop(f'_renaming_{idx}', None)
+                st.rerun()
+            if rc3.button('Cancel', key=f'dash_rename_cancel_{idx}',
+                          use_container_width=True):
+                st.session_state.pop(f'_renaming_{idx}', None)
+                st.rerun()
 
         # Won / Lost controls — only meaningful at the 'sent' stage.
         if stage == 'sent':
@@ -433,6 +483,21 @@ def _has_workspace_page() -> bool:
     return (Path(__file__).resolve().parents[1] / 'pages' / '2_Quote_Workspace.py').exists()
 
 
+def _delete_history_entry(idx: int, run: dict) -> None:
+    """Remove entry from session state and Supabase."""
+    from services import storage as _storage
+    supabase_id = run.get('supabase_id')
+    if supabase_id:
+        _storage.delete_quote(supabase_id)
+    history = st.session_state.run_history
+    try:
+        history.remove(run)
+    except ValueError:
+        if 0 <= idx < len(history):
+            history.pop(idx)
+    st.session_state[f'_del_confirm_{idx}'] = False
+
+
 def render_dashboard() -> None:
     """Render the dashboard landing page."""
     from ui.sidebar import _status_html
@@ -450,7 +515,7 @@ def render_dashboard() -> None:
         unsafe_allow_html=True,
     )
 
-    cta_col, _ = st.columns([2, 8])
+    cta_col, refresh_col, _ = st.columns([2, 1, 7])
     with cta_col:
         if st.button('＋ New Enquiry', type='primary', key='dash_new_enq',
                      use_container_width=True):
@@ -461,6 +526,11 @@ def render_dashboard() -> None:
             st.session_state._show_quote_page = False
             if _has_workspace_page():
                 st.switch_page('pages/2_Quote_Workspace.py')
+    with refresh_col:
+        if st.button('🔄 Refresh', key='dash_refresh', use_container_width=True,
+                     help='Reload history from database'):
+            st.session_state._history_loaded = False
+            st.rerun()
 
     history = st.session_state.run_history or []
     _render_metric_row(history)

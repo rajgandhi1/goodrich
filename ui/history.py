@@ -266,7 +266,7 @@ def _append_history(entry):
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
 
 
-def _save_processing_stub(source_label: str = '') -> None:
+def _save_processing_stub(source_label: str = '') -> dict:
     """Create and persist a placeholder entry BEFORE the LLM call starts.
 
     This makes the enquiry immediately visible on the dashboard even if the user
@@ -276,10 +276,10 @@ def _save_processing_stub(source_label: str = '') -> None:
     now = _dt.datetime.now().strftime('%d %b %Y %H:%M')
     entry: dict = {
         'timestamp':     now,
-        'customer':      source_label or 'New enquiry',
+        'customer':      '',
         'project_ref':   '',
         'quote_no':      '',
-        'custom_label':  '',
+        'custom_label':  source_label,  # filename (no ext) for files; '' for email
         'quote_data':    {},
         'n_items':       0,
         'n_ready':       0,
@@ -306,6 +306,7 @@ def _save_processing_stub(source_label: str = '') -> None:
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
     # Keep reference so _save_extraction_history() updates this record.
     st.session_state._active_hist_entry = entry
+    return entry
 
 
 def _save_extraction_history():

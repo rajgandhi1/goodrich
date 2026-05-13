@@ -168,6 +168,61 @@ def load_quotes(limit: int = 100) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
+# Load single
+# ---------------------------------------------------------------------------
+
+def load_quote(supabase_id: str) -> dict | None:
+    """Fetch a single quote by UUID. Returns None if not found or on error."""
+    sb = _get_client()
+    if not sb or not supabase_id:
+        return None
+    try:
+        result = sb.table('quotes').select('*').eq('id', supabase_id).limit(1).execute()
+        rows = result.data or []
+        if not rows:
+            return None
+        row = rows[0]
+        entry: dict = {
+            'supabase_id':    row.get('id'),
+            'quote_no':       row.get('quote_no') or '',
+            'customer':       row.get('customer') or '',
+            'project_ref':    row.get('project_ref') or '',
+            'custom_label':   row.get('custom_label') or '',
+            'timestamp':      row.get('timestamp') or (row.get('created_at') or '')[:16],
+            'n_items':        row.get('n_items', 0),
+            'n_ready':        row.get('n_ready', 0),
+            'n_check':        row.get('n_check', 0),
+            'n_missing':      row.get('n_missing', 0),
+            'n_regret':       row.get('n_regret', 0),
+            'quote_pdf_b64':  row.get('quote_pdf_b64') or '',
+            'quote_pdf_name': row.get('quote_pdf_name') or '',
+            'stage':          row.get('stage') or 'initial',
+        }
+        for key, default in (
+            ('items', []),
+            ('quote_data', {}),
+            ('stage_history', []),
+            ('stage_meta', {}),
+        ):
+            val = row.get(key)
+            if isinstance(val, (list, dict)):
+                entry[key] = val
+            elif isinstance(val, str):
+                try:
+                    entry[key] = json.loads(val)
+                except Exception:
+                    entry[key] = default
+            else:
+                entry[key] = default
+        return entry
+    except Exception as e:
+        logger.warning(f'Supabase load_quote failed: {e}')
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
 
 def delete_quote(supabase_id: str) -> bool:
     """Delete a quote by UUID. Returns True on success."""
