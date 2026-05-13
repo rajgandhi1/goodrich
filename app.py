@@ -11,18 +11,16 @@ st.set_page_config(
     page_title='Quote Pipeline — GGPL',
     page_icon='📊',
     layout='wide',
-    initial_sidebar_state='expanded',
+    initial_sidebar_state='collapsed',
 )
 
 from ui.chat import render_chat_widget
 from ui.dashboard import render_dashboard
 from ui.history import load_history
-from ui.sidebar import render_sidebar
 from ui.styles import apply_global_styles
 
 apply_global_styles()
 init_session_state()
 load_history()
-render_sidebar()
 render_dashboard()
 render_chat_widget()

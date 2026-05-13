@@ -430,15 +430,20 @@ def _has_workspace_page() -> bool:
 
 def render_dashboard() -> None:
     """Render the dashboard landing page."""
-    st.markdown("""
-    <div class="gq-header">
-      <div class="gq-header-icon">📊</div>
-      <div>
-        <p class="gq-header-title">Quote Pipeline Dashboard</p>
-        <p class="gq-header-sub">Goodrich Gasket — track every enquiry from intake to PO</p>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    from ui.sidebar import _status_html
+    st.markdown(
+        f'<div class="gq-header">'
+        f'<div class="gq-header-icon">📊</div>'
+        f'<div style="flex:1">'
+        f'<p class="gq-header-title">Quote Pipeline Dashboard</p>'
+        f'<p class="gq-header-sub">Goodrich Gasket — track every enquiry from intake to PO</p>'
+        f'</div>'
+        f'<div style="font-size:0.78rem;color:#c8d8f0;display:flex;gap:1rem;align-items:center">'
+        f'{_status_html()}'
+        f'</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
     cta_col, _ = st.columns([2, 8])
     with cta_col:

@@ -9,27 +9,44 @@ def apply_global_styles():
     <style>
     /* ── Global resets ─────────────────────────────────────────── */
     [data-testid="stAppViewContainer"] { background: #f4f6f9; }
-    [data-testid="stSidebar"] { background: #1a2740 !important; }
-    [data-testid="stSidebar"] * { color: #e8ecf1 !important; }
 
-    /* ── Hide Streamlit's auto-generated page nav (we use our own links) ── */
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .stButton > button {
-        background: #2e4470 !important;
-        color: #e8ecf1 !important;
-        border: 1px solid #3d5a8a !important;
-        border-radius: 6px !important;
-        width: 100%;
+    /* ── Hide sidebar completely ─────────────────────────────────── */
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+
+    /* ── Top navigation bar ──────────────────────────────────────── */
+    .gq-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: #1a2740;
+        border-radius: 10px;
+        padding: 0.5rem 1rem;
+        margin-bottom: 1rem;
     }
-    [data-testid="stSidebar"] .stButton > button:hover {
-        background: #3d5a8a !important;
-        color: #e8ecf1 !important;
+    .gq-topbar-status {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        font-size: 0.78rem;
+        color: #e8ecf1;
     }
-    [data-testid="stSidebar"] .stButton > button p,
-    [data-testid="stSidebar"] .stButton > button span {
-        color: #e8ecf1 !important;
+    .gq-topbar-dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
     }
-    [data-testid="stSidebar"] hr { border-color: #2e4470 !important; }
+    .gq-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+    }
+    .gq-dot-green { background: #22c55e; box-shadow: 0 0 5px #22c55e88; }
+    .gq-dot-red   { background: #ef4444; }
+    .gq-dot-amber { background: #f59e0b; }
 
     /* ── App header ─────────────────────────────────────────────── */
     .gq-header {

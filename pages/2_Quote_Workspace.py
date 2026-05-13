@@ -15,7 +15,7 @@ st.set_page_config(
     page_title='Quote Workspace — GGPL',
     page_icon='⚙️',
     layout='wide',
-    initial_sidebar_state='expanded',
+    initial_sidebar_state='collapsed',
 )
 
 from core.formatter import format_description
@@ -33,13 +33,13 @@ from ui.editor import (
 from ui.history import _save_extraction_history, load_history, mark_active_quote_prep
 from ui.processing import process_and_append
 from ui.quote_page import render_quote_page
-from ui.sidebar import render_sidebar
+from ui.sidebar import render_topbar
 from ui.styles import apply_global_styles
 
 apply_global_styles()
 init_session_state()
 load_history()
-render_sidebar()
+render_topbar(show_home=True)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ with tab_email:
         if not email_text.strip():
             st.warning('Please paste some email text first.')
         elif not _os.environ.get('OPENAI_API_KEY'):
-            st.error('OpenAI API key required. Enter it in the sidebar to process enquiries.')
+            st.error('OpenAI API key required — expand the key banner above to enter it.')
         elif process_and_append(source=email_text, source_type='email'):
             _save_extraction_history()
             st.rerun()
@@ -144,7 +144,7 @@ with tab_excel:
         if uploaded_file:
             file_bytes = uploaded_file.read()
             if not _os.environ.get('OPENAI_API_KEY'):
-                st.error('OpenAI API key required. Enter it in the sidebar to process enquiries.')
+                st.error('OpenAI API key required — expand the key banner above to enter it.')
             elif process_and_append(source=file_bytes, source_type='excel'):
                 _save_extraction_history()
                 st.rerun()
@@ -168,7 +168,7 @@ with tab_pdf:
             if not _os.environ.get('OPENAI_API_KEY'):
                 st.warning(
                     'PDF processing requires an OpenAI API key (Smart Parse mode). '
-                    'Enter your key in the sidebar.'
+                    'Enter your API key using the banner at the top of this page.'
                 )
             else:
                 pdf_bytes = pdf_file.read()
