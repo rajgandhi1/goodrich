@@ -102,6 +102,7 @@ def save_quote(entry: dict) -> str | None:
             return result.data[0].get('id')
     except Exception as e:
         logger.warning(f'Supabase save failed: {e}')
+        raise RuntimeError(str(e)) from e
     return None
 
 

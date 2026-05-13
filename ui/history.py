@@ -59,7 +59,12 @@ def advance_stage(entry: dict, new_stage: str, *, force: bool = False, meta: dic
 def _persist_entry(entry: dict) -> None:
     """Save a single entry to Supabase if connected, otherwise to the local JSON."""
     from services import storage as _storage
-    uid = _storage.save_quote(entry)
+    try:
+        uid = _storage.save_quote(entry)
+    except Exception as exc:
+        st.toast(f'Database save failed — {exc}', icon='🚨')
+        _save_history_local()
+        return
     if uid:
         entry['supabase_id'] = uid
     else:
@@ -232,11 +237,14 @@ def _append_history(entry):
         active['stage_meta'] = prior_meta
         # Generating the PDF means we're past quote prep.
         advance_stage(active, 'quote_prep')
-        uid = _storage.save_quote(active)
+        try:
+            uid = _storage.save_quote(active)
+        except Exception as exc:
+            st.toast(f'Database save failed — {exc}', icon='🚨')
+            uid = None
+            _save_history_local()
         if uid:
             active['supabase_id'] = uid
-        else:
-            _save_history_local()
         st.session_state.pop('_active_hist_entry', None)
         return
     # No pending entry - fresh insert.
@@ -246,11 +254,14 @@ def _append_history(entry):
         'at': _dt.datetime.now().strftime('%d %b %Y %H:%M'),
     }])
     entry.setdefault('stage_meta', {})
-    uid = _storage.save_quote(entry)
+    try:
+        uid = _storage.save_quote(entry)
+    except Exception as exc:
+        st.toast(f'Database save failed — {exc}', icon='🚨')
+        uid = None
+        _save_history_local()
     if uid:
         entry['supabase_id'] = uid
-    else:
-        _save_history_local()
     st.session_state.run_history.insert(0, entry)
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
 
@@ -268,11 +279,14 @@ def _save_extraction_history():
         'at': _dt.datetime.now().strftime('%d %b %Y %H:%M'),
     }]
     from services import storage as _storage
-    uid = _storage.save_quote(entry)
+    try:
+        uid = _storage.save_quote(entry)
+    except Exception as exc:
+        st.toast(f'Database save failed — {exc}', icon='🚨')
+        uid = None
+        _save_history_local()
     if uid:
         entry['supabase_id'] = uid
-    else:
-        _save_history_local()
     st.session_state.run_history.insert(0, entry)
     st.session_state.run_history = st.session_state.run_history[:_HISTORY_LIMIT]
     # Keep a reference so _append_history can update this entry when PDF is ready.

@@ -9,6 +9,7 @@ create table if not exists quotes (
     quote_no        text        not null default '',
     customer        text        not null default '',
     project_ref     text        not null default '',
+    custom_label    text        not null default '',   -- user-editable display name
     timestamp       text        not null default '',   -- human-readable "12 May 2025 14:30"
 
     -- Status counters
@@ -36,6 +37,7 @@ create table if not exists quotes (
 );
 
 -- Migration for existing deployments: add columns if missing
+alter table quotes add column if not exists custom_label  text  not null default '';
 alter table quotes add column if not exists stage         text  not null default 'initial';
 alter table quotes add column if not exists stage_history jsonb not null default '[]'::jsonb;
 alter table quotes add column if not exists stage_meta    jsonb not null default '{}'::jsonb;
