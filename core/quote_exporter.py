@@ -252,9 +252,12 @@ def build_quotation_excel(
         row += 1
 
     # ── Items table ──────────────────────────────────────────────────────────
+    currency = quote_data.get('currency', 'INR')
+
     ws.set_row(row, 30)
     tbl_headers = ['Sl.\nNo.', 'Cust\nSl.No', 'Customer\nItem Code',
-                   'Material Description', 'Qty', 'UOM', 'Unit Price\n(INR)', 'Total Price\n(INR)']
+                   'Material Description', 'Qty', 'UOM',
+                   f'Unit Price\n({currency})', f'Total Price\n({currency})']
     tbl_col_map = [0, 1, 2, 3, 4, 5, 6, 7]  # column indices
 
     for i, (col_idx, hdr) in enumerate(zip(tbl_col_map, tbl_headers)):
@@ -338,10 +341,12 @@ def build_quotation_excel(
     # GST calculation
     gst_type = quote_data.get('gst_type', 'IGST')
     gst_pct  = float(quote_data.get('gst_pct') or 18)
-    gst_amt  = round(net_before_tax * gst_pct / 100, 2)
+    gst_amt  = round(net_before_tax * gst_pct / 100, 2) if currency == 'INR' else 0.0
     grand_total = net_before_tax + gst_amt
 
-    if gst_type == 'IGST':
+    if currency != 'INR':
+        gst_rows = [(f'Tax / Duty ({currency})', gst_amt)]
+    elif gst_type == 'IGST':
         gst_rows = [(f'IGST @ {gst_pct:.2f}%', gst_amt),
                     ('CGST @ 0.00%', 0.0), ('SGST @ 0.00%', 0.0), ('UGST @ 0.00%', 0.0)]
     elif gst_type == 'CGST+SGST':
@@ -362,7 +367,7 @@ def build_quotation_excel(
         row += 1
 
     ws.set_row(row, 18)
-    ws.merge_range(_range(row, 0, row, 5), 'GRAND TOTAL (INR) :', f_total_lbl)
+    ws.merge_range(_range(row, 0, row, 5), f'GRAND TOTAL ({currency}) :', f_total_lbl)
     ws.write(row, 6, '', _fmt(bold=True, font_size=11, font_color=_NAVY,
                                bg_color=_LIGHT_BLUE, align='right', border=1,
                                border_color=_BORDER, num_format='#,##0.00'))
@@ -384,8 +389,10 @@ def build_quotation_excel(
         ('3. Packing & Forwarding', quote_data.get('packing', 'INCLUSIVE')),
         ('4. Freight',              quote_data.get('freight', 'INCLUSIVE')),
         ('5. Taxes and Duties',
-         f"GST ({gst_type}) @ {gst_pct:.2f}% = INR {gst_amt:,.2f}. "
-         "Taxes and duties shall be paid at actuals as applicable at the time of shipment."),
+         (f"GST ({gst_type}) @ {gst_pct:.2f}% = INR {gst_amt:,.2f}. "
+          "Taxes and duties shall be paid at actuals as applicable at the time of shipment.")
+         if currency == 'INR'
+         else "Taxes and duties shall be paid at actuals as applicable at the time of shipment."),
         ('6. Payment Terms',        quote_data.get('payment_terms',
                                                     '30% ADVANCE & 70% BALANCE BEFORE DISPATCH OF MATERIAL')),
         ('7. Bank Charges',         quote_data.get('bank_charges', 'TO YOUR ACCOUNT')),

@@ -396,6 +396,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
 
 def _totals(items: list[dict], quote_data: dict):
     unit_prices = quote_data.get("unit_prices", [])
+    currency = quote_data.get("currency", "INR")
     total_qty = Decimal("0")
     subtotal = Decimal("0")
     for idx, item in enumerate(items):
@@ -407,7 +408,7 @@ def _totals(items: list[dict], quote_data: dict):
     discount_amt = subtotal * discount_pct / Decimal("100")
     taxable = subtotal - discount_amt
     gst_pct = Decimal(str(_num(quote_data.get("gst_pct"), 18)))
-    gst_amt = taxable * gst_pct / Decimal("100")
+    gst_amt = taxable * gst_pct / Decimal("100") if currency == "INR" else Decimal("0")
     return float(total_qty), float(subtotal), float(discount_amt), float(taxable), float(gst_amt), float(taxable + gst_amt)
 
 

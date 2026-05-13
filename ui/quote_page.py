@@ -8,6 +8,35 @@ from ui.history import _append_history, _make_history_entry
 
 _LOGO_PATH = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), 'logo.png')
 
+_CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'KWD', 'SAR', 'SGD', 'AUD', 'CAD', 'JPY', 'CNY']
+_DEFAULT_FX_RATES = {
+    'INR': 1.0,
+    'USD': 83.0,
+    'EUR': 90.0,
+    'GBP': 105.0,
+    'AED': 22.5,
+    'KWD': 270.0,
+    'SAR': 22.1,
+    'SGD': 62.0,
+    'AUD': 55.0,
+    'CAD': 61.0,
+    'JPY': 0.56,
+    'CNY': 11.5,
+}
+
+
+def _fx_rate_for(qd: dict, currency: str) -> float:
+    """Return the editable INR-per-currency-unit conversion rate."""
+    if currency == 'INR':
+        return 1.0
+    rates = qd.setdefault('currency_rates', {})
+    if currency not in rates:
+        rates[currency] = _DEFAULT_FX_RATES.get(currency, 1.0)
+    try:
+        return max(float(rates[currency]), 0.0001)
+    except (TypeError, ValueError):
+        return _DEFAULT_FX_RATES.get(currency, 1.0)
+
 
 # ---------------------------------------------------------------------------
 # Quote page — rendered instead of main app when _show_quote_page is True
@@ -123,16 +152,63 @@ def render_quote_page():
     </div>
     """, unsafe_allow_html=True)
 
-    st.caption('Enter the unit price for each item. Total price is calculated automatically.')
+    st.caption('Enter base unit prices in INR. The selected quote currency is calculated from the editable conversion rate.')
 
-    # Build pricing dataframe
-    prev_prices = qd.get('unit_prices', [0.0] * len(items))
-    if len(prev_prices) != len(items):
-        prev_prices = list(prev_prices) + [0.0] * (len(items) - len(prev_prices))
-
+    cur_c1, cur_c2, cur_c3, _ = st.columns([2, 2, 3, 3])
+    currency_options = list(_CURRENCIES)
+    _cur_val = qd.get('currency', 'INR')
+    _previous_currency = _cur_val
+    if _cur_val not in currency_options:
+        currency_options = [_cur_val] + currency_options
+    qd['currency'] = cur_c1.selectbox(
+        'Quote Currency',
+        currency_options,
+        index=currency_options.index(_cur_val),
+        key='qp_currency',
+    )
     _cur = qd.get('currency', 'INR')
-    _up_col = f'Unit Price ({_cur})'
+    if _cur == 'INR':
+        qd['currency_rate'] = 1.0
+        cur_c2.number_input(
+            'Conversion Rate',
+            value=1.0,
+            min_value=1.0,
+            format='%.4f',
+            disabled=True,
+            help='INR quote; no conversion applied.',
+            key='qp_currency_rate_inr',
+        )
+    else:
+        rate_default = _fx_rate_for(qd, _cur)
+        qd['currency_rate'] = cur_c2.number_input(
+            f'INR per 1 {_cur}',
+            value=float(rate_default),
+            min_value=0.0001,
+            step=0.5,
+            format='%.4f',
+            help='Default internal conversion rate. Edit this value for the quotation; no market-rate lookup is used.',
+            key=f'qp_currency_rate_{_cur}',
+        )
+        qd.setdefault('currency_rates', {})[_cur] = qd['currency_rate']
+    cur_c3.caption('Conversion is fixed per quote and can be adjusted before generating the PDF.')
+
+    # Build pricing dataframe from base INR prices, then convert to quote currency.
+    prev_base_prices = qd.get('unit_prices_inr')
+    if prev_base_prices is None:
+        existing_prices = qd.get('unit_prices', [0.0] * len(items))
+        existing_currency = _previous_currency
+        existing_rate = float(qd.get('currency_rate') or 1.0)
+        if existing_currency and existing_currency != 'INR':
+            prev_base_prices = [float(p or 0) * existing_rate for p in existing_prices]
+        else:
+            prev_base_prices = list(existing_prices)
+    if len(prev_base_prices) != len(items):
+        prev_base_prices = list(prev_base_prices) + [0.0] * (len(items) - len(prev_base_prices))
+
+    _base_col = 'Unit Price (INR)'
+    _quote_col = f'Unit Price ({_cur})'
     _tot_col = f'Total ({_cur})'
+    _rate = float(qd.get('currency_rate') or 1.0)
 
     pricing_rows = []
     for i, item in enumerate(items):
@@ -145,12 +221,17 @@ def render_quote_page():
             'Customer Description': (item.get('raw_description') or '')[:120],
             'Qty':                  float(item.get('quantity') or 0),
             'UOM':                  item.get('uom') or 'NOS',
-            _up_col:                float(prev_prices[i]) if prev_prices[i] else 0.0,
+            _base_col:              float(prev_base_prices[i]) if prev_base_prices[i] else 0.0,
+            _quote_col:             0.0,
             _tot_col:               0.0,
         })
 
     pricing_df = pd.DataFrame(pricing_rows)
-    pricing_df[_tot_col] = pricing_df['Qty'].astype(float) * pricing_df[_up_col].astype(float)
+    pricing_df[_quote_col] = (
+        pricing_df[_base_col].astype(float) if _cur == 'INR'
+        else pricing_df[_base_col].astype(float) / _rate
+    )
+    pricing_df[_tot_col] = pricing_df['Qty'].astype(float) * pricing_df[_quote_col].astype(float)
 
     edited_pricing = st.data_editor(
         pricing_df,
@@ -165,13 +246,16 @@ def render_quote_page():
             'Qty':                  st.column_config.NumberColumn('Qty', width='small', min_value=0,
                                         help='Edit to override extracted quantity'),
             'UOM':                  st.column_config.TextColumn('UOM', width='small', disabled=True),
-            _up_col:                st.column_config.NumberColumn(_up_col, width='medium',
+            _base_col:              st.column_config.NumberColumn(_base_col, width='medium',
                                         min_value=0, format='%.2f',
-                                        help=f'Enter unit price in {_cur}'),
+                                        help='Enter the base unit price in INR'),
+            _quote_col:             st.column_config.NumberColumn(_quote_col, width='medium',
+                                        disabled=True, format='%.2f',
+                                        help=f'Calculated as INR price divided by the {_cur} conversion rate'),
             _tot_col:               st.column_config.NumberColumn(_tot_col, width='medium',
                                         disabled=True, format='%.2f'),
         },
-        key='qp_pricing_editor',
+        key=f'qp_pricing_editor_{_cur}',
     )
 
     # Propagate edited quantities back to items (so PDF uses the updated qty)
@@ -183,9 +267,14 @@ def render_quote_page():
             except (TypeError, ValueError):
                 pass
 
-    # Recompute totals from edited prices
-    edited_pricing[_tot_col] = edited_pricing['Qty'].astype(float) * edited_pricing[_up_col].astype(float)
-    qd['unit_prices'] = edited_pricing[_up_col].tolist()
+    # Recompute totals from edited INR prices and selected conversion rate.
+    edited_pricing[_quote_col] = (
+        edited_pricing[_base_col].astype(float) if _cur == 'INR'
+        else edited_pricing[_base_col].astype(float) / _rate
+    )
+    edited_pricing[_tot_col] = edited_pricing['Qty'].astype(float) * edited_pricing[_quote_col].astype(float)
+    qd['unit_prices_inr'] = edited_pricing[_base_col].tolist()
+    qd['unit_prices'] = edited_pricing[_quote_col].tolist()
     subtotal = edited_pricing[_tot_col].sum()
 
     # GST preview
@@ -194,16 +283,22 @@ def render_quote_page():
     disc_pct_live = float(qd.get('discount_pct') or 0)
     disc_amt_live = subtotal * disc_pct_live / 100
     net_live      = subtotal - disc_amt_live
-    gst_amt_live  = net_live * gst_pct_live / 100
+    gst_amt_live  = net_live * gst_pct_live / 100 if _cur == 'INR' else 0.0
 
     amt_col1, amt_col2, amt_col3, amt_col4 = st.columns(4)
-    _cur_live = qd.get('currency', 'INR')
+    _cur_live = _cur
     amt_col1.metric(f'Subtotal ({_cur_live})', f'{subtotal:,.2f}')
     if disc_pct_live > 0:
         amt_col2.metric(f'Discount ({disc_pct_live}%)', f'-{disc_amt_live:,.2f}')
-        amt_col3.metric(f'GST ({gst_type_live} {gst_pct_live}%)', f'{gst_amt_live:,.2f}')
+        amt_col3.metric(
+            f'GST ({gst_type_live} {gst_pct_live}%)' if _cur == 'INR' else 'GST (not applicable)',
+            f'{gst_amt_live:,.2f}',
+        )
     else:
-        amt_col2.metric(f'GST ({gst_type_live} {gst_pct_live}%)', f'{gst_amt_live:,.2f}')
+        amt_col2.metric(
+            f'GST ({gst_type_live} {gst_pct_live}%)' if _cur == 'INR' else 'GST (not applicable)',
+            f'{gst_amt_live:,.2f}',
+        )
     amt_col4.metric(f'Grand Total ({_cur_live})', f'{net_live + gst_amt_live:,.2f}')
 
     # ── Section 5 — GST & Discount ───────────────────────────────────────────
@@ -216,33 +311,28 @@ def render_quote_page():
     </div>
     """, unsafe_allow_html=True)
 
-    gst_c1, gst_c2, gst_c3, gst_c4 = st.columns(4)
-    _CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'KWD', 'SAR', 'SGD', 'AUD', 'CAD', 'JPY', 'CNY']
-    _cur_val = qd.get('currency', 'INR')
-    if _cur_val not in _CURRENCIES:
-        _CURRENCIES = [_cur_val] + _CURRENCIES
-    qd['currency'] = gst_c1.selectbox(
-        'Currency', _CURRENCIES,
-        index=_CURRENCIES.index(_cur_val),
-        key='qp_currency',
-    )
+    gst_c1, gst_c2, gst_c3, _ = st.columns([2, 2, 2, 4])
     qd['gst_type'] = gst_c2.selectbox(
         'GST Type', ['IGST', 'CGST+SGST', 'UGST'],
         index=['IGST', 'CGST+SGST', 'UGST'].index(qd.get('gst_type', 'IGST')),
         key='qp_gst_type',
         help='GST applies to INR quotes only',
+        disabled=_cur != 'INR',
     )
     qd['gst_pct'] = gst_c3.number_input(
         'GST %', value=float(qd.get('gst_pct') or 18.0),
         min_value=0.0, max_value=100.0, step=0.5, format='%.1f',
         key='qp_gst_pct',
+        disabled=_cur != 'INR',
     )
-    qd['discount_pct'] = gst_c4.number_input(
+    qd['discount_pct'] = gst_c1.number_input(
         'Discount %', value=float(qd.get('discount_pct') or 0.0),
         min_value=0.0, max_value=100.0, step=0.5, format='%.2f',
         help='Enter 0 for no discount',
         key='qp_discount',
     )
+    if _cur != 'INR':
+        st.caption(f'GST is not applied to {_cur} quotes. The quotation uses the editable conversion rate from Section 4.')
 
     # ── Section 6 — Terms & Conditions ───────────────────────────────────────
     st.markdown("""
