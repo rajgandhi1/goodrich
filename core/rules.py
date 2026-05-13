@@ -1088,6 +1088,20 @@ def apply_rules(item: dict) -> dict:
     elif re.search(r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bJACKETED\b', raw_desc):
         gasket_type = 'DJI'
         item['gasket_type'] = 'DJI'
+    elif gasket_type == 'SOFT_CUT' and re.search(
+        r'\b(?:SPIRAL|SPRIAL|SPRIRAL|SPIRIAL)\s*WOUND\b|\bSPW\b', raw_desc
+    ):
+        # LLM missed/misclassified — description text is unambiguous
+        gasket_type = 'SPIRAL_WOUND'
+        item['gasket_type'] = 'SPIRAL_WOUND'
+    elif gasket_type == 'SOFT_CUT' and re.search(r'\bKAMMPROFILE\b|\bCAMPROFILE\b', raw_desc):
+        gasket_type = 'KAMM'
+        item['gasket_type'] = 'KAMM'
+    elif gasket_type == 'SOFT_CUT' and re.search(
+        r'\b(?:RING\s+JOINT|RING\s+TYPE\s+JOINT|RTJ\s+GASKET)\b', raw_desc
+    ) and not re.search(r'\bSPIRAL\b|\bCNAF\b|\bPTFE\b|\bRUBBER\b|\bNEOPRENE\b|\bGRAPHITE\s+SHEET\b', raw_desc):
+        gasket_type = 'RTJ'
+        item['gasket_type'] = 'RTJ'
 
     # If "non-metallic" is mentioned in the original description, force SOFT_CUT
     if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT',):
