@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import datetime as _dt
 import json as _json
