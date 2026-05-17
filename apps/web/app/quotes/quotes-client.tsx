@@ -17,6 +17,7 @@ import {
   Inbox,
   Loader2,
   Mail,
+  Layers3,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -46,6 +47,7 @@ import {
   rfiDraft,
   toNumber,
 } from "@/lib/api";
+import { buildMaterialPlan, MaterialPlan, DEFAULT_SHEET_LENGTH_MM, DEFAULT_SHEET_WIDTH_MM } from "@/lib/material-planning";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -365,6 +367,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [saving, setSaving] = React.useState(false);
   const [exporting, setExporting] = React.useState<string | null>(null);
   const [intakeCollapsed, setIntakeCollapsed] = React.useState(false);
+  const [materialPlan, setMaterialPlan] = React.useState<MaterialPlan | null>(null);
   const isFinalSection = section === "final";
   const sectionBasePath = isFinalSection ? "/quotes/final" : "/quotes";
   const loadedQuoteId = React.useRef<string | null>(null);
@@ -383,6 +386,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     .map(({ index }) => index);
   const filteredItems = displayIndices.map((index) => items[index]);
   const selectedIndices = selectedRows.size ? Array.from(selectedRows).sort((a, b) => a - b) : [];
+
+  function invalidateMaterialPlan() {
+    setMaterialPlan(null);
+  }
 
   async function refreshQuotes(activeId?: string) {
     const data = await listQuotes();
@@ -430,6 +437,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         setJobProgress(job.progress);
         if (parsedCount && quote) {
           const baseItems = jobBaseItems.current ?? [];
+          invalidateMaterialPlan();
           setQuote((current) => (
             current && current.id === (job.quote_id ?? quote.id)
               ? { ...current, items: [...baseItems, ...job.items] }
@@ -441,6 +449,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
           setJobId(null);
           jobBaseItems.current = null;
           if (job.status === "succeeded") {
+            invalidateMaterialPlan();
             await refreshQuotes(job.quote_id ?? quote?.id);
             setIntakeCollapsed(true);
             toast.success(`Smart Parse appended ${job.items.length} item(s)`);
@@ -463,6 +472,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   async function startQuote() {
     setSaving(true);
     try {
+      invalidateMaterialPlan();
       const created = await createQuote({
         customer: "",
         project_ref: "",
@@ -484,6 +494,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   function clearWorkspace() {
+    invalidateMaterialPlan();
     setQuote(null);
     setEmailText("");
     setExcelFile(null);
@@ -553,6 +564,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function updateItems(nextItems: GasketItem[], success?: string) {
+    invalidateMaterialPlan();
     await savePatch({ items: nextItems } as Partial<Quote>, success);
   }
 
@@ -661,6 +673,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   function updateItem(index: number, field: string, value: string) {
+    invalidateMaterialPlan();
     const next = [...items];
     next[index] = setItemValue(next[index] ?? blankItem(index + 1), field, value);
     setQuote((current) => (current ? { ...current, items: next } : current));
@@ -671,6 +684,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   function addBlankRow() {
+    invalidateMaterialPlan();
     const next = [...items];
     const selectedVisible = displayIndices.filter((index) => selectedRows.has(index));
     const insertAt = selectedVisible.length === 1 ? selectedVisible[0] + 1 : next.length;
@@ -680,12 +694,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function deleteSelectedRows() {
+    invalidateMaterialPlan();
     const selected = new Set(selectedIndices);
     await updateItems(renumber(items.filter((_, index) => !selected.has(index))), "Rows deleted");
     setSelectedRows(new Set());
   }
 
   async function toggleRegretSelected() {
+    invalidateMaterialPlan();
     const selected = new Set(selectedIndices);
     const next = items.map((item, index) => {
       if (!selected.has(index)) return item;
@@ -697,6 +713,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function applyBulkEdit() {
+    invalidateMaterialPlan();
     const target = selectedIndices.length ? selectedIndices : displayIndices;
     const next = [...items];
     target.forEach((index) => {
@@ -724,6 +741,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function startNew() {
+    invalidateMaterialPlan();
     const created = await createQuote({ items: [], quote_data: quoteDefaults, stage: "initial" } as Partial<Quote>);
     setQuote(created);
     setEmailText("");
@@ -770,6 +788,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   async function openQuote(row: Quote) {
     try {
+      invalidateMaterialPlan();
       const active = await getQuote(row.id);
       setQuote(active);
       setSelectedRows(new Set());
@@ -778,6 +797,19 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not open quote");
     }
+  }
+
+  function generateMaterialPlan() {
+    if (!quote) return;
+    setMaterialPlan(buildMaterialPlan(items));
+  }
+
+  function updatePlanRow(index: number, patch: Partial<MaterialPlan["rows"][number]>) {
+    setMaterialPlan((current) => {
+      if (!current) return current;
+      const nextRows = current.rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row));
+      return { ...current, rows: nextRows };
+    });
   }
 
   if (!quote) {
@@ -1361,6 +1393,168 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             </CardContent>
           </Card>
         </>
+      )}
+
+      {!isFinalSection && (
+        <Card>
+          <CardHeader className="border-b">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <CardTitle>Material planning</CardTitle>
+                <div className="text-sm text-muted-foreground">
+                  Starter plan using {DEFAULT_SHEET_WIDTH_MM} x {DEFAULT_SHEET_LENGTH_MM} mm sheets. Rebuild after item edits.
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {materialPlan && (
+                  <Button variant="secondary" onClick={() => setMaterialPlan(null)}>
+                    <X className="h-4 w-4" />
+                    Clear
+                  </Button>
+                )}
+                <Button onClick={generateMaterialPlan} disabled={!items.length}>
+                  <Layers3 className="h-4 w-4" />
+                  Create material plan
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 pt-5">
+            {!materialPlan ? (
+              <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+                Create a plan to see starter stock sizes, estimated weights, and review notes for the current draft.
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1 text-center">
+                  <div className="text-base font-semibold uppercase tracking-tight">
+                    {quote?.customer || quote?.quote_no || "Untitled draft"} - REG : {quote?.quote_no || quote?.id || "N/A"} / {quote?.project_ref || "N/A"} / {quote?.custom_label || "GASKETS"}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Starter plan using {materialPlan.config.sheet_width_mm} x {materialPlan.config.sheet_length_mm} mm sheets and a {Math.round(materialPlan.config.nesting_efficiency * 100)}% nesting allowance.
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Components</div>
+                    <div className="text-lg font-semibold">{materialPlan.totals.component_count}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Sheet demand</div>
+                    <div className="text-lg font-semibold">{materialPlan.totals.sheet_count.toFixed(2)}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">Estimated weight</div>
+                    <div className="text-lg font-semibold">{materialPlan.totals.total_weight_kg.toFixed(3)} kg</div>
+                  </div>
+                </div>
+
+                {materialPlan.warnings.length > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
+                    <div className="mb-2 font-medium">Review flags</div>
+                    <ul className="space-y-1">
+                      {materialPlan.warnings.map((warning) => (
+                        <li key={warning}>- {warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-medium">Planning assumptions</summary>
+                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+                    {materialPlan.assumptions.map((assumption) => (
+                      <div key={assumption}>- {assumption}</div>
+                    ))}
+                  </div>
+                </details>
+
+                <div className="overflow-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-20">Review</TableHead>
+                        <TableHead className="w-16">SL.NO.</TableHead>
+                        <TableHead className="min-w-56">TYPE</TableHead>
+                        <TableHead className="w-28">WIDTH (mm)</TableHead>
+                        <TableHead className="w-28">LENGTH (mm)</TableHead>
+                        <TableHead className="w-28">THICKNESS (mm)</TableHead>
+                        <TableHead className="w-32">Reqd Qty (Sheets)</TableHead>
+                        <TableHead className="w-28">Reqd Qty Kgs.</TableHead>
+                        <TableHead className="w-80">Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {materialPlan.rows.map((row, index) => (
+                        <TableRow key={`${row.sl_no}-${row.type}-${index}`}>
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={row.reviewed}
+                              onChange={(event) => updatePlanRow(index, { reviewed: event.target.checked })}
+                              aria-label={`Mark row ${index + 1} reviewed`}
+                            />
+                          </TableCell>
+                          <TableCell>{row.sl_no}</TableCell>
+                          <TableCell className="text-sm font-medium">{row.type}</TableCell>
+                          <TableCell className="text-sm">{row.width_mm ?? ""}</TableCell>
+                          <TableCell className="text-sm">{row.length_mm ?? ""}</TableCell>
+                          <TableCell className="text-sm">{row.thickness_mm ?? ""}</TableCell>
+                          <TableCell className="text-sm">{row.reqd_qty_sheets === null ? "" : row.reqd_qty_sheets.toFixed(0)}</TableCell>
+                          <TableCell className="text-sm">{row.reqd_qty_kg === null ? "" : row.reqd_qty_kg.toFixed(2)}</TableCell>
+                          <TableCell>
+                            <textarea
+                              className="min-h-20 w-full rounded-md border bg-background px-2 py-1 text-xs"
+                              value={row.planner_notes}
+                              onChange={(event) => updatePlanRow(index, { planner_notes: event.target.value })}
+                              placeholder={row.notes}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-md border p-3">
+                    <div className="text-sm font-medium">Material summary</div>
+                    <div className="mt-2 overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>TYPE</TableHead>
+                            <TableHead>Rows</TableHead>
+                            <TableHead>Sheets</TableHead>
+                            <TableHead>Kgs.</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {materialPlan.summary.map((row) => (
+                            <TableRow key={row.type}>
+                              <TableCell className="text-sm">{row.type}</TableCell>
+                              <TableCell className="text-sm">{row.rows}</TableCell>
+                              <TableCell className="text-sm">{row.sheets_required.toFixed(2)}</TableCell>
+                              <TableCell className="text-sm">{row.total_weight_kg.toFixed(2)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-sm font-medium">Planner notes</div>
+                    <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+                      <div>Mark rows reviewed after checking the output against the drawing or nesting plan.</div>
+                      <div>Regenerate after any item edit, because the plan is draft-sensitive and local to the current quote.</div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {isFinalSection && (
