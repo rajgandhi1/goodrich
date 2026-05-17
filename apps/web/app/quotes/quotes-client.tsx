@@ -761,9 +761,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const missingCount = items.filter((item) => item.status === "missing").length;
   const actionCount = checkCount + missingCount;
   const readiness = items.length ? Math.round((readyCount / items.length) * 100) : 0;
-  const draftQuotes = quotes.filter((row) => DRAFT_STAGES.has(row.stage));
-  const finalQuotes = quotes.filter((row) => FINAL_STAGES.has(row.stage));
-
   const visibleQuotes = quotes.filter((row) => {
     if (isFinalSection && !FINAL_STAGES.has(row.stage)) return false;
     if (!isFinalSection && !DRAFT_STAGES.has(row.stage)) return false;
@@ -815,13 +812,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               </Button>
             </div>
           </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-4">
-          <SummaryTile label={isFinalSection ? "Final quotations" : "Open drafts"} value={visibleQuotes.length} detail="Current section" />
-          <SummaryTile label="Draft / review" value={draftQuotes.length} detail="Intake queue" />
-          <SummaryTile label="Quotation prep" value={finalQuotes.length} detail="Pricing queue" />
-          <SummaryTile label="Won POs" value={quotes.filter((row) => row.stage === "po").length} detail="Converted" tone="ready" />
         </div>
 
         <Card>
