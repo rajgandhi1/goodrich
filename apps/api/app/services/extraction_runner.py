@@ -36,11 +36,11 @@ def run_extraction_job(
         progress = done / total if total else 0.0
         repo.update_job(org_id, job_id, status="running", progress=progress, message=f"{done}/{total}")
 
-    def on_chunk_items(chunk_items: list[dict]) -> None:
-        current = repo.get_job(org_id, job_id)
-        if not current:
-            return
-        repo.update_job(org_id, job_id, items=[*current.items, *chunk_items])
+    def on_chunk_items(_chunk_items: list[dict]) -> None:
+        # Keep in-flight job records small. Large enquiries can produce thousands
+        # of rows, and rewriting that growing JSON payload on every chunk makes
+        # both polling and database writes expensive.
+        return None
 
     repo.update_job(org_id, job_id, status="running", progress=0.0, message="Smart Parse started")
     client = OpenAI(api_key=key, timeout=180.0)
@@ -63,6 +63,14 @@ def run_extraction_job(
         )
         return
 
+    if quote_id:
+        quote = repo.get_quote(org_id, quote_id)
+        if quote:
+            repo.update_quote(
+                org_id,
+                quote_id,
+                QuotePatch(items=[*quote.items, *items]),
+            )
     repo.update_job(
         org_id,
         job_id,
@@ -72,11 +80,3 @@ def run_extraction_job(
         skipped_count=skipped_count,
         message="Smart Parse completed",
     )
-    if quote_id:
-        quote = repo.get_quote(org_id, quote_id)
-        if quote:
-            repo.update_quote(
-                org_id,
-                quote_id,
-                QuotePatch(items=[*quote.items, *items]),
-            )

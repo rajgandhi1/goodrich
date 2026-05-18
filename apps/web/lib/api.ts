@@ -71,6 +71,19 @@ export type JobRead = {
   updated_at: string;
 };
 
+export type JobStatusRead = {
+  id: string;
+  status: JobStatus;
+  source_type: string;
+  quote_id: string | null;
+  progress: number;
+  message: string;
+  parsed_count: number;
+  skipped_count: number;
+  error: string | null;
+  updated_at: string;
+};
+
 export type SignedUrl = {
   signed_url: string;
   filename: string;
@@ -93,8 +106,8 @@ export type DashboardMetrics = {
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const API_TARGET = API_BASE || "the same-origin /api/v1 proxy";
-const ORG_ID = "local-org";
-const USER_ID = "local-user";
+const ORG_ID = process.env.NEXT_PUBLIC_ORG_ID ?? "local-org";
+const USER_ID = process.env.NEXT_PUBLIC_USER_ID ?? "local-user";
 
 export const ITEM_FIELDS = [
   "line_no",
@@ -298,6 +311,10 @@ export async function createExtraction(params: {
 
 export async function getJob(id: string): Promise<JobRead> {
   return parse<JobRead>(await apiFetch(`${API_BASE}/api/v1/jobs/${id}`, { headers: headers() }));
+}
+
+export async function getJobStatus(id: string): Promise<JobStatusRead> {
+  return parse<JobStatusRead>(await apiFetch(`${API_BASE}/api/v1/jobs/${id}/status`, { headers: headers() }));
 }
 
 export async function exportQuote(id: string, type: "pdf"): Promise<SignedUrl> {

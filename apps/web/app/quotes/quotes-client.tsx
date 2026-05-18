@@ -40,7 +40,7 @@ import {
   createQuote,
   deleteQuote,
   exportQuote,
-  getJob,
+  getJobStatus,
   getQuote,
   listQuotes,
   patchQuote,
@@ -380,7 +380,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const isFinalSection = section === "final";
   const sectionBasePath = isFinalSection ? "/quotes/final" : isMaterialSection ? "/material-planning" : "/quotes";
   const loadedQuoteId = React.useRef<string | null>(null);
-  const jobBaseItems = React.useRef<GasketItem[] | null>(null);
 
   const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
   const items = quote?.items ?? [];
@@ -440,28 +439,18 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     if (!jobId) return;
     const timer = window.setInterval(async () => {
       try {
-        const job = await getJob(jobId);
-        const parsedCount = job.items?.length ?? 0;
+        const job = await getJobStatus(jobId);
+        const parsedCount = job.parsed_count ?? 0;
         setJobMessage(job.error || (parsedCount ? `${job.message || job.status} - ${parsedCount} item(s) parsed` : job.message || job.status));
         setJobProgress(job.progress);
-        if (parsedCount && quote) {
-          const baseItems = jobBaseItems.current ?? [];
-          invalidateMaterialPlan();
-          setQuote((current) => (
-            current && current.id === (job.quote_id ?? quote.id)
-              ? { ...current, items: [...baseItems, ...job.items] }
-              : current
-          ));
-        }
         if (job.status === "succeeded" || job.status === "failed") {
           window.clearInterval(timer);
           setJobId(null);
-          jobBaseItems.current = null;
           if (job.status === "succeeded") {
             invalidateMaterialPlan();
             await refreshQuotes(job.quote_id ?? quote?.id);
             setIntakeCollapsed(true);
-            toast.success(`Smart Parse appended ${job.items.length} item(s)`);
+            toast.success(`Smart Parse appended ${parsedCount} item(s)`);
           } else {
             toast.error(job.error ?? "Smart Parse failed");
           }
@@ -469,7 +458,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       } catch (error) {
         window.clearInterval(timer);
         setJobId(null);
-        jobBaseItems.current = null;
         toast.error(error instanceof Error ? error.message : "Could not read extraction job");
       }
     }, 1200);
@@ -602,7 +590,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         customer: quote.customer,
         projectRef: quote.project_ref,
       });
-      jobBaseItems.current = items;
       setIntakeCollapsed(false);
       setJobId(accepted.job_id);
       setJobMessage("Smart Parse queued");

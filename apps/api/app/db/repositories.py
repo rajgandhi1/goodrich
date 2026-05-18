@@ -775,18 +775,29 @@ class PostgresRepository:
         return session
 
 
+def _sqlalchemy_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return f"postgresql+psycopg://{database_url.removeprefix('postgresql://')}"
+    if database_url.startswith("postgres://"):
+        return f"postgresql+psycopg://{database_url.removeprefix('postgres://')}"
+    return database_url
+
+
 def _make_repo() -> PostgresRepository | LocalJsonRepository:
     settings = get_settings()
     fallback_path = Path(".local/api_repository.json")
     try:
+        database_url = _sqlalchemy_database_url(settings.database_url)
         connect_args: dict[str, Any] = {}
-        if settings.database_url.startswith("postgresql"):
+        if database_url.startswith("postgresql"):
             connect_args["connect_timeout"] = 2
-        engine = create_engine(settings.database_url, pool_pre_ping=True, future=True, connect_args=connect_args)
+        engine = create_engine(database_url, pool_pre_ping=True, future=True, connect_args=connect_args)
         with engine.connect() as conn:
             conn.execute(text("select 1"))
         return PostgresRepository(engine)
-    except (ModuleNotFoundError, ImportError, SQLAlchemyError, OSError):
+    except (ModuleNotFoundError, ImportError, SQLAlchemyError, OSError) as exc:
+        if settings.environment.lower() in {"prod", "production"}:
+            raise RuntimeError("Postgres repository is required in production. Check DATABASE_URL and database access.") from exc
         return LocalJsonRepository(fallback_path)
 
 

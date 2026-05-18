@@ -35,3 +35,16 @@ class JobRead(BaseModel):
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class JobStatusRead(BaseModel):
+    id: str
+    status: JobStatus
+    source_type: str
+    quote_id: str | None = None
+    progress: float = 0.0
+    message: str = ""
+    parsed_count: int = 0
+    skipped_count: int = 0
+    error: str | None = None
+    updated_at: datetime

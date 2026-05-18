@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from app.db import repo
 from app.deps import CurrentUser, get_current_user
-from app.schemas.jobs import ExtractionAccepted, ExtractionCreate, JobRead
+from app.schemas.jobs import ExtractionAccepted, ExtractionCreate, JobRead, JobStatusRead
 from app.services.extraction_runner import run_extraction_job
 
 router = APIRouter(prefix="/api/v1", tags=["extractions"])
@@ -66,6 +66,25 @@ def get_job(job_id: str, user: CurrentUser = Depends(get_current_user)) -> JobRe
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.get("/jobs/{job_id}/status", response_model=JobStatusRead)
+def get_job_status(job_id: str, user: CurrentUser = Depends(get_current_user)) -> JobStatusRead:
+    job = repo.get_job(user.org_id, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobStatusRead(
+        id=job.id,
+        status=job.status,
+        source_type=job.source_type,
+        quote_id=job.quote_id,
+        progress=job.progress,
+        message=job.message,
+        parsed_count=len(job.items),
+        skipped_count=job.skipped_count,
+        error=job.error,
+        updated_at=job.updated_at,
+    )
 
 
 @router.get("/jobs/{job_id}/stream")
