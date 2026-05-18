@@ -2,7 +2,7 @@ import { GasketItem } from "@/lib/api";
 
 export const DEFAULT_SHEET_WIDTH_MM = 1250;
 export const DEFAULT_SHEET_LENGTH_MM = 1500;
-const DEFAULT_NESTING_EFFICIENCY = 0.82;
+export const DEFAULT_NESTING_EFFICIENCY = 0.82;
 const DEFAULT_SPW_METAL_FRACTION = 0.35;
 const DEFAULT_SPW_FILLER_FRACTION = 0.3;
 const DEFAULT_RING_RADIAL_ALLOWANCE_MM = 8;
@@ -114,6 +114,8 @@ export type MaterialPlan = {
   };
 };
 
+export type MaterialPlanInputConfig = Partial<MaterialPlan["config"]>;
+
 function text(value: unknown): string {
   return String(value ?? "").trim();
 }
@@ -208,15 +210,15 @@ function baseRow(item: GasketItem, component: string, material: string, stockFor
   };
 }
 
-function profileSoftCutStock(material: string): { width_mm: number; length_mm: number; thickness_mm: number } {
+function profileSheetStock(material: string, row: MaterialPlanRow, config: MaterialPlan["config"]): { width_mm: number; length_mm: number; thickness_mm: number } {
   const upper = material.toUpperCase();
-  if (upper.includes("GRAPHITE")) return { width_mm: 1500, length_mm: 1500, thickness_mm: 1.5 };
-  if (upper.includes("CHLOROPRENE")) return { width_mm: 150, length_mm: 1200, thickness_mm: 3 };
-  if (upper.includes("NEOPRENE")) return { width_mm: 120, length_mm: 700, thickness_mm: 3 };
-  if (upper.includes("RUBBER") || upper.includes("EPDM") || upper.includes("NBR") || upper.includes("VITON")) {
-    return { width_mm: 150, length_mm: 1200, thickness_mm: 3 };
-  }
-  return { width_mm: 1250, length_mm: 2500, thickness_mm: 3 };
+  const quotedThickness = row.stock_thickness_mm ?? row.thickness_mm;
+  const fallbackThickness = upper.includes("GRAPHITE") ? 1.5 : 3;
+  return {
+    width_mm: config.sheet_width_mm,
+    length_mm: config.sheet_length_mm,
+    thickness_mm: positive(quotedThickness, fallbackThickness),
+  };
 }
 
 function profileCoilStock(component: string, material: string, sourceSize: unknown): { width_mm: number | null; length_mm: number | string | null; thickness_mm: number } {
@@ -335,7 +337,6 @@ function planSpw(item: GasketItem, config: MaterialPlan["config"], assumptions: 
   const odMm = num((item as Record<string, unknown>).od_mm, NaN);
   const idMm = num((item as Record<string, unknown>).id_mm, NaN);
   const thkMm = positive((item as Record<string, unknown>).thickness_mm, 4.5);
-  const qty = positive(item.quantity, 1);
   const rows: MaterialPlanRow[] = [];
   const winding = materialName((item as Record<string, unknown>).sw_winding_material || item.moc || "UNSPECIFIED");
   const filler = materialName((item as Record<string, unknown>).sw_filler || "GRAPHITE");
@@ -400,7 +401,7 @@ function planKamm(item: GasketItem, config: MaterialPlan["config"], assumptions:
   coverRow.od_mm = odMm;
   coverRow.id_mm = idMm;
   coverRow.thickness_mm = 0.5;
-  coverRow.unit_weight_kg = annulusWeightKg(odMm, idMm, 1, surface) * 0.5;
+  coverRow.unit_weight_kg = annulusWeightKg(odMm, idMm, 1, surface);
   coverRow.calculation_notes = "Uses a 0.5 mm equivalent covering allowance per side.";
   addRow(rows, coverRow);
   return rows;
@@ -410,7 +411,6 @@ function planDji(item: GasketItem, warnings: string[]): MaterialPlanRow[] {
   const odMm = num((item as Record<string, unknown>).od_mm, NaN);
   const idMm = num((item as Record<string, unknown>).id_mm, NaN);
   const thkMm = positive((item as Record<string, unknown>).thickness_mm, 3);
-  const qty = positive(item.quantity, 1);
   const jacket = materialName(item.moc || "UNSPECIFIED");
   const filler = materialName((item as Record<string, unknown>).dji_filler || "GRAPHITE");
   if (!odMm || !idMm || odMm <= idMm) {
@@ -517,19 +517,19 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
         notes: row.calculation_notes || row.basis,
       };
     } else {
-      const stock = profileSoftCutStock(material);
+      const stock = profileSheetStock(material, row, config);
       const totalBlankMm2 = row.blank_area_m2 > 0 ? row.blank_area_m2 * 1_000_000 * row.quote_qty : 0;
       const sheets = totalBlankMm2 > 0
         ? sheetsRequired(totalBlankMm2, stock.width_mm, stock.length_mm, config.nesting_efficiency)
-        : Math.max(1, row.quote_qty);
+        : null;
       const kgPerSheet = stock.width_mm * stock.length_mm * stock.thickness_mm * densityKgPerMm3(material);
       profile = {
         width_mm: stock.width_mm,
         length_mm: stock.length_mm,
         thickness_mm: stock.thickness_mm,
         reqd_qty_sheets: sheets,
-        reqd_qty_kg: sheets * kgPerSheet,
-        notes: row.calculation_notes || row.basis,
+        reqd_qty_kg: sheets === null ? (row.total_weight_kg || null) : sheets * kgPerSheet,
+        notes: [row.calculation_notes || row.basis, sheets === null ? "OD/ID missing; sheet count cannot be calculated." : ""].filter(Boolean).join(" "),
       };
     }
 
@@ -574,17 +574,20 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
   }));
 }
 
-export function buildMaterialPlan(items: GasketItem[]): MaterialPlan {
+export function buildMaterialPlan(items: GasketItem[], inputConfig: MaterialPlanInputConfig = {}): MaterialPlan {
+  const sheetWidthMm = positive(inputConfig.sheet_width_mm, DEFAULT_SHEET_WIDTH_MM);
+  const sheetLengthMm = positive(inputConfig.sheet_length_mm, DEFAULT_SHEET_LENGTH_MM);
+  const nestingEfficiency = Math.max(0.1, Math.min(positive(inputConfig.nesting_efficiency, DEFAULT_NESTING_EFFICIENCY), 1));
   const config = {
-    sheet_width_mm: DEFAULT_SHEET_WIDTH_MM,
-    sheet_length_mm: DEFAULT_SHEET_LENGTH_MM,
-    nesting_efficiency: DEFAULT_NESTING_EFFICIENCY,
+    sheet_width_mm: sheetWidthMm,
+    sheet_length_mm: sheetLengthMm,
+    nesting_efficiency: nestingEfficiency,
   };
   const componentRows: MaterialPlanRow[] = [];
   const assumptions = new Set<string>([
-    `Default sheet size: ${DEFAULT_SHEET_WIDTH_MM} x ${DEFAULT_SHEET_LENGTH_MM} mm.`,
-    `Sheet nesting efficiency defaulted to ${Math.round(DEFAULT_NESTING_EFFICIENCY * 100)}%.`,
-    "Weights are planning estimates and should be checked against the approved drawing and nesting.",
+    `Sheet rows use ${sheetWidthMm} x ${sheetLengthMm} mm stock and ${Math.round(nestingEfficiency * 100)}% nesting efficiency.`,
+    "Coil, filler, and forged or rolled ring rows are weight-based; sheet dimensions are not applied to those stock forms.",
+    "Quantities are planning estimates and should be checked against approved drawings, nesting, and available stock.",
   ]);
   const warnings: string[] = [];
 

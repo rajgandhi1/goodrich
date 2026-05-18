@@ -34,6 +34,7 @@ import {
   GasketItem,
   ITEM_FIELDS,
   Quote,
+  advanceQuoteStage,
   bulkRecompute,
   createExtraction,
   createQuote,
@@ -47,7 +48,7 @@ import {
   rfiDraft,
   toNumber,
 } from "@/lib/api";
-import { buildMaterialPlan, MaterialPlan, DEFAULT_SHEET_LENGTH_MM, DEFAULT_SHEET_WIDTH_MM } from "@/lib/material-planning";
+import { buildMaterialPlan, MaterialPlan, DEFAULT_NESTING_EFFICIENCY, DEFAULT_SHEET_LENGTH_MM, DEFAULT_SHEET_WIDTH_MM } from "@/lib/material-planning";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,6 +72,7 @@ const FACE_OPTIONS = ["RF", "FF", ""];
 const UOM_OPTIONS = ["NOS", "M"];
 const GROOVE_OPTIONS = ["OCT", "OVAL", ""];
 const DRAFT_STAGES = new Set(["initial", "review"]);
+const MATERIAL_STAGES = new Set(["initial", "review", "quote_prep", "repricing"]);
 const FINAL_STAGES = new Set(["quote_prep", "repricing", "sent", "po"]);
 
 const defaultFx: Record<string, number> = {
@@ -345,7 +347,7 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-type QuoteSection = "drafts" | "final";
+type QuoteSection = "drafts" | "material" | "final";
 
 export function QuotesClient({ section = "drafts" }: { section?: QuoteSection }) {
   const params = useSearchParams();
@@ -368,8 +370,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [exporting, setExporting] = React.useState<string | null>(null);
   const [intakeCollapsed, setIntakeCollapsed] = React.useState(false);
   const [materialPlan, setMaterialPlan] = React.useState<MaterialPlan | null>(null);
+  const [materialConfig, setMaterialConfig] = React.useState({
+    sheet_width_mm: DEFAULT_SHEET_WIDTH_MM,
+    sheet_length_mm: DEFAULT_SHEET_LENGTH_MM,
+    nesting_efficiency: DEFAULT_NESTING_EFFICIENCY,
+  });
+  const isDraftSection = section === "drafts";
+  const isMaterialSection = section === "material";
   const isFinalSection = section === "final";
-  const sectionBasePath = isFinalSection ? "/quotes/final" : "/quotes";
+  const sectionBasePath = isFinalSection ? "/quotes/final" : isMaterialSection ? "/material-planning" : "/quotes";
   const loadedQuoteId = React.useRef<string | null>(null);
   const jobBaseItems = React.useRef<GasketItem[] | null>(null);
 
@@ -515,7 +524,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   async function openQuotationScreen() {
     if (!quote) return;
-    await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no), stage: "quote_prep" } as Partial<Quote>);
+    await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>);
+    const advanced = await advanceQuoteStage(quote.id, "quote_prep", "Moved to final quotation", {});
+    setQuote(advanced);
+    setQuotes((prev) => prev.map((row) => (row.id === advanced.id ? advanced : row)));
     router.replace(`/quotes/final?quote=${quote.id}`);
   }
 
@@ -781,7 +793,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const readiness = items.length ? Math.round((readyCount / items.length) * 100) : 0;
   const visibleQuotes = quotes.filter((row) => {
     if (isFinalSection && !FINAL_STAGES.has(row.stage)) return false;
-    if (!isFinalSection && !DRAFT_STAGES.has(row.stage)) return false;
+    else if (isMaterialSection && !MATERIAL_STAGES.has(row.stage)) return false;
+    else if (!DRAFT_STAGES.has(row.stage)) return false;
     const term = search.toLowerCase();
     return !term || row.customer.toLowerCase().includes(term) || row.project_ref.toLowerCase().includes(term) || row.quote_no.toLowerCase().includes(term);
   });
@@ -801,7 +814,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   function generateMaterialPlan() {
     if (!quote) return;
-    setMaterialPlan(buildMaterialPlan(items));
+    setMaterialPlan(buildMaterialPlan(items, materialConfig));
   }
 
   function updatePlanRow(index: number, patch: Partial<MaterialPlan["rows"][number]>) {
@@ -812,6 +825,24 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     });
   }
 
+  function formatStockSize(row: MaterialPlan["rows"][number]) {
+    if (row.length_mm === "COIL") {
+      return `${row.width_mm ?? "-"} mm wide coil${row.thickness_mm ? ` x ${row.thickness_mm} mm thk` : ""}`;
+    }
+    if (row.width_mm === null && row.length_mm === null && row.thickness_mm === null) {
+      return "Weight-based stock";
+    }
+    return `${row.width_mm ?? "-"} x ${row.length_mm ?? "-"} x ${row.thickness_mm ?? "-"} mm`;
+  }
+
+  function formatPlanQuantity(row: MaterialPlan["rows"][number]) {
+    if (row.reqd_qty_sheets !== null) {
+      return `${row.reqd_qty_sheets.toFixed(0)} sheet${row.reqd_qty_sheets === 1 ? "" : "s"}`;
+    }
+    if (row.reqd_qty_kg !== null) return "Weight based";
+    return "Needs dimensions";
+  }
+
   if (!quote) {
     return (
       <div className="space-y-6">
@@ -819,20 +850,22 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                {isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : <Inbox className="h-4 w-4" />}
-                {isFinalSection ? "Quotation queue" : "Draft queue"}
+                {isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : isMaterialSection ? <Layers3 className="h-4 w-4" /> : <Inbox className="h-4 w-4" />}
+                {isFinalSection ? "Quotation queue" : isMaterialSection ? "Material planning queue" : "Draft queue"}
               </div>
               <div>
-                <h2 className="text-2xl font-semibold tracking-normal">{isFinalSection ? "Final quotations" : "Drafts"}</h2>
+                <h2 className="text-2xl font-semibold tracking-normal">{isFinalSection ? "Final quotations" : isMaterialSection ? "Material planning" : "Drafts"}</h2>
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                   {isFinalSection
                     ? "Pricing, terms, PDF preview, and final customer quotation output."
+                    : isMaterialSection
+                      ? "Select a cleaned draft to generate starter stock sizes, estimated weights, and review notes."
                     : "Email and Excel enquiries move through draft cleanup before quotation preparation."}
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {!isFinalSection && (
+              {isDraftSection && (
                 <Button onClick={startQuote}>
                   <Plus className="h-4 w-4" />
                   New draft
@@ -849,7 +882,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         <Card>
           <CardHeader className="gap-3 border-b md:flex-row md:items-center md:justify-between md:space-y-0">
             <div className="space-y-1">
-              <CardTitle>{isFinalSection ? "Final quotation queue" : "Draft queue"}</CardTitle>
+              <CardTitle>{isFinalSection ? "Final quotation queue" : isMaterialSection ? "Material planning queue" : "Draft queue"}</CardTitle>
               <div className="text-sm text-muted-foreground">{visibleQuotes.length} workspace{visibleQuotes.length === 1 ? "" : "s"}</div>
             </div>
             <div className="relative w-full md:max-w-sm">
@@ -877,7 +910,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                         <TableCell>
                           <div className="flex items-start gap-3">
                             <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
-                              {isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
+                              {isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : isMaterialSection ? <Layers3 className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
                             </div>
                             <div className="min-w-0">
                               <div className="truncate font-medium">{row.custom_label || row.customer || row.quote_no || "Untitled quote"}</div>
@@ -926,10 +959,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <TableCell colSpan={5} className="py-14 text-center">
                         <div className="mx-auto flex max-w-sm flex-col items-center gap-3 text-sm text-muted-foreground">
                           <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
-                            <Inbox className="h-5 w-5" />
+                            {isMaterialSection ? <Layers3 className="h-5 w-5" /> : <Inbox className="h-5 w-5" />}
                           </div>
-                          <div>{isFinalSection ? "No quotes are ready for final quotation yet." : "No drafts match the current search."}</div>
-                          {!isFinalSection && (
+                          <div>{isFinalSection ? "No quotes are ready for final quotation yet." : isMaterialSection ? "No drafts are ready for material planning." : "No drafts match the current search."}</div>
+                          {isDraftSection && (
                             <Button onClick={startQuote}>
                               <Plus className="h-4 w-4" />
                               New draft
@@ -975,7 +1008,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               <RotateCcw className="h-4 w-4" />
               Back to list
             </Button>
-            {!isFinalSection && (
+            {isDraftSection && (
               <>
                 <Button variant="secondary" onClick={startNew}>
                   <Plus className="h-4 w-4" />
@@ -1003,7 +1036,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         </div>
       </div>
 
-      {!isFinalSection && (
+      {isDraftSection && (
         <Card>
           <CardHeader className="border-b">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -1121,7 +1154,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         </Card>
       )}
 
-      {!isFinalSection && (
+      {isDraftSection && (
         <>
           <Card>
             <CardHeader className="sticky top-16 z-20 border-b bg-card/95 backdrop-blur">
@@ -1395,14 +1428,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         </>
       )}
 
-      {!isFinalSection && (
+      {isMaterialSection && (
         <Card>
           <CardHeader className="border-b">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
                 <CardTitle>Material planning</CardTitle>
                 <div className="text-sm text-muted-foreground">
-                  Starter plan using {DEFAULT_SHEET_WIDTH_MM} x {DEFAULT_SHEET_LENGTH_MM} mm sheets. Rebuild after item edits.
+                  Generate a reviewable stock plan from the selected draft. Sheet settings are editable in Planning inputs.
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1414,15 +1447,52 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 )}
                 <Button onClick={generateMaterialPlan} disabled={!items.length}>
                   <Layers3 className="h-4 w-4" />
-                  Create material plan
+                  {materialPlan ? "Update material plan" : "Create material plan"}
                 </Button>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4 pt-5">
+            <details className="rounded-md border p-3">
+              <summary className="cursor-pointer text-sm font-medium">Planning inputs</summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <Field
+                  label="Sheet width (mm)"
+                  type="number"
+                  value={String(materialConfig.sheet_width_mm)}
+                  onChange={(value) => {
+                    setMaterialConfig((current) => ({ ...current, sheet_width_mm: Number(value) || DEFAULT_SHEET_WIDTH_MM }));
+                    setMaterialPlan(null);
+                  }}
+                />
+                <Field
+                  label="Sheet length (mm)"
+                  type="number"
+                  value={String(materialConfig.sheet_length_mm)}
+                  onChange={(value) => {
+                    setMaterialConfig((current) => ({ ...current, sheet_length_mm: Number(value) || DEFAULT_SHEET_LENGTH_MM }));
+                    setMaterialPlan(null);
+                  }}
+                />
+                <Field
+                  label="Nesting efficiency (%)"
+                  type="number"
+                  value={String(Math.round(materialConfig.nesting_efficiency * 100))}
+                  onChange={(value) => {
+                    const percent = Math.max(10, Math.min(Number(value) || Math.round(DEFAULT_NESTING_EFFICIENCY * 100), 100));
+                    setMaterialConfig((current) => ({ ...current, nesting_efficiency: percent / 100 }));
+                    setMaterialPlan(null);
+                  }}
+                />
+              </div>
+              <div className="mt-3 text-xs leading-5 text-muted-foreground">
+                Sheet size and nesting efficiency are used for sheet and plate rows. Spiral-wound strip, filler tape, and RTJ or ring blanks remain weight-based because those are normally planned from coil or ring stock, not sheet nesting.
+              </div>
+            </details>
+
             {!materialPlan ? (
               <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Create a plan to see starter stock sizes, estimated weights, and review notes for the current draft.
+                Create a plan to see one consolidated output table for stock size, planned quantity, estimated purchase weight, and review notes.
               </div>
             ) : (
               <>
@@ -1431,7 +1501,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     {quote?.customer || quote?.quote_no || "Untitled draft"} - REG : {quote?.quote_no || quote?.id || "N/A"} / {quote?.project_ref || "N/A"} / {quote?.custom_label || "GASKETS"}
                   </div>
                   <div className="text-sm text-muted-foreground">
-                    Starter plan using {materialPlan.config.sheet_width_mm} x {materialPlan.config.sheet_length_mm} mm sheets and a {Math.round(materialPlan.config.nesting_efficiency * 100)}% nesting allowance.
+                    Sheet rows use {materialPlan.config.sheet_width_mm} x {materialPlan.config.sheet_length_mm} mm stock with {Math.round(materialPlan.config.nesting_efficiency * 100)}% nesting efficiency.
                   </div>
                 </div>
 
@@ -1442,10 +1512,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </div>
                   <div className="rounded-md border p-3">
                     <div className="text-xs text-muted-foreground">Sheet demand</div>
-                    <div className="text-lg font-semibold">{materialPlan.totals.sheet_count.toFixed(2)}</div>
+                    <div className="text-lg font-semibold">{materialPlan.totals.sheet_count.toFixed(0)}</div>
                   </div>
                   <div className="rounded-md border p-3">
-                    <div className="text-xs text-muted-foreground">Estimated weight</div>
+                    <div className="text-xs text-muted-foreground">Estimated purchase weight</div>
                     <div className="text-lg font-semibold">{materialPlan.totals.total_weight_kg.toFixed(3)} kg</div>
                   </div>
                 </div>
@@ -1461,28 +1531,18 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </div>
                 )}
 
-                <details className="rounded-md border p-3">
-                  <summary className="cursor-pointer text-sm font-medium">Planning assumptions</summary>
-                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
-                    {materialPlan.assumptions.map((assumption) => (
-                      <div key={assumption}>- {assumption}</div>
-                    ))}
-                  </div>
-                </details>
-
                 <div className="overflow-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-20">Review</TableHead>
                         <TableHead className="w-16">SL.NO.</TableHead>
-                        <TableHead className="min-w-56">TYPE</TableHead>
-                        <TableHead className="w-28">WIDTH (mm)</TableHead>
-                        <TableHead className="w-28">LENGTH (mm)</TableHead>
-                        <TableHead className="w-28">THICKNESS (mm)</TableHead>
-                        <TableHead className="w-32">Reqd Qty (Sheets)</TableHead>
-                        <TableHead className="w-28">Reqd Qty Kgs.</TableHead>
-                        <TableHead className="w-80">Notes</TableHead>
+                        <TableHead className="min-w-72">Stock type</TableHead>
+                        <TableHead className="min-w-44">Stock size</TableHead>
+                        <TableHead className="w-36">Planned qty</TableHead>
+                        <TableHead className="w-40">Est. purchase wt.</TableHead>
+                        <TableHead className="w-28">Source rows</TableHead>
+                        <TableHead className="min-w-96">Notes / planner review</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1498,17 +1558,17 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           </TableCell>
                           <TableCell>{row.sl_no}</TableCell>
                           <TableCell className="text-sm font-medium">{row.type}</TableCell>
-                          <TableCell className="text-sm">{row.width_mm ?? ""}</TableCell>
-                          <TableCell className="text-sm">{row.length_mm ?? ""}</TableCell>
-                          <TableCell className="text-sm">{row.thickness_mm ?? ""}</TableCell>
-                          <TableCell className="text-sm">{row.reqd_qty_sheets === null ? "" : row.reqd_qty_sheets.toFixed(0)}</TableCell>
-                          <TableCell className="text-sm">{row.reqd_qty_kg === null ? "" : row.reqd_qty_kg.toFixed(2)}</TableCell>
+                          <TableCell className="text-sm">{formatStockSize(row)}</TableCell>
+                          <TableCell className="text-sm">{formatPlanQuantity(row)}</TableCell>
+                          <TableCell className="text-sm">{row.reqd_qty_kg === null ? "Needs dimensions" : `${row.reqd_qty_kg.toFixed(2)} kg`}</TableCell>
+                          <TableCell className="text-sm">{row.source_count}</TableCell>
                           <TableCell>
+                            <div className="mb-2 text-xs leading-5 text-muted-foreground">{row.notes}</div>
                             <textarea
-                              className="min-h-20 w-full rounded-md border bg-background px-2 py-1 text-xs"
+                              className="min-h-16 w-full rounded-md border bg-background px-2 py-1 text-xs"
                               value={row.planner_notes}
                               onChange={(event) => updatePlanRow(index, { planner_notes: event.target.value })}
-                              placeholder={row.notes}
+                              placeholder="Planner notes"
                             />
                           </TableCell>
                         </TableRow>
@@ -1517,40 +1577,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </Table>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="rounded-md border p-3">
-                    <div className="text-sm font-medium">Material summary</div>
-                    <div className="mt-2 overflow-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>TYPE</TableHead>
-                            <TableHead>Rows</TableHead>
-                            <TableHead>Sheets</TableHead>
-                            <TableHead>Kgs.</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {materialPlan.summary.map((row) => (
-                            <TableRow key={row.type}>
-                              <TableCell className="text-sm">{row.type}</TableCell>
-                              <TableCell className="text-sm">{row.rows}</TableCell>
-                              <TableCell className="text-sm">{row.sheets_required.toFixed(2)}</TableCell>
-                              <TableCell className="text-sm">{row.total_weight_kg.toFixed(2)}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-medium">Assumptions and review basis</summary>
+                  <div className="mt-3 space-y-1 text-sm text-muted-foreground">
+                    {materialPlan.assumptions.map((assumption) => (
+                      <div key={assumption}>- {assumption}</div>
+                    ))}
+                    <div>- Mark rows reviewed only after checking against the approved drawing, nesting plan, and available stock.</div>
                   </div>
-                  <div className="rounded-md border p-3">
-                    <div className="text-sm font-medium">Planner notes</div>
-                    <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-                      <div>Mark rows reviewed after checking the output against the drawing or nesting plan.</div>
-                      <div>Regenerate after any item edit, because the plan is draft-sensitive and local to the current quote.</div>
-                    </div>
-                  </div>
-                </div>
+                </details>
               </>
             )}
           </CardContent>
