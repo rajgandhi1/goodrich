@@ -40,7 +40,6 @@ import {
   createQuote,
   deleteQuote,
   exportQuote,
-  getJobStatus,
   getQuote,
   listQuotes,
   patchQuote,
@@ -48,6 +47,7 @@ import {
   rfiDraft,
   toNumber,
 } from "@/lib/api";
+import { addBackgroundJob } from "@/lib/background-jobs";
 import { buildMaterialPlan, MaterialPlan, DEFAULT_NESTING_EFFICIENCY, DEFAULT_SHEET_LENGTH_MM, DEFAULT_SHEET_WIDTH_MM } from "@/lib/material-planning";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -181,6 +181,21 @@ const TABLE_COLUMNS: TableColumn[] = [
   { label: "AI", field: "confidence", kind: "readonly", width: "w-28" },
 ];
 
+const COMPACT_TABLE_COLUMNS: TableColumn[] = [
+  { label: "#", field: "line_no", kind: "readonly", width: "w-16" },
+  { label: "Status", field: "status", kind: "readonly", width: "w-20" },
+  { label: "GGPL Description", field: "ggpl_description", kind: "readonly", width: "min-w-96" },
+  { label: "Notes / Flags", field: "flags", kind: "readonly", width: "min-w-72" },
+  { label: "Qty", field: "quantity", kind: "number", width: "w-24" },
+  { label: "UoM", field: "uom", width: "w-24" },
+  { label: "Type", field: "gasket_type", width: "w-36" },
+  { label: "Size", field: "size", width: "w-28" },
+  { label: "Rating", field: "rating", width: "w-28" },
+  { label: "MOC", field: "moc", width: "w-40" },
+  { label: "Face", field: "face_type", width: "w-24" },
+  { label: "Thk", field: "thickness_mm", kind: "number", width: "w-24" },
+];
+
 const BULK_DEFAULTS = {
   gasket_type: "(no change)",
   moc: "",
@@ -197,6 +212,9 @@ const BULK_DEFAULTS = {
   standard: "",
 };
 const BLANK_SELECT_VALUE = "__blank__";
+const LARGE_DRAFT_THRESHOLD = 250;
+const DRAFT_PAGE_SIZE = 25;
+const SUMMARY_LIMIT = 40;
 
 function blankItem(lineNo: number): GasketItem {
   return {
@@ -358,12 +376,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [emailText, setEmailText] = React.useState("");
   const [excelFile, setExcelFile] = React.useState<File | null>(null);
   const [manualItem, setManualItem] = React.useState<GasketItem>(blankItem(1));
-  const [jobId, setJobId] = React.useState<string | null>(null);
-  const [jobMessage, setJobMessage] = React.useState("");
-  const [jobProgress, setJobProgress] = React.useState(0);
+  const [startingExtraction, setStartingExtraction] = React.useState(false);
   const [previewUrl, setPreviewUrl] = React.useState("");
   const [selectedRows, setSelectedRows] = React.useState<Set<number>>(new Set());
   const [statusFilter, setStatusFilter] = React.useState("all");
+  const [draftPage, setDraftPage] = React.useState(0);
   const [bulkValues, setBulkValues] = React.useState<Record<string, string>>(BULK_DEFAULTS);
   const [rfiText, setRfiText] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -382,7 +399,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const loadedQuoteId = React.useRef<string | null>(null);
 
   const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
-  const items = quote?.items ?? [];
+  const items = React.useMemo(() => quote?.items ?? [], [quote?.items]);
+  const isLargeDraft = items.length > LARGE_DRAFT_THRESHOLD;
+  const activeTableColumns = isLargeDraft ? COMPACT_TABLE_COLUMNS : TABLE_COLUMNS;
   const displayIndices = items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => {
@@ -392,8 +411,23 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       return true;
     })
     .map(({ index }) => index);
-  const filteredItems = displayIndices.map((index) => items[index]);
+  const pageCount = Math.max(1, Math.ceil(displayIndices.length / DRAFT_PAGE_SIZE));
+  const safeDraftPage = Math.min(draftPage, pageCount - 1);
+  const pagedDisplayIndices = displayIndices.slice(safeDraftPage * DRAFT_PAGE_SIZE, (safeDraftPage + 1) * DRAFT_PAGE_SIZE);
+  const filteredItems = pagedDisplayIndices.map((index) => items[index]);
+  const pageStart = displayIndices.length ? safeDraftPage * DRAFT_PAGE_SIZE + 1 : 0;
+  const pageEnd = Math.min(displayIndices.length, (safeDraftPage + 1) * DRAFT_PAGE_SIZE);
   const selectedIndices = selectedRows.size ? Array.from(selectedRows).sort((a, b) => a - b) : [];
+  const extractionSummary = React.useMemo(() => {
+    const summary = items.reduce<Record<string, number>>((acc, item) => {
+      const key = summaryKey(item);
+      if (key) acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(summary).sort((left, right) => right[1] - left[1]);
+  }, [items]);
+  const shownSummary = extractionSummary.slice(0, SUMMARY_LIMIT);
+  const hiddenSummaryCount = Math.max(0, extractionSummary.length - shownSummary.length);
 
   function invalidateMaterialPlan() {
     setMaterialPlan(null);
@@ -421,7 +455,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     if (quote?.id === loadedQuoteId.current) return;
     loadedQuoteId.current = quote?.id ?? null;
     setIntakeCollapsed(Boolean(quote && !isFinalSection && (quote.items?.length ?? 0) > 0));
+    setDraftPage(0);
   }, [isFinalSection, quote]);
+
+  React.useEffect(() => {
+    setDraftPage(0);
+  }, [statusFilter, quote?.id]);
 
   React.useEffect(() => {
     const hasProgress = Boolean(quote && (items.length > 0 || isFinalSection));
@@ -434,37 +473,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [items.length, quote, isFinalSection]);
-
-  React.useEffect(() => {
-    if (!jobId) return;
-    const timer = window.setInterval(async () => {
-      try {
-        const job = await getJobStatus(jobId);
-        const parsedCount = job.parsed_count ?? 0;
-        setJobMessage(job.error || (parsedCount ? `${job.message || job.status} - ${parsedCount} item(s) parsed` : job.message || job.status));
-        setJobProgress(job.progress);
-        if (job.status === "succeeded" || job.status === "failed") {
-          window.clearInterval(timer);
-          setJobId(null);
-          if (job.status === "succeeded") {
-            invalidateMaterialPlan();
-            await refreshQuotes(job.quote_id ?? quote?.id);
-            setIntakeCollapsed(true);
-            toast.success(`Smart Parse appended ${parsedCount} item(s)`);
-          } else {
-            toast.error(job.error ?? "Smart Parse failed");
-          }
-        }
-      } catch (error) {
-        window.clearInterval(timer);
-        setJobId(null);
-        toast.error(error instanceof Error ? error.message : "Could not read extraction job");
-      }
-    }, 1200);
-    return () => window.clearInterval(timer);
-    // The polling interval intentionally follows only the active job and quote id.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId, quote?.id]);
 
   async function startQuote() {
     setSaving(true);
@@ -496,9 +504,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     setEmailText("");
     setExcelFile(null);
     setManualItem(blankItem(1));
-    setJobId(null);
-    setJobMessage("");
-    setJobProgress(0);
+    setStartingExtraction(false);
     setSelectedRows(new Set());
     setPreviewUrl("");
     setStatusFilter("all");
@@ -582,6 +588,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       return;
     }
     try {
+      setStartingExtraction(true);
       const accepted = await createExtraction({
         quoteId: quote.id,
         sourceType,
@@ -590,13 +597,20 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         customer: quote.customer,
         projectRef: quote.project_ref,
       });
+      addBackgroundJob({
+        id: accepted.job_id,
+        quoteId: quote.id,
+        sourceType,
+        label: `Smart Parse ${sourceType === "excel" ? "Excel" : "email"} draft`,
+        startedAt: new Date().toISOString(),
+      });
+      invalidateMaterialPlan();
       setIntakeCollapsed(false);
-      setJobId(accepted.job_id);
-      setJobMessage("Smart Parse queued");
-      setJobProgress(0);
-      toast.info("Smart Parse job started");
+      toast.info("Smart Parse is running in the background. You can keep working and will be notified when it finishes.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Extraction failed");
+    } finally {
+      setStartingExtraction(false);
     }
   }
 
@@ -983,7 +997,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             </div>
             {!isFinalSection && (
               <div className="grid gap-3 sm:grid-cols-4">
-                <SummaryTile label="Items" value={items.length} detail={`${filteredItems.length} visible`} />
+                <SummaryTile label="Items" value={items.length} detail={`${filteredItems.length} on this page`} />
                 <SummaryTile label="Ready" value={readyCount} detail={`${readiness}% complete`} tone="ready" />
                 <SummaryTile label="Review" value={checkCount} detail="Defaults used" tone="check" />
                 <SummaryTile label="Missing" value={missingCount} detail="Needs input" tone="missing" />
@@ -1030,17 +1044,17 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               <div className="space-y-1">
                 <CardTitle>Draft intake</CardTitle>
                 <div className="text-sm text-muted-foreground">
-                  {intakeCollapsed && !jobId ? `${items.length} item(s) captured. Intake is minimized.` : "Email, Excel, and manual item capture"}
+                  {intakeCollapsed && !startingExtraction ? `${items.length} item(s) captured. Intake is minimized.` : "Email, Excel, and manual item capture"}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {jobId && (
+                {startingExtraction && (
                   <Badge variant="outline" className="w-fit">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Processing
+                    Starting
                   </Badge>
                 )}
-                {(items.length > 0 || intakeCollapsed) && !jobId && (
+                {(items.length > 0 || intakeCollapsed) && !startingExtraction && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1054,7 +1068,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               </div>
             </div>
           </CardHeader>
-          {intakeCollapsed && !jobId ? (
+          {intakeCollapsed && !startingExtraction ? (
             <CardContent className="pt-5">
               <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
                 Intake minimized. Review and clean the extracted draft below.
@@ -1076,8 +1090,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     placeholder="Paste raw customer enquiry email text"
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button onClick={() => runExtraction("email")}>
-                      {jobId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    <Button onClick={() => runExtraction("email")} disabled={startingExtraction}>
+                      {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       Process email draft
                     </Button>
                     <Button variant="secondary" onClick={() => setEmailText("")} disabled={!emailText}>
@@ -1100,7 +1114,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <Input className="max-w-sm" type="file" accept=".xlsx,.xls" onChange={(event) => setExcelFile(event.target.files?.[0] ?? null)} />
                     </div>
                   </div>
-                  <Button className="mt-3" onClick={() => runExtraction("excel", excelFile)}>
+                  <Button className="mt-3" onClick={() => runExtraction("excel", excelFile)} disabled={startingExtraction}>
                     <Upload className="h-4 w-4" />
                     Process Excel draft
                   </Button>
@@ -1122,17 +1136,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </Button>
                 </TabsContent>
               </Tabs>
-              {jobId && (
+              {startingExtraction && (
                 <div className="mt-4 rounded-md border bg-muted/40 p-3">
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      {jobMessage || "Smart Parse running"}
+                      Starting Smart Parse background job
                     </div>
-                    <span className="text-xs text-muted-foreground">{Math.round(jobProgress * 100)}%</span>
-                  </div>
-                  <div className="mt-2">
-                    <ProgressBar value={jobProgress * 100} />
                   </div>
                 </div>
               )}
@@ -1189,7 +1199,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   Update {selectedIndices.length ? "selected" : "visible"}
                 </Button>
                 <Button variant="secondary" onClick={() => reprocessRows()}>
-                  {jobId ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   Smart Parse {selectedIndices.length ? "selected" : "visible"}
                 </Button>
                 <Button variant="destructive" onClick={deleteSelectedRows} disabled={!selectedIndices.length}>
@@ -1261,18 +1271,45 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </div>
               </details>
 
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div className="text-muted-foreground">
+                  Showing {pageStart}-{pageEnd} of {displayIndices.length} visible row(s).
+                  {isLargeDraft ? " Compact columns are shown for large drafts; select one row to edit all fields below." : " Large drafts are paged to keep the browser responsive."}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setDraftPage((page) => Math.max(0, page - 1))}
+                    disabled={safeDraftPage <= 0}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Page {safeDraftPage + 1} of {pageCount}</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setDraftPage((page) => Math.min(pageCount - 1, page + 1))}
+                    disabled={safeDraftPage >= pageCount - 1}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+
               <div className="max-h-[540px] overflow-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="sticky left-0 z-20 w-12 bg-card">Select</TableHead>
                       <TableHead className="sticky left-12 z-20 w-44 bg-card">Actions</TableHead>
-                      {TABLE_COLUMNS.map((column) => <TableHead key={column.label} className={column.width ?? "min-w-36"}>{column.label}</TableHead>)}
+                      {activeTableColumns.map((column) => <TableHead key={column.label} className={column.width ?? "min-w-36"}>{column.label}</TableHead>)}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredItems.map((item) => {
-                      const index = items.indexOf(item);
+                    {pagedDisplayIndices.map((index) => {
+                      const item = items[index];
+                      if (!item) return null;
                       return (
                         <TableRow key={`${index}-${item.line_no ?? ""}`} className={statusClass(item.status)}>
                           <TableCell className="sticky left-0 z-10 bg-card align-top">
@@ -1310,7 +1347,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                               </Button>
                             </div>
                           </TableCell>
-                          {TABLE_COLUMNS.map((column) => (
+                          {activeTableColumns.map((column) => (
                             <TableCell key={column.label} className="align-top">
                               {column.field === "status" ? (
                                 <div className="flex items-center gap-2 text-sm">{statusIcon[getString(item.status)]}{getString(item.status)}</div>
@@ -1350,7 +1387,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     })}
                     {!filteredItems.length && (
                       <TableRow>
-                        <TableCell colSpan={TABLE_COLUMNS.length + 2} className="py-8 text-center text-sm text-muted-foreground">No items match this filter.</TableCell>
+                        <TableCell colSpan={activeTableColumns.length + 2} className="py-8 text-center text-sm text-muted-foreground">No items match this filter.</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -1379,11 +1416,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <div className="rounded-md border p-3">
                   <div className="text-sm font-medium">Extraction summary</div>
                   <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                    {Object.entries(items.reduce<Record<string, number>>((acc, item) => {
-                      const key = summaryKey(item);
-                      if (key) acc[key] = (acc[key] ?? 0) + 1;
-                      return acc;
-                    }, {})).map(([key, count], index) => <div key={key}><span className="font-medium">{index + 1}.</span> {key} <span className="text-xs">({count})</span></div>)}
+                    {shownSummary.map(([key, count], index) => <div key={key}><span className="font-medium">{index + 1}.</span> {key} <span className="text-xs">({count})</span></div>)}
+                    {hiddenSummaryCount > 0 && <div>+ {hiddenSummaryCount} more summary group(s)</div>}
                     {!items.length && <div>No items yet.</div>}
                   </div>
                 </div>
