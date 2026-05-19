@@ -214,6 +214,7 @@ const BULK_DEFAULTS = {
 const BLANK_SELECT_VALUE = "__blank__";
 const LARGE_DRAFT_THRESHOLD = 250;
 const DRAFT_PAGE_SIZE = 25;
+const FINAL_PAGE_SIZE = 50;
 const SUMMARY_LIMIT = 40;
 
 function blankItem(lineNo: number): GasketItem {
@@ -251,6 +252,10 @@ function setItemValue(item: GasketItem, field: string, value: string): GasketIte
 
 function renumber(items: GasketItem[]): GasketItem[] {
   return items.map((item, index) => ({ ...item, line_no: index + 1 }));
+}
+
+function quoteSummary(quote: Quote): Quote {
+  return { ...quote, items: [] };
 }
 
 function notesFor(item: GasketItem): string {
@@ -381,6 +386,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [selectedRows, setSelectedRows] = React.useState<Set<number>>(new Set());
   const [statusFilter, setStatusFilter] = React.useState("all");
   const [draftPage, setDraftPage] = React.useState(0);
+  const [finalPage, setFinalPage] = React.useState(0);
   const [bulkValues, setBulkValues] = React.useState<Record<string, string>>(BULK_DEFAULTS);
   const [rfiText, setRfiText] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -417,6 +423,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const filteredItems = pagedDisplayIndices.map((index) => items[index]);
   const pageStart = displayIndices.length ? safeDraftPage * DRAFT_PAGE_SIZE + 1 : 0;
   const pageEnd = Math.min(displayIndices.length, (safeDraftPage + 1) * DRAFT_PAGE_SIZE);
+  const finalPageCount = Math.max(1, Math.ceil(items.length / FINAL_PAGE_SIZE));
+  const safeFinalPage = Math.min(finalPage, finalPageCount - 1);
+  const finalPageStartIndex = safeFinalPage * FINAL_PAGE_SIZE;
+  const finalPageEndIndex = Math.min(items.length, finalPageStartIndex + FINAL_PAGE_SIZE);
+  const finalPageItems = items.slice(finalPageStartIndex, finalPageEndIndex);
   const selectedIndices = selectedRows.size ? Array.from(selectedRows).sort((a, b) => a - b) : [];
   const extractionSummary = React.useMemo(() => {
     const summary = items.reduce<Record<string, number>>((acc, item) => {
@@ -435,11 +446,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   async function refreshQuotes(activeId?: string) {
     const data = await listQuotes();
-    setQuotes(data);
+    setQuotes(data.map(quoteSummary));
     const nextId = activeId ?? (quote && data.some((row) => row.id === quote.id) ? quote.id : undefined);
     if (nextId) {
-      const active = data.find((row) => row.id === nextId) ?? (await getQuote(nextId));
-      setQuote(active);
+      setQuote(await getQuote(nextId));
     } else {
       setQuote(null);
     }
@@ -456,6 +466,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     loadedQuoteId.current = quote?.id ?? null;
     setIntakeCollapsed(Boolean(quote && !isFinalSection && (quote.items?.length ?? 0) > 0));
     setDraftPage(0);
+    setFinalPage(0);
   }, [isFinalSection, quote]);
 
   React.useEffect(() => {
@@ -521,7 +532,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>);
     const advanced = await advanceQuoteStage(quote.id, "quote_prep", "Moved to final quotation", {});
     setQuote(advanced);
-    setQuotes((prev) => prev.map((row) => (row.id === advanced.id ? advanced : row)));
+    setQuotes((prev) => prev.map((row) => (row.id === advanced.id ? quoteSummary(advanced) : row)));
     router.replace(`/quotes/final?quote=${quote.id}`);
   }
 
@@ -542,8 +553,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       if (quote?.id === row.id) {
         const nextId = nextQuotes[0]?.id;
         if (nextId) {
-          const active = nextQuotes.find((item) => item.id === nextId) ?? await getQuote(nextId);
-          setQuote(active);
+          setQuote(await getQuote(nextId));
         } else {
           setQuote(null);
         }
@@ -560,7 +570,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     try {
       const updated = await patchQuote(quote.id, payload);
       setQuote(updated);
-      setQuotes((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setQuotes((prev) => prev.map((row) => (row.id === updated.id ? quoteSummary(updated) : row)));
       if (success) toast.success(success);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Save failed");
@@ -1688,7 +1698,32 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <Field label="GST %" value={getString(qd.gst_pct)} onChange={(value) => updateQd("gst_pct", Number(value))} type="number" />
               </div>
 
-              <div className="overflow-auto rounded-md border">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div className="text-muted-foreground">
+                  Showing {items.length ? finalPageStartIndex + 1 : 0}-{finalPageEndIndex} of {items.length} quotation row(s).
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setFinalPage((page) => Math.max(0, page - 1))}
+                    disabled={safeFinalPage <= 0}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Page {safeFinalPage + 1} of {finalPageCount}</span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setFinalPage((page) => Math.min(finalPageCount - 1, page + 1))}
+                    disabled={safeFinalPage >= finalPageCount - 1}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+
+              <div className="max-h-[620px] overflow-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1702,7 +1737,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.map((item, index) => {
+                    {finalPageItems.map((item, pageIndex) => {
+                      const index = finalPageStartIndex + pageIndex;
                       const price = unitPrices[index] ?? 0;
                       const converted = currency === "INR" ? price : price / (fxRate || 1);
                       const total = item.status === "regret" ? 0 : converted * toNumber(item.quantity);

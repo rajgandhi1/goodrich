@@ -32,8 +32,11 @@ def _quote_or_404(org_id: str, quote_id: str) -> QuoteRead:
 
 
 @router.get("/quotes", response_model=list[QuoteRead])
-def list_quotes(user: CurrentUser = Depends(get_current_user)) -> list[QuoteRead]:
-    return repo.list_quotes(user.org_id)
+def list_quotes(summary: bool = False, user: CurrentUser = Depends(get_current_user)) -> list[QuoteRead]:
+    quotes = repo.list_quotes(user.org_id)
+    if summary:
+        return [quote.model_copy(update={"items": []}) for quote in quotes]
+    return quotes
 
 
 @router.post("/quotes", response_model=QuoteRead, status_code=201)

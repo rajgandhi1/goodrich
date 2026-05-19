@@ -211,7 +211,9 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 }
 
 export async function listQuotes(): Promise<Quote[]> {
-  return parse<Quote[]>(await apiFetch(`${API_BASE}/api/v1/quotes`, { headers: headers({ "Content-Type": "application/json" }) }));
+  return parse<Quote[]>(
+    await apiFetch(`${API_BASE}/api/v1/quotes?summary=true`, { headers: headers({ "Content-Type": "application/json" }) }),
+  );
 }
 
 export async function getQuote(id: string): Promise<Quote> {
