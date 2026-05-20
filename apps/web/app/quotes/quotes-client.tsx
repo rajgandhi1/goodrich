@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1388,7 +1388,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <h2 className="text-2xl font-semibold tracking-normal">{isFinalSection ? "Final quotations" : isMaterialSection ? "Material planning" : "Enquiry"}</h2>
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                   {isFinalSection
-                    ? "Pricing, terms, PDF preview, and final customer quotation output."
+                    ? "Prepared and completed quotations are listed here for final review."
                     : isMaterialSection
                       ? "Select a cleaned enquiry to generate starter stock sizes, estimated weights, and review notes."
                     : "Email and Excel enquiries move through enquiry cleanup before quotation preparation."}
@@ -1409,6 +1409,104 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             </div>
           </div>
         </div>
+
+        {isFinalSection && (
+          <Card>
+            <CardHeader className="gap-3 border-b md:flex-row md:items-center md:justify-between md:space-y-0">
+              <div className="space-y-1">
+                <CardTitle>Final quotation queue</CardTitle>
+                <div className="text-sm text-muted-foreground">{visibleQuotes.length} quotation{visibleQuotes.length === 1 ? "" : "s"}</div>
+              </div>
+              <div className="relative w-full md:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input className="pl-9" placeholder="Search customer, project, quote no" value={search} onChange={(event) => setSearch(event.target.value)} />
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Workspace</TableHead>
+                      <TableHead className="w-48">Readiness</TableHead>
+                      <TableHead className="w-28">Items</TableHead>
+                      <TableHead className="w-40">Updated</TableHead>
+                      <TableHead className="w-28 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleQuotes.map((row) => {
+                      const rowQuality = evaluateQuoteQuality(row, row.items, row.quote_data ?? {});
+                      const highRisks = rowQuality.risks.filter((risk) => risk.severity === "high").length;
+                      return (
+                        <TableRow key={row.id} className="cursor-pointer hover:bg-muted/60" onClick={() => openQuote(row)}>
+                          <TableCell>
+                            <div className="flex items-start gap-3">
+                              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
+                                <FileSpreadsheet className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="truncate font-medium">{row.custom_label || row.customer || row.quote_no || "Untitled quote"}</div>
+                                <div className="truncate text-xs text-muted-foreground">{row.project_ref || row.quote_no || row.id}</div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  <Badge variant={row.stage === "po" ? "secondary" : "outline"}>{stageLabel(row.stage)}</Badge>
+                                  {revisionLabel(row) && <Badge variant="outline">{revisionLabel(row)}</Badge>}
+                                  <Badge variant="outline">Version {row.version}</Badge>
+                                  {highRisks > 0 && <Badge variant="warning">{highRisks} high risk</Badge>}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <ProgressBar value={rowQuality.score} />
+                              <div className="text-xs text-muted-foreground">{rowQuality.score}% ready</div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{row.n_items}</div>
+                            <div className="text-xs text-muted-foreground">{row.n_missing + row.n_check} need review</div>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">{new Date(row.updated_at).toLocaleString("en-GB")}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="sm" onClick={(event) => { event.stopPropagation(); openQuote(row); }}>
+                                <ArrowRight className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  removeQuote(row);
+                                }}
+                                aria-label={`Delete ${row.customer || row.quote_no || row.id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {!visibleQuotes.length && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-14 text-center">
+                          <div className="mx-auto flex max-w-sm flex-col items-center gap-3 text-sm text-muted-foreground">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
+                              <FileSpreadsheet className="h-5 w-5" />
+                            </div>
+                            <div>No quotes are ready for final quotation yet.</div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="gap-3 border-b md:flex-row md:items-center md:justify-between md:space-y-0">
@@ -1472,7 +1570,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           <div className="font-medium">{row.n_items}</div>
                           <div className="text-xs text-muted-foreground">{row.n_missing + row.n_check} need review</div>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{new Date(row.updated_at).toLocaleDateString()}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{new Date(row.updated_at).toLocaleString("en-GB")}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-1">
                             <Button variant="ghost" size="sm" onClick={(event) => { event.stopPropagation(); openQuote(row); }}>
@@ -2341,6 +2439,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <Field label="Quote date" value={getString(qd.quote_date)} onChange={(value) => updateQd("quote_date", value)} />
                 <Field label="Revision no" value={getString(qd.rev_no)} onChange={(value) => updateQd("rev_no", value)} />
                 <Field label="Revision date" value={getString(qd.rev_date)} onChange={(value) => updateQd("rev_date", value)} />
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Customer code" value={getString(qd.customer_code)} onChange={(value) => updateQd("customer_code", value)} />
+                <Field label="Serial no" value={getString(qd.serial_no)} onChange={(value) => updateQd("serial_no", value)} />
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Buyer name/address" value={getString(qd.buyer_name_address)} onChange={(value) => updateQd("buyer_name_address", value)} textarea />
