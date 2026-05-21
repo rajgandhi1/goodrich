@@ -5,6 +5,7 @@ import { Download, FileText, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { API_BASE, Quote, QuoteStage, listQuotes } from "@/lib/api";
+import { readActivityLog } from "@/components/quotes/activity-utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +28,7 @@ type HistoryEvent = {
   id: string;
   quote: Quote;
   at: string;
-  kind: "stage" | "export";
+  kind: "stage" | "export" | "activity" | "vendor";
   stage?: QuoteStage;
   title: string;
   detail: string;
@@ -82,7 +83,30 @@ function eventsForQuote(quote: Quote): HistoryEvent[] {
     filename: entry.filename,
   }));
 
-  return [...stageEvents, ...exportEvents];
+  const activityEvents = readActivityLog(quote).map((entry) => ({
+    id: `${quote.id}-activity-${entry.id}`,
+    quote,
+    at: entry.at,
+    kind: "activity" as const,
+    title: entry.title,
+    detail: [entry.detail, entry.user].filter(Boolean).join(" | "),
+  }));
+
+  const vendorValue = quote.stage_meta?.vendor_enquiries;
+  const vendorEvents = Array.isArray(vendorValue) ? vendorValue.map((entry: Record<string, unknown>, index) => ({
+    id: `${quote.id}-vendor-${getString(entry.id) || index}`,
+    quote,
+    at: getString(entry.updated_at || entry.created_at) || quote.updated_at,
+    kind: "vendor" as const,
+    title: `Vendor ${getString(entry.status || "enquiry")}`,
+    detail: [entry.vendor_name, entry.material_group, entry.remarks].map((value) => getString(value)).filter(Boolean).join(" | "),
+  })) : [];
+
+  return [...stageEvents, ...exportEvents, ...activityEvents, ...vendorEvents];
+}
+
+function getString(value: unknown): string {
+  return String(value ?? "").trim();
 }
 
 function formatDate(value: string) {
@@ -138,6 +162,8 @@ export function HistoryClient() {
             <SelectItem value="all">All activity</SelectItem>
             <SelectItem value="stage">Stage changes</SelectItem>
             <SelectItem value="export">Exports</SelectItem>
+            <SelectItem value="activity">Workflow activity</SelectItem>
+            <SelectItem value="vendor">Vendor enquiries</SelectItem>
           </SelectContent>
         </Select>
         <Select value={stage} onValueChange={setStage}>
@@ -163,8 +189,8 @@ export function HistoryClient() {
           <div className="text-lg font-semibold">{events.filter((event) => event.kind === "stage").length}</div>
         </div>
         <div className="rounded-md border p-3">
-          <div className="text-xs text-muted-foreground">PDF exports</div>
-          <div className="text-lg font-semibold">{events.filter((event) => event.exportType === "pdf").length}</div>
+          <div className="text-xs text-muted-foreground">Workflow events</div>
+          <div className="text-lg font-semibold">{events.filter((event) => event.kind === "activity" || event.kind === "vendor").length}</div>
         </div>
       </div>
 
@@ -192,7 +218,7 @@ export function HistoryClient() {
                     <TableCell className="text-sm text-muted-foreground">{formatDate(event.at)}</TableCell>
                     <TableCell>
                       <div className="font-medium">{event.title}</div>
-                      <Badge variant="outline" className="mt-1">{event.kind === "export" ? "Export" : "Stage"}</Badge>
+                      <Badge variant="outline" className="mt-1">{event.kind === "export" ? "Export" : event.kind === "vendor" ? "Vendor" : event.kind === "activity" ? "Workflow" : "Stage"}</Badge>
                     </TableCell>
                     <TableCell>
                       <div className="font-medium">{event.quote.custom_label || event.quote.customer || "Untitled customer"}</div>

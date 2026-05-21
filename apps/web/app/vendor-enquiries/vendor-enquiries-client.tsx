@@ -5,6 +5,7 @@ import { CheckCircle2, RefreshCw, Save, Send } from "lucide-react";
 import { toast } from "sonner";
 
 import { getString } from "@/components/quotes/item-validation";
+import { appendActivity } from "@/components/quotes/activity-utils";
 import { stageLabel } from "@/components/quotes/stage-utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -134,11 +135,16 @@ export function VendorEnquiriesClient() {
         ? current.map((row) => row.id === nextEnquiry.id ? nextEnquiry : row)
         : [...current, nextEnquiry];
       const updated = await patchQuote(quote.id, {
-        stage_meta: {
+        stage_meta: appendActivity({
           ...(quote.stage_meta ?? {}),
           vendor_enquiries: nextList,
           vendor_enquiries_updated_at: now,
-        },
+        }, {
+          kind: "vendor",
+          title: `Vendor enquiry ${nextEnquiry.status}`,
+          detail: [nextEnquiry.vendor_name, nextEnquiry.material_group].filter(Boolean).join(" - "),
+          user: "Purchase",
+        }),
       } as Partial<Quote>);
       setQuote(updated);
       setDraft(emptyDraft(updated, draft.source));

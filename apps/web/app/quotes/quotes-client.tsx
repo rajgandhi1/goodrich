@@ -27,6 +27,7 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  Undo2,
   Upload,
   X,
 } from "lucide-react";
@@ -58,7 +59,10 @@ import { buildQuotePricingSummary } from "@/components/quotes/pricing-utils";
 import { evaluateQuoteQuality } from "@/components/quotes/quality-utils";
 import { itemMatchesSmartFilter, quoteDueState, quoteHasClarification, quoteIsHighRisk, quoteIsHighValue } from "@/components/quotes/queue-utils";
 import { QuoteSummaryRow } from "@/components/quotes/quote-summary-row";
+import { appendActivity } from "@/components/quotes/activity-utils";
+import { QuoteTimeline } from "@/components/quotes/quote-timeline";
 import { DRAFT_STAGES, FINAL_STAGES, MATERIAL_STAGES, QuoteSection, revisionLabel, stageLabel } from "@/components/quotes/stage-utils";
+import { issueBadgesForItem, TechnicalIssuesPanel } from "@/components/quotes/technical-issues-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -257,6 +261,8 @@ const GRID_INPUT_CLASS =
 const GRID_TEXTAREA_CLASS =
   "h-14 w-full min-w-0 resize-none rounded-none border-0 bg-transparent px-2 py-1 text-xs shadow-none outline-none focus:ring-1 focus:ring-ring";
 const GRID_READONLY_CLASS = "bg-muted/30 text-muted-foreground";
+const FILTER_STORAGE_KEY = "gq_quote_saved_filters";
+const RECENT_QUOTES_KEY = "gq_recent_quotes";
 
 function blankItem(lineNo: number): GasketItem {
   return {
@@ -402,6 +408,45 @@ function confidenceClass(value: unknown) {
   return "bg-red-100/80 text-red-950 dark:bg-red-950/40 dark:text-red-100";
 }
 
+function storageAvailable() {
+  return typeof window !== "undefined" && Boolean(window.localStorage);
+}
+
+function savedFiltersFor(section: QuoteSection) {
+  if (!storageAvailable()) return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FILTER_STORAGE_KEY) || "{}") as Record<string, { queueFilter?: string; statusFilter?: string; columnPreset?: string }>;
+    return parsed[`${section}:${getCurrentAppUser().role}`] ?? parsed[section] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSavedFilters(section: QuoteSection, filters: { queueFilter: string; statusFilter: string; columnPreset: string }) {
+  if (!storageAvailable()) return;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FILTER_STORAGE_KEY) || "{}") as Record<string, unknown>;
+    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ ...parsed, [`${section}:${getCurrentAppUser().role}`]: filters }));
+  } catch {
+    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ [`${section}:${getCurrentAppUser().role}`]: filters }));
+  }
+}
+
+function rememberRecentQuote(row: Quote) {
+  if (!storageAvailable()) return;
+  try {
+    const recent = JSON.parse(window.localStorage.getItem(RECENT_QUOTES_KEY) || "[]") as Array<{ id: string; label: string; href: string; at: string }>;
+    const href = FINAL_STAGES.has(row.stage) ? `/quotes/final?quote=${row.id}` : `/quotes?quote=${row.id}`;
+    const next = [
+      { id: row.id, label: row.customer || row.quote_no || row.id, href, at: new Date().toISOString() },
+      ...recent.filter((item) => item.id !== row.id),
+    ].slice(0, 8);
+    window.localStorage.setItem(RECENT_QUOTES_KEY, JSON.stringify(next));
+  } catch {
+    window.localStorage.removeItem(RECENT_QUOTES_KEY);
+  }
+}
+
 function Field({
   label,
   value,
@@ -499,12 +544,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [currentUser, setCurrentUser] = React.useState(() => getCurrentAppUser());
   const [approvalComment, setApprovalComment] = React.useState("");
   const [draftScrollTop, setDraftScrollTop] = React.useState(0);
+  const [undoItems, setUndoItems] = React.useState<{ label: string; items: GasketItem[] } | null>(null);
+  const [hasUnsavedLocalEdits, setHasUnsavedLocalEdits] = React.useState(false);
   const isDraftSection = section === "drafts";
   const isMaterialSection = section === "material";
   const isFinalSection = section === "final";
   const sectionBasePath = isFinalSection ? "/quotes/final" : isMaterialSection ? "/material-planning" : "/quotes";
   const loadedQuoteId = React.useRef<string | null>(null);
   const draftGridRef = React.useRef<HTMLDivElement | null>(null);
+  const filtersLoaded = React.useRef(false);
 
   const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
   const items = React.useMemo(() => quote?.items ?? [], [quote?.items]);
@@ -577,6 +625,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     setMaterialPlan(isMaterialSection ? storedMaterialPlan(quote) : null);
     setDraftPage(0);
     setFinalPage(0);
+    setHasUnsavedLocalEdits(false);
   }, [isFinalSection, isMaterialSection, quote]);
 
   React.useEffect(() => {
@@ -599,6 +648,19 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       window.removeEventListener("storage", refresh);
     };
   }, []);
+
+  React.useEffect(() => {
+    const saved = savedFiltersFor(section);
+    if (saved?.queueFilter) setQueueFilter(saved.queueFilter);
+    if (saved?.statusFilter) setStatusFilter(saved.statusFilter);
+    if (saved?.columnPreset) setColumnPreset(saved.columnPreset);
+    filtersLoaded.current = true;
+  }, [currentUser.role, section]);
+
+  React.useEffect(() => {
+    if (!filtersLoaded.current) return;
+    persistSavedFilters(section, { queueFilter, statusFilter, columnPreset });
+  }, [columnPreset, queueFilter, section, statusFilter]);
 
   React.useEffect(() => {
     const hasProgress = Boolean(quote && (items.length > 0 || isFinalSection));
@@ -694,7 +756,18 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function updateQueueMeta(row: Quote, patch: Record<string, unknown>) {
-    const nextStageMeta = { ...(row.stage_meta ?? {}), ...patch };
+    let nextStageMeta = { ...(row.stage_meta ?? {}), ...patch };
+    const activityDetails = Object.entries(patch)
+      .filter(([key]) => ["owner_id", "owner_name", "priority", "due_date", "clarification_status"].includes(key))
+      .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value || "blank")}`);
+    if (activityDetails.length) {
+      nextStageMeta = appendActivity(nextStageMeta, {
+        kind: patch.clarification_status ? "clarification" : patch.owner_id || patch.owner_name ? "owner" : patch.priority ? "priority" : "due_date",
+        title: "Queue metadata updated",
+        detail: activityDetails.join(", "),
+        user: currentUser.name || currentUser.id,
+      });
+    }
     setQuotes((prev) => prev.map((item) => (item.id === row.id ? { ...item, stage_meta: nextStageMeta } : item)));
     if (quote?.id === row.id) {
       setQuote((current) => (current ? { ...current, stage_meta: nextStageMeta } : current));
@@ -715,6 +788,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     try {
       const updated = await patchQuote(quote.id, payload);
       setQuote(updated);
+      setHasUnsavedLocalEdits(false);
       setQuotes((prev) => prev.map((row) => (row.id === updated.id ? quoteSummary(updated) : row)));
       if (success) toast.success(success);
     } catch (error) {
@@ -819,6 +893,31 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     await updateItems(next, "Smart Parse refreshed selected rows");
   }
 
+  async function buildClarificationEmail() {
+    if (!quote) return;
+    try {
+      const draft = await rfiDraft(quote.id);
+      setRfiText(draft.text);
+      const nextStageMeta = appendActivity(
+        {
+          ...(quote.stage_meta ?? {}),
+          clarification_status: "requested",
+          clarification_requested_at: new Date().toISOString(),
+        },
+        {
+          kind: "clarification",
+          title: "Clarification drafted",
+          detail: `${Object.keys(draft.groups ?? {}).length} issue group(s) included`,
+          user: currentUser.name || currentUser.id,
+        },
+      );
+      setQuote((current) => (current ? { ...current, stage_meta: nextStageMeta } : current));
+      await patchQuote(quote.id, { stage_meta: nextStageMeta } as Partial<Quote>);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build clarification email");
+    }
+  }
+
   async function exportCurrent(type: "pdf", mode: "preview" | "download" = "download") {
     if (!quote) return;
     if (mode === "download" && !canExportFinal) {
@@ -862,10 +961,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         items,
         quote_data: qd,
         quote_no: getString(qd.quote_no),
-        stage_meta: {
-          ...(quote.stage_meta ?? {}),
-          approval: nextApproval,
-        },
+        stage_meta: appendActivity({ ...(quote.stage_meta ?? {}), approval: nextApproval }, {
+          kind: "approval",
+          title: "Approval requested",
+          detail: pricingSummary.approvalReasons.join(", ") || approvalComment.trim() || "Approval requested",
+          user: currentUser.name || currentUser.id,
+        }),
       } as Partial<Quote>,
       "Approval requested",
     );
@@ -891,10 +992,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         items,
         quote_data: qd,
         quote_no: getString(qd.quote_no),
-        stage_meta: {
-          ...(quote.stage_meta ?? {}),
-          approval: nextApproval,
-        },
+        stage_meta: appendActivity({ ...(quote.stage_meta ?? {}), approval: nextApproval }, {
+          kind: "approval",
+          title: status === "approved" ? "Approval granted" : "Approval rejected",
+          detail: approvalComment.trim() || nextApproval.required_changes || status,
+          user: currentUser.name || currentUser.id,
+        }),
       } as Partial<Quote>,
       status === "approved" ? "Quotation approved" : "Quotation rejected",
     );
@@ -913,7 +1016,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       sent_by: currentUser.name || currentUser.id,
       sent_at: new Date().toISOString(),
     };
-    const advanced = await advanceQuoteStage(quote.id, "sent", "Approved quotation sent", sentMeta);
+    const advanced = await advanceQuoteStage(quote.id, "sent", "Approved quotation sent", appendActivity(sentMeta, {
+      kind: "workflow",
+      title: "Quotation sent",
+      detail: "Approved quotation marked sent",
+      user: currentUser.name || currentUser.id,
+    }));
     setQuote(advanced);
     setQuotes((prev) => prev.map((row) => (row.id === advanced.id ? quoteSummary(advanced) : row)));
     toast.success("Quotation marked sent");
@@ -924,6 +1032,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     const next = [...items];
     next[index] = setItemValue(next[index] ?? blankItem(index + 1), field, value);
     setQuote((current) => (current ? { ...current, items: next } : current));
+    setHasUnsavedLocalEdits(true);
   }
 
   function setBulkValue(field: string, value: string) {
@@ -937,26 +1046,61 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     const insertAt = selectedVisible.length === 1 ? selectedVisible[0] + 1 : next.length;
     next.splice(insertAt, 0, blankItem(insertAt + 1));
     setQuote((current) => (current ? { ...current, items: renumber(next) } : current));
+    setHasUnsavedLocalEdits(true);
     setSelectedRows(new Set());
   }
 
   async function deleteSelectedRows() {
+    if (!quote) return;
     invalidateMaterialPlan();
     const selected = new Set(selectedIndices);
-    await updateItems(renumber(items.filter((_, index) => !selected.has(index))), "Rows deleted");
+    setUndoItems({ label: "Restore deleted rows", items });
+    await savePatch({
+      items: renumber(items.filter((_, index) => !selected.has(index))),
+      stage_meta: appendActivity(quote.stage_meta ?? {}, {
+        kind: "items",
+        title: "Rows deleted",
+        detail: `${selected.size} row(s) deleted`,
+        user: currentUser.name || currentUser.id,
+      }),
+    } as Partial<Quote>, "Rows deleted");
     setSelectedRows(new Set());
   }
 
   async function toggleRegretSelected() {
+    if (!quote) return;
     invalidateMaterialPlan();
     const selected = new Set(selectedIndices);
+    setUndoItems({ label: "Undo regret change", items });
     const next = items.map((item, index) => {
       if (!selected.has(index)) return item;
       const isRegret = item.status === "regret" || item.regret === true;
       return { ...item, regret: !isRegret, status: isRegret ? "check" : "regret" };
     });
-    await updateItems(next, "Regret status updated");
+    await savePatch({
+      items: next,
+      stage_meta: appendActivity(quote.stage_meta ?? {}, {
+        kind: "items",
+        title: "Regret toggled",
+        detail: `${selected.size} row(s) changed`,
+        user: currentUser.name || currentUser.id,
+      }),
+    } as Partial<Quote>, "Regret status updated");
     setSelectedRows(new Set());
+  }
+
+  async function restoreUndoItems() {
+    if (!quote || !undoItems) return;
+    await savePatch({
+      items: undoItems.items,
+      stage_meta: appendActivity(quote.stage_meta ?? {}, {
+        kind: "items",
+        title: "Undo restored",
+        detail: undoItems.label,
+        user: currentUser.name || currentUser.id,
+      }),
+    } as Partial<Quote>, "Rows restored");
+    setUndoItems(null);
   }
 
   async function applyBulkEdit() {
@@ -1054,6 +1198,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       next.fx_rate = defaultFx[getString(value)] ?? 1;
     }
     setQuote((current) => (current ? { ...current, quote_data: next, quote_no: getString(next.quote_no) } : current));
+    setHasUnsavedLocalEdits(true);
   }
 
   const unitPrices = React.useMemo(() => Array.isArray(qd.unit_prices) ? qd.unit_prices.map((value) => toNumber(value)) : [], [qd.unit_prices]);
@@ -1118,6 +1263,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       invalidateMaterialPlan();
       const active = await getQuote(row.id);
       setQuote(active);
+      rememberRecentQuote(active);
       setSelectedRows(new Set());
       setRfiText("");
       router.replace(`${sectionBasePath}?quote=${row.id}`);
@@ -1287,6 +1433,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       }, []);
       return { ...current, rows: nextRows, grouped_summary: grouped };
     });
+    setHasUnsavedLocalEdits(true);
   }
 
   function formatStockSize(row: MaterialPlan["rows"][number]) {
@@ -1425,6 +1572,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               <Badge variant={quote.stage === "po" ? "secondary" : "outline"}>{stageLabel(quote.stage)}</Badge>
               {revisionLabel(quote) && <Badge variant="outline">{revisionLabel(quote)}</Badge>}
               {saving && <span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving</span>}
+              {!saving && hasUnsavedLocalEdits && <Badge variant="warning">Unsaved edits</Badge>}
             </div>
             <div>
               <h2 className="truncate text-2xl font-semibold tracking-normal">{quote.customer || quote.quote_no || "Untitled enquiry"}</h2>
@@ -1644,6 +1792,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
       {isDraftSection && (
         <>
+          <TechnicalIssuesPanel
+            items={items}
+            onSelectRow={(index) => {
+              setSelectedRows(new Set([index]));
+              setStatusFilter("all");
+            }}
+            onBuildClarification={buildClarificationEmail}
+          />
+          <QuoteTimeline quote={quote} />
           <Card>
             <CardHeader className="sticky top-16 z-20 border-b bg-card/95 backdrop-blur">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -1721,6 +1878,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <Button variant="secondary" onClick={toggleRegretSelected} disabled={!selectedIndices.length}>
                   Toggle regret
                 </Button>
+                {undoItems && (
+                  <Button variant="secondary" onClick={restoreUndoItems}>
+                    <Undo2 className="h-4 w-4" />
+                    {undoItems.label}
+                  </Button>
+                )}
               </div>
 
               <details className="rounded-md border p-3">
@@ -1938,6 +2101,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     onChange={(value) => updateItem(selectedIndices[0], "clarification_note", value)}
                     textarea
                   />
+                  <div className="space-y-1.5">
+                    <Label>Review badges</Label>
+                    <div className="flex min-h-24 flex-wrap content-start gap-1.5 rounded-md border bg-background p-2">
+                      {issueBadgesForItem(items[selectedIndices[0]]).map((badge) => <Badge key={badge} variant="outline">{badge}</Badge>)}
+                      {!issueBadgesForItem(items[selectedIndices[0]]).length && <div className="text-sm text-muted-foreground">No row badges.</div>}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1974,11 +2144,35 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => quote && rfiDraft(quote.id).then((draft) => setRfiText(draft.text)).catch((error) => toast.error(error.message))}
+                      onClick={buildClarificationEmail}
                     >
                       Build RFI email
                     </Button>
                   </div>
+                  <textarea
+                    className="mt-2 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                    value={getString(quote.stage_meta?.clarification_note)}
+                    onChange={(event) => {
+                      const stageMeta = { ...(quote.stage_meta ?? {}), clarification_note: event.target.value };
+                      setQuote((current) => (current ? { ...current, stage_meta: stageMeta } : current));
+                      setHasUnsavedLocalEdits(true);
+                    }}
+                    placeholder="Quote-level clarification context"
+                  />
+                  <Button
+                    className="mt-2"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => savePatch({ stage_meta: appendActivity(quote.stage_meta ?? {}, {
+                      kind: "clarification",
+                      title: "Clarification note saved",
+                      detail: getString(quote.stage_meta?.clarification_note) || "Quote clarification note updated",
+                      user: currentUser.name || currentUser.id,
+                    }) } as Partial<Quote>, "Clarification note saved")}
+                  >
+                    <Save className="h-4 w-4" />
+                    Save note
+                  </Button>
                   <textarea className="mt-2 min-h-32 w-full rounded-md border bg-background px-3 py-2 text-sm" value={rfiText} onChange={(event) => setRfiText(event.target.value)} />
                   {rfiText && (
                     <a

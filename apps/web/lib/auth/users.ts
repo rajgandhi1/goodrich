@@ -1,6 +1,6 @@
 "use client";
 
-export type AppRole = "admin" | "approver" | "sales" | "viewer";
+export type AppRole = "admin" | "management" | "approver" | "sales" | "estimation" | "technical" | "planning" | "purchase" | "viewer";
 
 export type AppUser = {
   id: string;
@@ -16,10 +16,17 @@ export const USERS_CHANGED_EVENT = "gq-users-changed";
 
 export const roleLabels: Record<AppRole, string> = {
   admin: "Admin",
+  management: "Management",
   approver: "Approver",
   sales: "Sales",
+  estimation: "Estimation",
+  technical: "Technical",
+  planning: "Planning",
+  purchase: "Purchase",
   viewer: "Viewer",
 };
+
+const validRoles: AppRole[] = ["admin", "management", "approver", "sales", "estimation", "technical", "planning", "purchase", "viewer"];
 
 const defaultAdmin: AppUser = {
   id: "shashnam@flosil.com",
@@ -43,7 +50,7 @@ function notifyChanged() {
 
 function normalizeUser(user: Partial<AppUser>, fallbackId: string): AppUser {
   const id = String(user.id || fallbackId || crypto.randomUUID()).trim();
-  const role = ["admin", "approver", "sales", "viewer"].includes(String(user.role)) ? user.role as AppRole : "sales";
+  const role = validRoles.includes(String(user.role) as AppRole) ? user.role as AppRole : "sales";
   return {
     id,
     name: String(user.name || user.email || id).trim(),
@@ -153,7 +160,7 @@ export function canManageUsers(role: AppRole) {
 }
 
 export function canApproveQuotes(role: AppRole) {
-  return role === "admin" || role === "approver";
+  return role === "admin" || role === "approver" || role === "management";
 }
 
 export function canEditQuotes(role: AppRole) {
