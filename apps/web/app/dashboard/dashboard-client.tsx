@@ -21,6 +21,7 @@ function pct(value: number) {
 }
 
 function quoteHref(quote: Quote) {
+  if (quote.stage === "po") return `/purchase-orders?quote=${quote.id}`;
   return finalStages.has(quote.stage) ? `/quotes/final?quote=${quote.id}` : `/quotes?quote=${quote.id}`;
 }
 
@@ -98,7 +99,7 @@ export function DashboardClient() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Customer / enquiry</TableHead>
-                    <TableHead>Owner</TableHead>
+                    <TableHead>Sales rep</TableHead>
                     <TableHead>Stage</TableHead>
                     <TableHead>Age</TableHead>
                     <TableHead>Due</TableHead>
@@ -155,7 +156,7 @@ export function DashboardClient() {
                 </div>
               </div>
             ))}
-            {!(metrics?.owner_workload ?? []).length && <div className="text-sm text-muted-foreground">No open owner workload yet.</div>}
+            {!(metrics?.owner_workload ?? []).length && <div className="text-sm text-muted-foreground">No open sales rep workload yet.</div>}
           </CardContent>
         </Card>
       </div>

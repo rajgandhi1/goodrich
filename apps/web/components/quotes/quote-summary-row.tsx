@@ -1,4 +1,4 @@
-import { ArrowRight, ClipboardList, FileSpreadsheet, Layers3, Trash2 } from "lucide-react";
+import { ArrowRight, ClipboardList, FileSpreadsheet, Layers3, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Quote } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,7 @@ export function QuoteSummaryRow({
   onMetaChange: (quote: Quote, patch: Record<string, unknown>) => void;
 }) {
   const isFinalSection = section === "final";
+  const isPoSection = section === "po";
   const isMaterialSection = section === "material";
   const rowQuality = evaluateQuoteQuality(quote, quote.items, quote.quote_data ?? {});
   const highRisks = rowQuality.risks.filter((risk) => risk.severity === "high").length;
@@ -43,7 +44,7 @@ export function QuoteSummaryRow({
       <TableCell>
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
-            {isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : isMaterialSection ? <Layers3 className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
+            {isPoSection ? <ShoppingCart className="h-4 w-4" /> : isFinalSection ? <FileSpreadsheet className="h-4 w-4" /> : isMaterialSection ? <Layers3 className="h-4 w-4" /> : <ClipboardList className="h-4 w-4" />}
           </div>
           <div className="min-w-0">
             <div className="truncate font-medium">{quote.custom_label || quote.customer || quote.quote_no || "Untitled quote"}</div>

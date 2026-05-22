@@ -37,13 +37,16 @@ FIELDS per item (omit a field entirely if value is unknown — never output null
   Variants: "# 150", "#  300", "CL 150", "Class 300" → "150#", "300#"; "PN16", "PN-16" → "PN 16"
 - gasket_type — choose by PHYSICAL CONSTRUCTION described, not by the standard the customer cites (customers often cite the wrong standard):
     * SOFT_CUT — flat sheet cut to shape, single homogeneous material (rubber, CNAF, PTFE, graphite sheet)
+    * SHEET_GASKET — sheet gasket specifically called out by the customer; use when the construction is sheet form rather than generic soft cut
+    * CORRUGATED — corrugated metal/metallic gasket, normally formed metal with optional facing
+    * PLUG_GASKET — plug gasket / plug type gasket, usually a special-purpose formed or sheet gasket
     * SPIRAL_WOUND — alternating metal strip wound with soft filler ("spiral wound", "SW", winding + filler mentioned)
     * RTJ — solid metal ring sitting in a groove (ring joint / RJ / RTJ / ring gasket; oval / octagonal / BX profile)
     * KAMM — metal core/insert with thin soft sealing layer on both faces ("kammprofile", "profile gasket … metal core/insert", "grooved metal core")
     * DJI — double-jacketed: metal jacket fully enclosing a soft filler (heat exchanger style)
     * ISK — insulating gasket kit / flange insulation kit (includes sleeves, washers, kit components)
 - moc — the principal sealing/body material. Populate for EVERY gasket type when the source names a material:
-    * SOFT_CUT: the sheet material (EPDM, NEOPRENE, CNAF, PTFE, VITON, NBR, GRAPHITE SHEET, etc.)
+    * SOFT_CUT / SHEET_GASKET / CORRUGATED / PLUG_GASKET: the sheet/body material (EPDM, NEOPRENE, CNAF, PTFE, VITON, NBR, GRAPHITE SHEET, SS316, CS, etc.)
     * RTJ: the ring metal verbatim (e.g. "SOFT IRON", "F5", "F11", "F22", "2-1/4 Cr - 1 Mo", "SS316", "INCONEL 625")
     * SPIRAL_WOUND: leave moc blank — materials live in sw_* fields
     * KAMM / DJI: jacket or core metal (e.g. "SS316", "CS"); soft layers go in *_filler / *_surface
@@ -472,6 +475,16 @@ _GASKET_TYPE_ALIASES = {
     'SOFT_CUT': 'SOFT_CUT',
     'NON METALLIC': 'SOFT_CUT',
     'NON-METALLIC': 'SOFT_CUT',
+    'SHEET': 'SHEET_GASKET',
+    'SHEET GASKET': 'SHEET_GASKET',
+    'SHEET_GASKET': 'SHEET_GASKET',
+    'CORRUGATED': 'CORRUGATED',
+    'CORRUGATED GASKET': 'CORRUGATED',
+    'CORRUGATED METAL': 'CORRUGATED',
+    'CORRUGATED METALLIC GASKET': 'CORRUGATED',
+    'PLUG': 'PLUG_GASKET',
+    'PLUG GASKET': 'PLUG_GASKET',
+    'PLUG_GASKET': 'PLUG_GASKET',
     'SPIRAL': 'SPIRAL_WOUND',
     'SPIRAL WOUND': 'SPIRAL_WOUND',
     'SPIRAL_WOUND': 'SPIRAL_WOUND',

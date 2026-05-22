@@ -4,6 +4,9 @@ Generates the GGPL internal quote description string from a processed item.
 
 Formats by type:
   SOFT_CUT    : SIZE : {size} X {rating} X {thk}MM THK ,{MOC} ,{face} ,{standard}
+  SHEET_GASKET: SIZE : {size} X {rating} X {thk}MM THK ,SHEET GASKET ,{MOC} ,{face} ,{standard}
+  CORRUGATED  : SIZE : {size} X {rating} X {thk}MM THK ,CORRUGATED GASKET ,{MOC} ,{face} ,{standard}
+  PLUG_GASKET : SIZE : {size} X {rating} X {thk}MM THK ,PLUG GASKET ,{MOC} ,{standard}
   SPIRAL_WOUND: SIZE : {size} X {rating} X {thk}MM THK ,{MOC} {standard}
   RTJ         : SIZE : {ring_no} ,RTJ ,{groove} ,{moc} ,{bhn} BHN HARDNESS ,{standard}
   KAMM        : SIZE: {size} X {rating} X {thk}MM THK,{moc},{standard}
@@ -58,14 +61,22 @@ def format_description(item: dict) -> str:
     size_str = _fmt_size(size, gtype)
     rating_str = _fmt_rating(rating)
 
-    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK', moc]
-    if face:
+    construction = {
+        'SHEET_GASKET': 'SHEET GASKET',
+        'CORRUGATED': 'CORRUGATED GASKET',
+        'PLUG_GASKET': 'PLUG GASKET',
+    }.get(gtype)
+    parts = [f'SIZE : {size_str} X {rating_str} X {_fmt_num(thickness)}MM THK']
+    if construction:
+        parts.append(construction)
+    parts.append(moc)
+    if face and gtype != 'PLUG_GASKET':
         parts.append(face)
     # Spiral wound: special notes (e.g. E.GALV, FLEXIBLE INHIBITED GRAPHITE FILLER)
     # come between MOC and standard per GGPL convention. LOW STRESS is a gasket
     # construction note and is shown with the gasket standard.
-    if gtype == 'SPIRAL_WOUND' and special and str(special).upper() != 'LOW STRESS':
-        parts.append(special)
+    if special and not (gtype == 'SPIRAL_WOUND' and str(special).upper() == 'LOW STRESS'):
+        _append_special_part(parts, special)
     if standard:
         if gtype == 'SPIRAL_WOUND' and special and str(special).upper() == 'LOW STRESS':
             standard = f'{standard} (LOW STRESS)'
@@ -75,6 +86,28 @@ def format_description(item: dict) -> str:
     # SPIRAL_WOUND keeps the standard comma-space separator
     sep = ' ,' if gtype == 'SOFT_CUT' else ', '
     return sep.join(parts)
+
+
+def _special_text(special) -> str:
+    return str(special or '').strip()
+
+
+def _has_special(description: str, special) -> bool:
+    value = _special_text(special)
+    return not value or value.upper() in description.upper()
+
+
+def _append_special_part(parts: list[str], special) -> None:
+    value = _special_text(special)
+    if value and value.upper() not in ', '.join(parts).upper():
+        parts.append(value)
+
+
+def _with_special(description: str, special, sep: str = ', ') -> str:
+    value = _special_text(special)
+    if not description or _has_special(description, value):
+        return description
+    return f'{description}{sep}{value}'
 
 
 _RTJ_COATINGS = ('GALVANISED', 'ZINC PLATED', 'PHOSPHATE COATED', 'NICKEL PLATED', 'CADMIUM PLATED')
@@ -97,6 +130,7 @@ def _fmt_rtj(item: dict) -> str:
     hardness_spec = item.get('rtj_hardness_spec')
     bhn = item.get('rtj_hardness_bhn')
     standard = item.get('standard') or 'ASME B16.20'
+    special = item.get('special')
 
     if not moc:
         return ''
@@ -113,6 +147,7 @@ def _fmt_rtj(item: dict) -> str:
         parts = [f'SIZE : {size_str} X {_fmt_rating(rating)}', 'RTJ', groove, moc]
         if hardness_str:
             parts.append(hardness_str)
+        _append_special_part(parts, special)
         parts.append(standard)
         return ' ,'.join(parts)
 
@@ -121,12 +156,14 @@ def _fmt_rtj(item: dict) -> str:
         parts = [f'SIZE : {ring_no}', moc]
         if hardness_str:
             parts.append(hardness_str)
+        _append_special_part(parts, special)
         parts.append(standard)
         return ' ,'.join(parts)
 
     parts = [f'SIZE : {ring_no}', 'RTJ', groove, moc]
     if hardness_str:
         parts.append(hardness_str)
+    _append_special_part(parts, special)
     parts.append(standard)
     return ' ,'.join(parts)
 
@@ -194,7 +231,7 @@ def _fmt_kamm(item: dict) -> str:
                 ring_suffix = f' + {outer_ring} OUTER RING'
             else:
                 ring_suffix = ''
-            return f'{dims}{body}{ring_suffix}'
+            return _with_special(f'{dims}{body}{ring_suffix}', special)
 
         # Legacy OD/ID format: pre-formatted moc string or no new fields
         moc_str = _kamm_moc_str(core, surface)
@@ -228,6 +265,7 @@ def _fmt_kamm(item: dict) -> str:
         else:
             ring_part = f'{outer_ring} OUTER RING'
         parts = [f'SIZE : {size_str} X {rating_str}{thk_str}', moc_part, ring_part]
+        _append_special_part(parts, item.get('special'))
         if standard:
             parts.append(standard)
         return ', '.join(parts)
@@ -237,6 +275,8 @@ def _fmt_kamm(item: dict) -> str:
     parts = [f'SIZE : {size_str} X {rating_str}{thk_str}']
     if moc_str:
         parts.append(f',{moc_str}')
+    if item.get('special') and not _has_special(''.join(parts), item.get('special')):
+        parts.append(f',{item.get("special")}')
     if standard:
         parts.append(f',{standard}')
     return ''.join(parts)
@@ -281,7 +321,8 @@ def _fmt_dji(item: dict) -> str:
     moc = item.get('moc')
     thk_str = f' X {_fmt_num(thk)}MM THK' if thk else ''
     filler = (item.get('dji_filler') or 'GRAPHITE').strip().upper()
-    special = (item.get('special') or '').upper()
+    special_raw = (item.get('special') or '').strip()
+    special = special_raw.upper()
     dji_face = (item.get('dji_face_type') or '').strip().upper() or None
     dji_id_first = item.get('dji_id_first', False)
 
@@ -292,10 +333,10 @@ def _fmt_dji(item: dict) -> str:
         primary = filler   # inner sealing material → body MOC in output
         jacket  = moc or ''  # jacket material → 'FILLER' label in output
         if primary and jacket:
-            return f'{dims}, {primary} DOUBLE JACKETED GASKET WITH {jacket} FILLER ,{dji_face}'
+            return _with_special(f'{dims}, {primary} DOUBLE JACKETED GASKET WITH {jacket} FILLER ,{dji_face}', special_raw)
         elif primary:
-            return f'{dims}, {primary} DOUBLE JACKETED GASKET ,{dji_face}'
-        return f'{dims}, DOUBLE JACKETED GASKET ,{dji_face}'
+            return _with_special(f'{dims}, {primary} DOUBLE JACKETED GASKET ,{dji_face}', special_raw)
+        return _with_special(f'{dims}, DOUBLE JACKETED GASKET ,{dji_face}', special_raw)
 
     dims_od = f'SIZE : {_fmt_num(od)}MM OD X {_fmt_num(id_)}MM ID{thk_str}'
     dims_id = f'SIZE : {_fmt_num(id_)}MM ID X {_fmt_num(od)}MM OD{thk_str}'
@@ -304,27 +345,27 @@ def _fmt_dji(item: dict) -> str:
     if 'AS PER DRAWING' in special or 'DRAWING' in special:
         if moc:
             filler_str = f'{filler} FILLER' if filler == 'GRAPHITE' else filler
-            return f'{dims_od}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)'
+            return _with_special(f'{dims_od}, DOUBLE JACKETED, {moc} WITH {filler_str} (AS PER DRAWING)', special_raw)
         else:
-            return f'{dims_od}, DOUBLE JACKETED WITH {filler} (AS PER DRAWING)'
+            return _with_special(f'{dims_od}, DOUBLE JACKETED WITH {filler} (AS PER DRAWING)', special_raw)
 
     # 3. Corrugated type (OD-first)
     if 'CORRUGATED' in filler:
         if not moc:
             return ''
         filler_str = filler if filler.endswith('FILLER') else f'{filler} FILLER'
-        return f'{dims_od}, {moc} DOUBLE JACKETED GASKET WITH {filler_str}'
+        return _with_special(f'{dims_od}, {moc} DOUBLE JACKETED GASKET WITH {filler_str}', special_raw)
 
     # 4. ID-first format (TYPE 3 / ID-first input)
     if dji_id_first:
         if not moc:
             return ''
-        return f'{dims_id}, DOUBLE JACKETED,{moc} + {filler} FILLER'
+        return _with_special(f'{dims_id}, DOUBLE JACKETED,{moc} + {filler} FILLER', special_raw)
 
     # 5. Standard piping pattern (OD-first)
     if not moc:
         return ''
-    return f'{dims_od}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED'
+    return _with_special(f'{dims_od}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED', special_raw)
 
 
 def _fmt_isk(item: dict) -> str:

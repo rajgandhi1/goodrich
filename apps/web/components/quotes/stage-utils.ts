@@ -2,11 +2,12 @@ import { Quote } from "@/lib/api";
 
 import { getString } from "./item-validation";
 
-export type QuoteSection = "drafts" | "material" | "final";
+export type QuoteSection = "drafts" | "material" | "final" | "po";
 
 export const DRAFT_STAGES = new Set(["initial", "review"]);
 export const MATERIAL_STAGES = new Set(["initial", "review", "quote_prep", "repricing"]);
 export const FINAL_STAGES = new Set(["quote_prep", "repricing", "sent", "po"]);
+export const PO_STAGES = new Set(["po"]);
 
 export function revisionLabel(quote: Quote): string {
   const revNo = getString(quote.quote_data?.rev_no);

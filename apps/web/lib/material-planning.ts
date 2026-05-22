@@ -7,6 +7,11 @@ const DEFAULT_SPW_METAL_FRACTION = 0.35;
 const DEFAULT_SPW_FILLER_FRACTION = 0.3;
 const DEFAULT_RING_RADIAL_ALLOWANCE_MM = 8;
 const DEFAULT_RING_THICKNESS_MM = 3;
+const DEFAULT_WINDING_STRIP_WIDTH_MM = 4.8;
+const DEFAULT_WINDING_STRIP_THICKNESS_MM = 0.2;
+const DEFAULT_FILLER_TAPE_WIDTH_MM = 6;
+const DEFAULT_FILLER_TAPE_THICKNESS_MM = 1;
+const DEFAULT_PURCHASE_WASTAGE_PERCENT = 7.5;
 
 const DENSITIES_G_PER_CM3: Record<string, number> = {
   CS: 7.85,
@@ -100,11 +105,59 @@ export type StockPlanRow = {
   source_count: number;
 };
 
+export type MaterialBreakdownRow = {
+  reviewed: boolean;
+  line_no: number;
+  gasket_type: string;
+  size_inch: string;
+  pressure_rating: string;
+  thickness: string;
+  winding: string;
+  inner_ring: string;
+  outer_ring: string;
+  filler: string;
+  qty: number;
+  uom: string;
+  series: string;
+  remarks: string;
+  od_mm: number | null;
+  id_mm: number | null;
+  source_rows: number;
+  source_description: string;
+};
+
+export type MaterialInputRow = {
+  material: string;
+  component: string;
+  stock_form: string;
+  purchase_uom: "SHEETS" | "KG" | "COIL" | "RINGS" | "NOS";
+  stock_width_mm: number | null;
+  stock_length_mm: number | string | null;
+  stock_thickness_mm: number | null;
+  density_g_cm3: number;
+  wastage_percent: number;
+  available_qty: number;
+  reserved_qty: number;
+  preferred_vendor: string;
+  lead_time_days: number;
+  rate_per_uom: number;
+  moq: number;
+  notes: string;
+};
+
 export type MaterialPlan = {
   config: {
     sheet_width_mm: number;
     sheet_length_mm: number;
     nesting_efficiency: number;
+    winding_strip_width_mm: number;
+    winding_strip_thickness_mm: number;
+    filler_tape_width_mm: number;
+    filler_tape_thickness_mm: number;
+    ring_radial_allowance_mm: number;
+    ring_thickness_mm: number;
+    purchase_wastage_percent: number;
+    material_inputs: MaterialInputRow[];
   };
   rows: StockPlanRow[];
   summary: Array<{
@@ -130,6 +183,16 @@ export type MaterialPlan = {
 };
 
 export type MaterialPlanInputConfig = Partial<MaterialPlan["config"]>;
+
+export const DEFAULT_MATERIAL_PLANNING_INPUTS = {
+  winding_strip_width_mm: DEFAULT_WINDING_STRIP_WIDTH_MM,
+  winding_strip_thickness_mm: DEFAULT_WINDING_STRIP_THICKNESS_MM,
+  filler_tape_width_mm: DEFAULT_FILLER_TAPE_WIDTH_MM,
+  filler_tape_thickness_mm: DEFAULT_FILLER_TAPE_THICKNESS_MM,
+  ring_radial_allowance_mm: DEFAULT_RING_RADIAL_ALLOWANCE_MM,
+  ring_thickness_mm: DEFAULT_RING_THICKNESS_MM,
+  purchase_wastage_percent: DEFAULT_PURCHASE_WASTAGE_PERCENT,
+};
 
 function text(value: unknown): string {
   return String(value ?? "").trim();
@@ -171,11 +234,55 @@ function positive(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function nullablePositive(value: unknown): number | null {
+  const parsed = num(value, NaN);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function npsValue(size: unknown): number | null {
   const raw = text(size).replace(/["']/g, "").trim();
   if (!raw) return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sizeLabel(size: unknown): string {
+  const raw = text(size);
+  if (!raw) return "";
+  if (/["']/.test(raw)) return raw.replace(/'/g, "\"");
+  const parsed = npsValue(raw);
+  return parsed === null ? raw : `${parsed}"`;
+}
+
+function thicknessText(value: unknown): string {
+  const parsed = nullablePositive(value);
+  return parsed ? `${parsed}${Number.isInteger(parsed) ? ".0" : ""}MM` : text(value);
+}
+
+function remarksFromItem(item: GasketItem): string {
+  const source = [
+    item.raw_description,
+    item.ggpl_description,
+    (item as Record<string, unknown>).remarks,
+    (item as Record<string, unknown>).service,
+  ].map(text).join(" ").toUpperCase();
+  const remarks: string[] = [];
+  if (source.includes("LOW STRESS")) remarks.push("LOW STRESS");
+  if (source.includes("OXYGEN")) remarks.push("OXYGEN SERVICE");
+  if (source.includes("NACE")) remarks.push("NACE");
+  return remarks.join(" & ");
+}
+
+function seriesFromItem(item: GasketItem): string {
+  const explicit = text((item as Record<string, unknown>).series);
+  if (explicit) return explicit.toUpperCase();
+  const source = [item.standard, item.raw_description, item.ggpl_description].map(text).join(" ").toUpperCase();
+  const match = source.match(/SERIES\s+[A-Z0-9]+/);
+  return match ? match[0] : "";
+}
+
+function materialInputKey(material: string, component: string, stockForm: string): string {
+  return `${materialName(material)}|${text(component).toUpperCase()}|${text(stockForm).toUpperCase()}`;
 }
 
 function annulusAreaMm2(odMm: number, idMm: number): number {
@@ -225,6 +332,130 @@ function baseRow(item: GasketItem, component: string, material: string, stockFor
   };
 }
 
+export function buildMaterialBreakdown(items: GasketItem[]): MaterialBreakdownRow[] {
+  const grouped = new Map<string, MaterialBreakdownRow>();
+
+  for (const item of items) {
+    if (item.regret || item.status === "regret") continue;
+    const size = sizeLabel((item as Record<string, unknown>).size ?? (item as Record<string, unknown>).size_norm);
+    const rating = text(item.rating).toUpperCase();
+    const thickness = thicknessText((item as Record<string, unknown>).thickness_mm || (item as Record<string, unknown>).thickness);
+    const gasketType = text(item.gasket_type || "SOFT_CUT").toUpperCase();
+    const winding = materialName((item as Record<string, unknown>).sw_winding_material || item.moc || "");
+    const innerRing = materialName((item as Record<string, unknown>).sw_inner_ring || "");
+    const outerRing = materialName((item as Record<string, unknown>).sw_outer_ring || "");
+    const filler = materialName((item as Record<string, unknown>).sw_filler || "");
+    const uom = text(item.uom || "NOS") || "NOS";
+    const series = seriesFromItem(item);
+    const remarks = remarksFromItem(item);
+    const odMm = nullablePositive((item as Record<string, unknown>).od_mm);
+    const idMm = nullablePositive((item as Record<string, unknown>).id_mm);
+    const key = [
+      gasketType,
+      size,
+      rating,
+      thickness,
+      winding,
+      innerRing,
+      outerRing,
+      filler,
+      uom,
+      series,
+      remarks,
+      odMm ?? "",
+      idMm ?? "",
+    ].join("|");
+    const current = grouped.get(key);
+    if (current) {
+      current.qty += positive(item.quantity, 1);
+      current.source_rows += 1;
+      continue;
+    }
+    grouped.set(key, {
+      reviewed: false,
+      line_no: num(item.line_no, grouped.size + 1),
+      gasket_type: gasketType,
+      size_inch: size,
+      pressure_rating: rating,
+      thickness,
+      winding: winding === "UNSPECIFIED" ? "" : winding,
+      inner_ring: innerRing === "UNSPECIFIED" ? "" : innerRing,
+      outer_ring: outerRing === "UNSPECIFIED" ? "" : outerRing,
+      filler: filler === "UNSPECIFIED" ? "" : filler,
+      qty: positive(item.quantity, 1),
+      uom,
+      series,
+      remarks,
+      od_mm: odMm,
+      id_mm: idMm,
+      source_rows: 1,
+      source_description: text(item.ggpl_description || item.raw_description),
+    });
+  }
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    const leftSize = npsValue(left.size_inch) ?? 0;
+    const rightSize = npsValue(right.size_inch) ?? 0;
+    return leftSize - rightSize || left.pressure_rating.localeCompare(right.pressure_rating) || left.line_no - right.line_no;
+  }).map((row, index) => ({ ...row, line_no: index + 1 }));
+}
+
+function defaultInputFor(material: string, component: string, stockForm: string, config: MaterialPlan["config"]): MaterialInputRow {
+  const upperComponent = component.toUpperCase();
+  const upperStock = stockForm.toUpperCase();
+  const normalizedMaterial = materialName(material);
+  const isFiller = upperComponent.includes("FILLER");
+  const isWinding = upperComponent.includes("WINDING");
+  const isRing = upperComponent.includes("RING");
+  return {
+    material: normalizedMaterial,
+    component,
+    stock_form: stockForm,
+    purchase_uom: isWinding || isFiller ? "KG" : isRing ? "SHEETS" : upperStock.includes("COIL") ? "COIL" : "SHEETS",
+    stock_width_mm: isWinding ? config.winding_strip_width_mm : isFiller ? config.filler_tape_width_mm : config.sheet_width_mm,
+    stock_length_mm: isWinding || isFiller ? "COIL" : config.sheet_length_mm,
+    stock_thickness_mm: isWinding ? config.winding_strip_thickness_mm : isFiller ? config.filler_tape_thickness_mm : isRing ? config.ring_thickness_mm : null,
+    density_g_cm3: density(normalizedMaterial),
+    wastage_percent: config.purchase_wastage_percent,
+    available_qty: 0,
+    reserved_qty: 0,
+    preferred_vendor: "",
+    lead_time_days: 0,
+    rate_per_uom: 0,
+    moq: 0,
+    notes: "",
+  };
+}
+
+export function buildMaterialInputs(breakdown: MaterialBreakdownRow[], inputConfig: MaterialPlanInputConfig = {}): MaterialInputRow[] {
+  const config = normalizeConfig(inputConfig);
+  const inputs = new Map<string, MaterialInputRow>();
+  const add = (material: string, component: string, stockForm: string) => {
+    const normalized = materialName(material);
+    if (!normalized || normalized === "UNSPECIFIED") return;
+    const key = materialInputKey(normalized, component, stockForm);
+    if (!inputs.has(key)) {
+      const base = defaultInputFor(normalized, component, stockForm, config);
+      const existing = config.material_inputs.find((input) => materialInputKey(input.material, input.component, input.stock_form) === key);
+      inputs.set(key, existing ? { ...base, ...existing, material: normalized, component, stock_form: stockForm } : base);
+    }
+  };
+
+  for (const row of breakdown) {
+    const isSpiralWound = row.gasket_type.toUpperCase().includes("SPIRAL");
+    if (isSpiralWound) {
+      add(row.winding, "SPW winding strip", "Strip coil");
+      add(row.filler, "SPW filler tape", "Filler tape");
+      add(row.inner_ring, "SPW inner ring", "Ring sheet/blank");
+      add(row.outer_ring, "SPW outer ring", "Ring sheet/blank");
+    } else {
+      add(row.winding || row.inner_ring || row.outer_ring || row.filler || row.gasket_type, "Gasket material", "Sheet/plate");
+    }
+  }
+
+  return Array.from(inputs.values()).sort((left, right) => left.material.localeCompare(right.material) || left.component.localeCompare(right.component));
+}
+
 function profileSheetStock(material: string, row: MaterialPlanRow, config: MaterialPlan["config"]): { width_mm: number; length_mm: number; thickness_mm: number } {
   const upper = material.toUpperCase();
   const quotedThickness = row.stock_thickness_mm ?? row.thickness_mm;
@@ -261,6 +492,66 @@ function profileCoilStock(component: string, material: string, sourceSize: unkno
     };
   }
   return { width_mm: null, length_mm: null, thickness_mm: 3 };
+}
+
+function approximateEnvelopeFromBreakdown(row: MaterialBreakdownRow): { od_mm: number | null; id_mm: number | null; warning: boolean } {
+  if (row.od_mm && row.id_mm && row.od_mm > row.id_mm) {
+    return { od_mm: row.od_mm, id_mm: row.id_mm, warning: false };
+  }
+  const size = npsValue(row.size_inch);
+  if (!size) return { od_mm: null, id_mm: null, warning: true };
+  const ratingNumber = Number.parseFloat(row.pressure_rating.replace(/[^0-9.]/g, ""));
+  const allowance = Number.isFinite(ratingNumber) && ratingNumber >= 600 ? 85 : 65;
+  const idMm = size * 25.4;
+  return { od_mm: idMm + allowance, id_mm: idMm, warning: true };
+}
+
+function thicknessFromBreakdown(row: MaterialBreakdownRow, fallback = 4.5): number {
+  return positive(row.thickness.replace(/MM/i, ""), fallback);
+}
+
+function componentRowFromBreakdown(row: MaterialBreakdownRow, component: string, materialRaw: string, stockForm: string, basis: string): MaterialPlanRow {
+  const material = materialName(materialRaw || "UNSPECIFIED");
+  return {
+    reviewed: row.reviewed,
+    line_no: row.line_no,
+    gasket_type: row.gasket_type,
+    component,
+    material,
+    stock_form: stockForm,
+    width_mm: null,
+    length_mm: null,
+    stock_thickness_mm: null,
+    quote_qty: positive(row.qty, 1),
+    quote_uom: row.uom || "NOS",
+    od_mm: row.od_mm,
+    id_mm: row.id_mm,
+    thickness_mm: thicknessFromBreakdown(row),
+    blank_area_m2: 0,
+    sheets_required: 0,
+    unit_weight_kg: 0,
+    total_weight_kg: 0,
+    density_g_cm3: density(material),
+    basis,
+    calculation_notes: "",
+    planner_notes: "",
+    description: [row.size_inch, row.pressure_rating, row.series, row.remarks].filter(Boolean).join(" / "),
+  };
+}
+
+function ringRowFromBreakdown(row: MaterialBreakdownRow, component: string, materialRaw: string, boundaryDiaMm: number, config: MaterialPlan["config"], note: string): MaterialPlanRow {
+  const material = materialName(materialRaw || "UNSPECIFIED");
+  const planRow = componentRowFromBreakdown(row, component, material, "Ring sheet/blank", note);
+  const radiusAllowance = positive(config.ring_radial_allowance_mm, DEFAULT_RING_RADIAL_ALLOWANCE_MM);
+  const ringThickness = positive(config.ring_thickness_mm, DEFAULT_RING_THICKNESS_MM);
+  planRow.od_mm = boundaryDiaMm + radiusAllowance;
+  planRow.id_mm = Math.max(boundaryDiaMm - radiusAllowance, 0);
+  planRow.thickness_mm = ringThickness;
+  planRow.blank_area_m2 = blankAreaMm2(planRow.od_mm) / 1_000_000;
+  planRow.unit_weight_kg = annulusWeightKg(planRow.od_mm, planRow.id_mm, ringThickness, material);
+  planRow.calculation_notes = `Uses ${radiusAllowance} mm radial ring allowance and ${ringThickness} mm stock thickness.`;
+  planRow.total_weight_kg = planRow.unit_weight_kg * planRow.quote_qty;
+  return planRow;
 }
 
 function toStockType(row: MaterialPlanRow): string {
@@ -535,6 +826,18 @@ function enrichStockRow(row: Omit<StockPlanRow, "available_qty" | "reserved_qty"
   };
 }
 
+function matchingMaterialInput(row: MaterialPlanRow, stockType: string, config: MaterialPlan["config"]): MaterialInputRow | null {
+  const normalizedMaterial = materialName(row.material);
+  const exactKey = materialInputKey(normalizedMaterial, row.component, row.stock_form);
+  const exact = config.material_inputs.find((input) => materialInputKey(input.material, input.component, input.stock_form) === exactKey);
+  if (exact) return exact;
+  return config.material_inputs.find((input) => {
+    const materialMatches = materialName(input.material) === normalizedMaterial || stockType.toUpperCase().includes(materialName(input.material));
+    const componentMatches = !input.component || row.component.toUpperCase().includes(input.component.toUpperCase()) || input.component.toUpperCase().includes(row.component.toUpperCase());
+    return materialMatches && componentMatches;
+  }) ?? null;
+}
+
 function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["config"]): StockPlanRow[] {
   const grouped = new Map<string, {
     type: string;
@@ -546,6 +849,7 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
     notes: Set<string>;
     planner_notes: string;
     source_count: number;
+    input: MaterialInputRow | null;
   }>();
 
   for (const row of componentRows) {
@@ -589,9 +893,32 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
       };
     }
 
-    const stockType = component.includes("WINDING") || component.includes("FILLER") || component.includes("RTJ")
+    let stockType = component.includes("WINDING") || component.includes("FILLER") || component.includes("RTJ")
       ? toStockType(row)
       : `${material} ${thicknessLabel(profile.thickness_mm ?? 0)} SHEET`;
+    const input = matchingMaterialInput(row, stockType, config);
+    if (input) {
+      profile.width_mm = input.stock_width_mm ?? profile.width_mm;
+      profile.length_mm = input.stock_length_mm ?? profile.length_mm;
+      profile.thickness_mm = input.stock_thickness_mm ?? profile.thickness_mm;
+      if (!component.includes("WINDING") && !component.includes("FILLER") && !component.includes("RTJ")) {
+        const stockWidth = num(profile.width_mm, 0);
+        const stockLength = typeof profile.length_mm === "number" ? profile.length_mm : num(profile.length_mm, 0);
+        const stockThickness = num(profile.thickness_mm, 0);
+        const totalBlankMm2 = row.blank_area_m2 > 0 ? row.blank_area_m2 * 1_000_000 * row.quote_qty : 0;
+        if (stockWidth > 0 && stockLength > 0 && stockThickness > 0 && totalBlankMm2 > 0) {
+          const sheets = sheetsRequired(totalBlankMm2, stockWidth, stockLength, config.nesting_efficiency);
+          profile.reqd_qty_sheets = sheets;
+          profile.reqd_qty_kg = sheets * stockWidth * stockLength * stockThickness * densityKgPerMm3(material);
+        }
+      }
+      const wastageFactor = 1 + Math.max(0, num(input.wastage_percent, config.purchase_wastage_percent)) / 100;
+      if (profile.reqd_qty_kg !== null) profile.reqd_qty_kg *= wastageFactor;
+      if (profile.reqd_qty_sheets !== null) profile.reqd_qty_sheets = Math.ceil(profile.reqd_qty_sheets * wastageFactor);
+      if (!component.includes("WINDING") && !component.includes("FILLER") && !component.includes("RTJ")) {
+        stockType = `${material} ${thicknessLabel(profile.thickness_mm ?? 0)} SHEET`;
+      }
+    }
     const key = `${stockType}|${profile.width_mm ?? ""}|${profile.length_mm ?? ""}|${profile.thickness_mm ?? ""}`;
     const current = grouped.get(key) ?? {
       type: stockType,
@@ -603,6 +930,7 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
       notes: new Set<string>(),
       planner_notes: "",
       source_count: 0,
+      input,
     };
     current.source_count += 1;
     if (profile.reqd_qty_sheets !== null) {
@@ -615,39 +943,131 @@ function toStockRows(componentRows: MaterialPlanRow[], config: MaterialPlan["con
     grouped.set(key, current);
   }
 
-  return Array.from(grouped.values()).map((row, index) => enrichStockRow({
-    reviewed: false,
-    sl_no: index + 1,
-    type: row.type,
-    width_mm: row.width_mm,
-    length_mm: row.length_mm,
-    thickness_mm: row.thickness_mm,
-    reqd_qty_sheets: row.reqd_qty_sheets,
-    reqd_qty_kg: row.reqd_qty_kg,
-    notes: Array.from(row.notes).filter(Boolean).join("; "),
-    planner_notes: "",
-    source_count: row.source_count,
-  }));
+  return Array.from(grouped.values()).map((row, index) => {
+    const enriched = enrichStockRow({
+      reviewed: false,
+      sl_no: index + 1,
+      type: row.type,
+      width_mm: row.width_mm,
+      length_mm: row.length_mm,
+      thickness_mm: row.thickness_mm,
+      reqd_qty_sheets: row.reqd_qty_sheets,
+      reqd_qty_kg: row.reqd_qty_kg,
+      notes: Array.from(row.notes).filter(Boolean).join("; "),
+      planner_notes: "",
+      source_count: row.source_count,
+    });
+    if (!row.input) return enriched;
+    const required = requiredPlanningQty(enriched);
+    const available = num(row.input.available_qty, 0);
+    const reserved = num(row.input.reserved_qty, 0);
+    const shortage = Math.max(0, required + reserved - available);
+    const suggested = Math.max(shortage, num(row.input.moq, 0));
+    return {
+      ...enriched,
+      available_qty: available,
+      reserved_qty: reserved,
+      shortage_qty: shortage,
+      suggested_purchase_qty: suggested,
+      lead_time_days: num(row.input.lead_time_days, 0),
+      preferred_vendor: row.input.preferred_vendor,
+      estimated_material_cost: suggested * num(row.input.rate_per_uom, 0),
+      notes: [enriched.notes, row.input.notes].filter(Boolean).join("; "),
+    };
+  });
 }
 
-export function buildMaterialPlan(items: GasketItem[], inputConfig: MaterialPlanInputConfig = {}): MaterialPlan {
+function normalizeConfig(inputConfig: MaterialPlanInputConfig = {}): MaterialPlan["config"] {
   const sheetWidthMm = positive(inputConfig.sheet_width_mm, DEFAULT_SHEET_WIDTH_MM);
   const sheetLengthMm = positive(inputConfig.sheet_length_mm, DEFAULT_SHEET_LENGTH_MM);
   const nestingEfficiency = Math.max(0.1, Math.min(positive(inputConfig.nesting_efficiency, DEFAULT_NESTING_EFFICIENCY), 1));
-  const config = {
+  return {
     sheet_width_mm: sheetWidthMm,
     sheet_length_mm: sheetLengthMm,
     nesting_efficiency: nestingEfficiency,
+    winding_strip_width_mm: positive(inputConfig.winding_strip_width_mm, DEFAULT_WINDING_STRIP_WIDTH_MM),
+    winding_strip_thickness_mm: positive(inputConfig.winding_strip_thickness_mm, DEFAULT_WINDING_STRIP_THICKNESS_MM),
+    filler_tape_width_mm: positive(inputConfig.filler_tape_width_mm, DEFAULT_FILLER_TAPE_WIDTH_MM),
+    filler_tape_thickness_mm: positive(inputConfig.filler_tape_thickness_mm, DEFAULT_FILLER_TAPE_THICKNESS_MM),
+    ring_radial_allowance_mm: positive(inputConfig.ring_radial_allowance_mm, DEFAULT_RING_RADIAL_ALLOWANCE_MM),
+    ring_thickness_mm: positive(inputConfig.ring_thickness_mm, DEFAULT_RING_THICKNESS_MM),
+    purchase_wastage_percent: Math.max(0, positive(inputConfig.purchase_wastage_percent, DEFAULT_PURCHASE_WASTAGE_PERCENT)),
+    material_inputs: Array.isArray(inputConfig.material_inputs) ? inputConfig.material_inputs : [],
   };
+}
+
+function planBreakdownRow(row: MaterialBreakdownRow, config: MaterialPlan["config"], assumptions: Set<string>, warnings: string[]): MaterialPlanRow[] {
+  const envelope = approximateEnvelopeFromBreakdown(row);
+  if (envelope.warning) {
+    warnings.push(`Breakdown line ${row.line_no}: OD/ID were not available, so phase 2 used an approximate ${row.size_inch || "size"} envelope.`);
+  }
+  const odMm = envelope.od_mm;
+  const idMm = envelope.id_mm;
+  const thkMm = thicknessFromBreakdown(row);
+  const rows: MaterialPlanRow[] = [];
+
+  if (!odMm || !idMm || odMm <= idMm) {
+    const material = row.winding || row.inner_ring || row.outer_ring || row.filler || row.gasket_type;
+    rows.push(componentRowFromBreakdown(row, "Gasket material", material, "Sheet/plate", "Size/dimensions required"));
+    warnings.push(`Breakdown line ${row.line_no}: size or dimensions are missing, so quantity is a placeholder.`);
+    return rows;
+  }
+
+  assumptions.add("Phase 2 stock planning uses the reviewed phase 1 material breakdown as its source.");
+  const isSpiralWound = row.gasket_type.toUpperCase().includes("SPIRAL");
+  if (!isSpiralWound) {
+    const material = row.winding || row.inner_ring || row.outer_ring || row.filler || row.gasket_type;
+    const sheet = componentRowFromBreakdown(row, "Gasket material", material, "Sheet/plate", "Sheet or plate blank");
+    sheet.od_mm = odMm;
+    sheet.id_mm = idMm;
+    sheet.thickness_mm = thkMm;
+    sheet.blank_area_m2 = blankAreaMm2(odMm) / 1_000_000;
+    sheet.unit_weight_kg = annulusWeightKg(odMm, idMm, thkMm, material);
+    sheet.calculation_notes = "Sheet consumption uses a square OD blank. Weight uses annular area.";
+    addRow(rows, sheet);
+    return rows;
+  }
+
+  if (row.winding) {
+    const winding = componentRowFromBreakdown(row, "SPW winding strip", row.winding, "Strip coil", "Winding metal");
+    winding.od_mm = odMm;
+    winding.id_mm = idMm;
+    winding.thickness_mm = thkMm;
+    winding.unit_weight_kg = annulusAreaMm2(odMm, idMm) * thkMm * DEFAULT_SPW_METAL_FRACTION * densityKgPerMm3(row.winding);
+    winding.calculation_notes = `${Math.round(DEFAULT_SPW_METAL_FRACTION * 100)}% compacted metal fraction.`;
+    addRow(rows, winding);
+  }
+  if (row.filler) {
+    const filler = componentRowFromBreakdown(row, "SPW filler tape", row.filler, "Filler tape", "Compressed filler");
+    filler.od_mm = odMm;
+    filler.id_mm = idMm;
+    filler.thickness_mm = thkMm;
+    filler.unit_weight_kg = annulusAreaMm2(odMm, idMm) * thkMm * DEFAULT_SPW_FILLER_FRACTION * densityKgPerMm3(row.filler);
+    filler.calculation_notes = `${Math.round(DEFAULT_SPW_FILLER_FRACTION * 100)}% compacted filler fraction.`;
+    addRow(rows, filler);
+  }
+  if (row.inner_ring) rows.push(ringRowFromBreakdown(row, "SPW inner ring", row.inner_ring, idMm, config, "ID support ring"));
+  if (row.outer_ring) rows.push(ringRowFromBreakdown(row, "SPW outer ring", row.outer_ring, odMm, config, "Centering ring"));
+  return rows;
+}
+
+function buildRowsFromBreakdown(breakdown: MaterialBreakdownRow[], config: MaterialPlan["config"], assumptions: Set<string>, warnings: string[]): MaterialPlanRow[] {
+  return breakdown.flatMap((row) => planBreakdownRow(row, config, assumptions, warnings));
+}
+
+export function buildMaterialPlan(items: GasketItem[], inputConfig: MaterialPlanInputConfig = {}, breakdown?: MaterialBreakdownRow[]): MaterialPlan {
+  const config = normalizeConfig(inputConfig);
   const componentRows: MaterialPlanRow[] = [];
   const assumptions = new Set<string>([
-    `Sheet rows use ${sheetWidthMm} x ${sheetLengthMm} mm stock and ${Math.round(nestingEfficiency * 100)}% nesting efficiency.`,
+    `Sheet rows use ${config.sheet_width_mm} x ${config.sheet_length_mm} mm stock and ${Math.round(config.nesting_efficiency * 100)}% nesting efficiency.`,
     "Coil, filler, and forged or rolled ring rows are weight-based; sheet dimensions are not applied to those stock forms.",
     "Quantities are planning estimates and should be checked against approved drawings, nesting, and available stock.",
   ]);
   const warnings: string[] = [];
 
-  for (const item of items) {
+  if (breakdown?.length) {
+    componentRows.push(...buildRowsFromBreakdown(breakdown, config, assumptions, warnings));
+  } else for (const item of items) {
     if (item.regret || item.status === "regret") continue;
     const type = text(item.gasket_type || "SOFT_CUT").toUpperCase();
     let planned: MaterialPlanRow[] = [];

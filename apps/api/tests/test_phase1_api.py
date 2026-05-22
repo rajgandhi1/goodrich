@@ -52,7 +52,27 @@ def test_quote_workflow_exports_and_tenant_isolation():
     assert recomputed.status_code == 200
     assert "SIZE : 4\"" in recomputed.json()[0]["ggpl_description"]
 
-    locked_pdf = client.post(f"/api/v1/quotes/{quote_id}/exports/pdf", headers=headers)
+    unapproved_pdf = client.post(f"/api/v1/quotes/{quote_id}/exports/pdf", headers=headers)
+    assert unapproved_pdf.status_code == 200
+
+    locked = client.post(
+        "/api/v1/quotes",
+        headers=headers,
+        json={
+            "customer": "ACME",
+            "project_ref": "P1",
+            "items": [{**item, "quantity": 1}],
+            "quote_data": {
+                "quote_no": "Q-LOW-MARGIN",
+                "quote_date": "15 May 2026",
+                "unit_prices": [100],
+                "cost_prices": [95],
+                "minimum_margin_pct": 15,
+            },
+        },
+    )
+    assert locked.status_code == 201
+    locked_pdf = client.post(f"/api/v1/quotes/{locked.json()['id']}/exports/pdf", headers=headers)
     assert locked_pdf.status_code == 403
 
     approved = client.patch(

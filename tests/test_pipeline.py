@@ -97,6 +97,24 @@ def test_smart_parse_flags_ambiguous_rubber(openai_client):
     assert any('rubber' in flag.lower() or 'moc' in flag.lower() for flag in item['flags'])
 
 
+def test_plug_gasket_does_not_default_or_print_face_type():
+    item = apply_rules({
+        'raw_description': '2" 150# plug gasket SS316 4.5mm',
+        'gasket_type': 'SOFT_CUT',
+        'size': '2"',
+        'rating': '150#',
+        'moc': 'SS316',
+        'thickness_mm': 4.5,
+        'quantity': 1,
+    })
+    item['ggpl_description'] = format_description(item)
+
+    assert item['gasket_type'] == 'PLUG_GASKET'
+    assert 'PLUG GASKET' in item['ggpl_description']
+    assert 'RF' not in item['ggpl_description']
+    assert 'FF' not in item['ggpl_description']
+
+
 def test_smart_parse_excel_pipeline(openai_client):
     wb = Workbook()
     ws = wb.active

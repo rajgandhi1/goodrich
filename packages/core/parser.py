@@ -381,6 +381,12 @@ def _infer_gasket_type(description: str) -> str | None:
         return 'KAMM'
     if re.search(r'\bDOUBLE[\s\-]?JACKET(?:ED)?\b|\bJACKETED\b|\bJACKET\s+GASKET\b|\bCOPPER\s+JACKET\b', raw):
         return 'DJI'
+    if re.search(r'\bPLUG\s+GASKET\b|\bPLUG\s+TYPE\s+GASKET\b', raw):
+        return 'PLUG_GASKET'
+    if re.search(r'\bCORRUGATED(?:\s+METAL(?:LIC)?)?\s+GASKET\b|\bCORRUGATED\s+GASKET\b', raw):
+        return 'CORRUGATED'
+    if re.search(r'\bSHEET\s+GASKET\b|\bGASKET\s+SHEET\b', raw):
+        return 'SHEET_GASKET'
     if re.search(r'\bGASKET\b.*\bO\.?D\.?\s*\d+.*\bI\.?D\.?\s*\d+', raw, re.IGNORECASE) and re.search(r'\bDRAWING\b|\bPOSITION\b|\bASBESTOS\s+FREE\b', raw):
         return 'DJI'
     if _looks_like_gasket(description):

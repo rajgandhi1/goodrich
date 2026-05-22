@@ -367,7 +367,7 @@ export async function getJobStatus(id: string): Promise<JobStatusRead> {
   return parse<JobStatusRead>(await apiFetch(`${API_BASE}/api/v1/jobs/${id}/status`, { headers: headers() }));
 }
 
-export async function exportQuote(id: string, type: "pdf"): Promise<SignedUrl> {
+export async function exportQuote(id: string, type: "pdf" | "xlsx"): Promise<SignedUrl> {
   return parse<SignedUrl>(
     await apiFetch(`${API_BASE}/api/v1/quotes/${id}/exports/${type}`, {
       method: "POST",

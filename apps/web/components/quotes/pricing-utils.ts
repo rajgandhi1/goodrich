@@ -99,9 +99,7 @@ export function buildQuotePricingSummary({
   if (grossMarginPct !== null && grossMarginPct < minimumMarginPct) {
     approvalReasons.push(`Gross margin ${grossMarginPct.toFixed(1)}% is below ${minimumMarginPct}% threshold`);
   }
-  if (riskCount > 0) {
-    approvalReasons.push(`${riskCount} technical risk${riskCount === 1 ? "" : "s"} still open`);
-  }
+  void riskCount;
 
   return {
     lines,

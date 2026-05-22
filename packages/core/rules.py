@@ -1107,9 +1107,18 @@ def apply_rules(item: dict) -> dict:
     ) and not re.search(r'\bSPIRAL\b|\bCNAF\b|\bPTFE\b|\bRUBBER\b|\bNEOPRENE\b|\bGRAPHITE\s+SHEET\b', raw_desc):
         gasket_type = 'RTJ'
         item['gasket_type'] = 'RTJ'
+    elif gasket_type == 'SOFT_CUT' and re.search(r'\bPLUG\s+GASKET\b|\bPLUG\s+TYPE\s+GASKET\b', raw_desc):
+        gasket_type = 'PLUG_GASKET'
+        item['gasket_type'] = 'PLUG_GASKET'
+    elif gasket_type == 'SOFT_CUT' and re.search(r'\bCORRUGATED(?:\s+METAL(?:LIC)?)?\s+GASKET\b|\bCORRUGATED\s+GASKET\b', raw_desc):
+        gasket_type = 'CORRUGATED'
+        item['gasket_type'] = 'CORRUGATED'
+    elif gasket_type == 'SOFT_CUT' and re.search(r'\bSHEET\s+GASKET\b|\bGASKET\s+SHEET\b', raw_desc):
+        gasket_type = 'SHEET_GASKET'
+        item['gasket_type'] = 'SHEET_GASKET'
 
     # If "non-metallic" is mentioned in the original description, force SOFT_CUT
-    if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT',):
+    if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT', 'SHEET_GASKET'):
         gasket_type = 'SOFT_CUT'
         item['gasket_type'] = 'SOFT_CUT'
 
@@ -1130,7 +1139,7 @@ def apply_rules(item: dict) -> dict:
     elif gasket_type in ('ISK', 'ISK_RTJ'):
         _apply_isk_rules(item, flags, applied_defaults)
         item['dimensions'] = None
-    elif gasket_type not in ('SOFT_CUT',):
+    elif gasket_type not in ('SOFT_CUT', 'SHEET_GASKET', 'CORRUGATED', 'PLUG_GASKET'):
         # Unrecognised gasket type — pass through but flag for manual review
         flags.append(
             f'Unrecognised gasket type "{gasket_type}" — verify and convert to GGPL format manually'
@@ -1169,7 +1178,7 @@ def apply_rules(item: dict) -> dict:
                 flags.append(f'MOC "{normalized}" not in standard list — verify spelling')
 
         # --- Default: face_type ---
-        if not item.get('face_type'):
+        if gasket_type != 'PLUG_GASKET' and not item.get('face_type'):
             if is_pn:
                 item['face_type'] = 'FF'
             else:

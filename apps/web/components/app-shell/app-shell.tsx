@@ -47,6 +47,7 @@ const navSections: NavSection[] = [
     title: "Commercial",
     items: [
       { href: "/quotes/final", label: "Quotation", icon: FileCheck2, roles: ["admin", "management", "approver", "sales"] },
+      { href: "/purchase-orders", label: "Purchase Orders", icon: ShoppingCart, roles: ["admin", "management", "approver", "sales", "planning", "purchase"] },
       { href: "/dashboard", label: "Approvals", icon: LayoutDashboard, roles: ["admin", "management", "approver"] },
     ],
   },

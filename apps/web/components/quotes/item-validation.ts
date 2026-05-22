@@ -34,6 +34,10 @@ function uniqueNotes(notes: string[]): string[] {
   return Array.from(new Set(notes.map((note) => note.trim()).filter(Boolean)));
 }
 
+function isSheetStyleType(type: string): boolean {
+  return ["SOFT_CUT", "SHEET_GASKET", "CORRUGATED", "PLUG_GASKET"].includes(type);
+}
+
 export function derivedNotesFor(item: GasketItem): string[] {
   const notes: string[] = [];
   const type = getString(item.gasket_type).toUpperCase();
@@ -58,9 +62,9 @@ export function derivedNotesFor(item: GasketItem): string[] {
     notes.push("Quantity missing or zero");
   }
 
-  if (type === "SOFT_CUT") {
+  if (isSheetStyleType(type)) {
     if (!hasText(item.thickness_mm)) notes.push("Thickness missing");
-    if (!hasText(item.face_type)) notes.push("Face type missing");
+    if (type !== "PLUG_GASKET" && !hasText(item.face_type)) notes.push("Face type missing");
   }
   if (type === "SPIRAL_WOUND") {
     if (!hasText(item.sw_winding_material)) notes.push("SW winding material missing");
