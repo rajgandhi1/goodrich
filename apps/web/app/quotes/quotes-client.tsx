@@ -106,6 +106,8 @@ const quoteDefaults: Record<string, unknown> = {
   quote_date: new Date().toLocaleDateString("en-GB"),
   rev_no: "0",
   rev_date: "",
+  include_customer_sl_no: false,
+  include_customer_item_code: false,
   buyer_name_address: "",
   customer_enq_no: "",
   attention: "",
@@ -150,17 +152,27 @@ type TableColumn = {
   width?: string;
 };
 
+type GridCell = {
+  rowIndex: number;
+  colIndex: number;
+};
+
+type GridSort = {
+  field: string;
+  direction: "asc" | "desc";
+} | null;
+
 const TABLE_COLUMNS: TableColumn[] = [
   { label: "#", field: "line_no", kind: "readonly", width: "w-16" },
   { label: "Status", field: "status", kind: "readonly", width: "w-20" },
   { label: "Cust Sl.No", field: "customer_sl_no", width: "w-28" },
   { label: "Customer Item Code", field: "customer_item_code", width: "w-36" },
-  { label: "GGPL Description", field: "ggpl_description", kind: "readonly", width: "min-w-96" },
   { label: "Notes / Flags", field: "flags", kind: "readonly", width: "min-w-80" },
   { label: "Qty", field: "quantity", kind: "number", width: "w-24" },
   { label: "UoM", field: "uom", kind: "select", options: UOM_OPTIONS, width: "w-28" },
   { label: "Regret", field: "regret", kind: "checkbox", width: "w-20" },
   { label: "Customer Description", field: "raw_description", kind: "textarea", width: "min-w-96" },
+  { label: "GGPL Description", field: "ggpl_description", kind: "readonly", width: "min-w-96" },
   { label: "Type", field: "gasket_type", kind: "select", options: TYPE_OPTIONS, width: "w-40" },
   { label: "Size", field: "size", width: "w-32" },
   { label: "Size (in)", field: "size_norm", width: "w-32" },
@@ -198,6 +210,8 @@ const TABLE_COLUMNS: TableColumn[] = [
   { label: "AI", field: "confidence", kind: "readonly", width: "w-28" },
 ];
 
+const TABLE_COLUMN_BY_FIELD = new Map(TABLE_COLUMNS.map((column) => [column.field, column]));
+
 const COMPACT_TABLE_COLUMNS: TableColumn[] = [
   { label: "#", field: "line_no", kind: "readonly", width: "w-16" },
   { label: "Status", field: "status", kind: "readonly", width: "w-20" },
@@ -221,6 +235,7 @@ const STREAMLIT_TABLE_FIELDS = [
   "customer_sl_no",
   "customer_item_code",
   "raw_description",
+  "ggpl_description",
   "gasket_type",
   "size",
   "size_norm",
@@ -257,7 +272,6 @@ const STREAMLIT_TABLE_FIELDS = [
   "quantity",
   "uom",
   "special",
-  "ggpl_description",
   "status",
   "confidence",
   "flags",
@@ -278,11 +292,19 @@ const COLUMN_PRESET_FIELDS: Record<string, string[]> = {
 function columnsForPreset(preset: string, large: boolean): TableColumn[] {
   if (large && preset === "review") return COMPACT_TABLE_COLUMNS;
   const fields = COLUMN_PRESET_FIELDS[preset] ?? COLUMN_PRESET_FIELDS.review;
-  return fields.map((field) => TABLE_COLUMNS.find((column) => column.field === field)).filter(Boolean) as TableColumn[];
+  return fields.map((field) => TABLE_COLUMN_BY_FIELD.get(field)).filter(Boolean) as TableColumn[];
 }
 
 function streamlitColumns(): TableColumn[] {
-  return STREAMLIT_TABLE_FIELDS.map((field) => TABLE_COLUMNS.find((column) => column.field === field)).filter(Boolean) as TableColumn[];
+  return STREAMLIT_TABLE_FIELDS.map((field) => TABLE_COLUMN_BY_FIELD.get(field)).filter(Boolean) as TableColumn[];
+}
+
+function sameNumberSet(left: Set<number>, right: Set<number>) {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
 }
 
 const BULK_DEFAULTS = {
@@ -405,13 +427,71 @@ function setItemValue(item: GasketItem, field: string, value: string): GasketIte
   if (["line_no", "quantity", "thickness_mm", "rtj_hardness_bhn", "od_mm", "id_mm", "kamm_core_thk"].includes(field)) {
     return { ...item, [field]: value === "" ? null : Number(value) };
   }
-  if (field === "is_gasket" || field === "dji_id_first" || field === "isk_standard_explicit") {
+  if (field === "is_gasket" || field === "dji_id_first" || field === "isk_standard_explicit" || field === "regret") {
     return { ...item, [field]: value === "true" };
   }
   if (field === "flags") {
     return { ...item, flags: value.split(";").map((part) => part.trim()).filter(Boolean) };
   }
   return { ...item, [field]: value };
+}
+
+function columnValue(item: GasketItem, column: TableColumn): string {
+  if (column.field === "flags") return notesFor(item);
+  if (column.field === "regret") return item.status === "regret" || item.regret === true ? "TRUE" : "FALSE";
+  return getString(item[column.field]);
+}
+
+function isEditableGridColumn(column: TableColumn): boolean {
+  if (column.field === "line_no" || column.field === "status" || column.field === "confidence" || column.field === "flags" || column.field === "ggpl_description") return false;
+  return column.kind !== "readonly";
+}
+
+function parseClipboardTable(text: string): string[][] {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((row, index, rows) => row.length > 0 || index < rows.length - 1)
+    .map((row) => row.split("\t"));
+}
+
+function filterMatches(value: string, rawFilter: string): boolean {
+  const filter = rawFilter.trim();
+  if (!filter) return true;
+  const normalizedValue = value.trim();
+  const upperValue = normalizedValue.toUpperCase();
+  const upperFilter = filter.toUpperCase();
+  if (upperFilter === "EMPTY") return !normalizedValue;
+  if (upperFilter === "!EMPTY") return Boolean(normalizedValue);
+  const comparison = filter.match(/^(>=|<=|>|<|=|!=)\s*(.+)$/);
+  if (comparison) {
+    const [, operator, operand] = comparison;
+    const leftNumber = Number(normalizedValue);
+    const rightNumber = Number(operand);
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+      if (operator === ">=") return leftNumber >= rightNumber;
+      if (operator === "<=") return leftNumber <= rightNumber;
+      if (operator === ">") return leftNumber > rightNumber;
+      if (operator === "<") return leftNumber < rightNumber;
+      if (operator === "=") return leftNumber === rightNumber;
+      return leftNumber !== rightNumber;
+    }
+    if (operator === "=") return upperValue === operand.trim().toUpperCase();
+    if (operator === "!=") return upperValue !== operand.trim().toUpperCase();
+  }
+  return upperValue.includes(upperFilter);
+}
+
+function sortItemsByColumn(left: { item: GasketItem; index: number }, right: { item: GasketItem; index: number }, column: TableColumn, direction: "asc" | "desc") {
+  const leftValue = columnValue(left.item, column);
+  const rightValue = columnValue(right.item, column);
+  const leftNumber = Number(leftValue);
+  const rightNumber = Number(rightValue);
+  const result = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+    ? leftNumber - rightNumber
+    : leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: "base" });
+  return direction === "asc" ? result : -result;
 }
 
 function renumber(items: GasketItem[]): GasketItem[] {
@@ -607,6 +687,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [draftScrollTop, setDraftScrollTop] = React.useState(0);
   const [undoItems, setUndoItems] = React.useState<{ label: string; items: GasketItem[] } | null>(null);
   const [hasUnsavedLocalEdits, setHasUnsavedLocalEdits] = React.useState(false);
+  const [activeCell, setActiveCell] = React.useState<GridCell | null>(null);
+  const [selectionAnchor, setSelectionAnchor] = React.useState<GridCell | null>(null);
+  const [selectionFocus, setSelectionFocus] = React.useState<GridCell | null>(null);
+  const [isSelectingCells, setIsSelectingCells] = React.useState(false);
+  const [columnFilters, setColumnFilters] = React.useState<Record<string, string>>({});
+  const [gridSort, setGridSort] = React.useState<GridSort>(null);
   const isDraftSection = section === "drafts";
   const isMaterialSection = section === "material";
   const isFinalSection = section === "final";
@@ -618,26 +704,69 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
   const items = React.useMemo(() => quote?.items ?? [], [quote?.items]);
   const isLargeDraft = items.length > LARGE_DRAFT_THRESHOLD;
-  const activeTableColumns = tableMode === "spreadsheet" ? streamlitColumns() : columnsForPreset(columnPreset, isLargeDraft);
-  const displayIndices = items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => {
-      if (statusFilter === "issues") return item.status === "check" || item.status === "missing";
-      if (statusFilter === "missing") return item.status === "missing";
-      if (statusFilter === "regret") return item.status === "regret";
-      if (statusFilter !== "all") return itemMatchesSmartFilter(item, statusFilter);
-      return true;
-    })
-    .map(({ index }) => index);
+  const activeTableColumns = React.useMemo(
+    () => (tableMode === "spreadsheet" ? streamlitColumns() : columnsForPreset(columnPreset, isLargeDraft)),
+    [columnPreset, isLargeDraft, tableMode],
+  );
+  const activeColumnFilters = React.useMemo(
+    () => Object.entries(columnFilters).filter(([, value]) => value.trim()),
+    [columnFilters],
+  );
+  const displayEntries = React.useMemo(() => {
+    return items
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => {
+        if (statusFilter === "issues") return item.status === "check" || item.status === "missing";
+        if (statusFilter === "missing") return item.status === "missing";
+        if (statusFilter === "regret") return item.status === "regret";
+        if (statusFilter !== "all") return itemMatchesSmartFilter(item, statusFilter);
+        return true;
+      })
+      .filter(({ item }) => activeColumnFilters.every(([field, value]) => {
+        const column = TABLE_COLUMN_BY_FIELD.get(field);
+        if (!column) return true;
+        return filterMatches(columnValue(item, column), value);
+      }))
+      .sort((left, right) => {
+        if (!gridSort) return left.index - right.index;
+        const column = TABLE_COLUMN_BY_FIELD.get(gridSort.field);
+        if (!column) return left.index - right.index;
+        return sortItemsByColumn(left, right, column, gridSort.direction) || left.index - right.index;
+      });
+  }, [activeColumnFilters, gridSort, items, statusFilter]);
+  const displayIndices = React.useMemo(() => displayEntries.map(({ index }) => index), [displayEntries]);
+  const displayIndexPositions = React.useMemo(() => {
+    const positions = new Map<number, number>();
+    displayIndices.forEach((index, position) => positions.set(index, position));
+    return positions;
+  }, [displayIndices]);
+  const selectionAnchorPosition = selectionAnchor ? displayIndexPositions.get(selectionAnchor.rowIndex) ?? -1 : -1;
+  const selectionFocusPosition = selectionFocus ? displayIndexPositions.get(selectionFocus.rowIndex) ?? -1 : -1;
+  const selectedRange = selectionAnchor && selectionFocus && selectionAnchorPosition >= 0 && selectionFocusPosition >= 0
+    ? {
+        minPosition: Math.min(selectionAnchorPosition, selectionFocusPosition),
+        maxPosition: Math.max(selectionAnchorPosition, selectionFocusPosition),
+        minCol: Math.min(selectionAnchor.colIndex, selectionFocus.colIndex),
+        maxCol: Math.max(selectionAnchor.colIndex, selectionFocus.colIndex),
+      }
+    : null;
+  const selectedCellCount = selectedRange ? (selectedRange.maxPosition - selectedRange.minPosition + 1) * (selectedRange.maxCol - selectedRange.minCol + 1) : 0;
+  const filterCount = activeColumnFilters.length + (gridSort ? 1 : 0);
   const pageCount = Math.max(1, Math.ceil(displayIndices.length / DRAFT_PAGE_SIZE));
   const safeDraftPage = Math.min(draftPage, pageCount - 1);
-  const pagedDisplayIndices = displayIndices.slice(safeDraftPage * DRAFT_PAGE_SIZE, (safeDraftPage + 1) * DRAFT_PAGE_SIZE);
-  const filteredItems = pagedDisplayIndices.map((index) => items[index]);
+  const pagedDisplayIndices = React.useMemo(
+    () => displayIndices.slice(safeDraftPage * DRAFT_PAGE_SIZE, (safeDraftPage + 1) * DRAFT_PAGE_SIZE),
+    [displayIndices, safeDraftPage],
+  );
+  const filteredItems = React.useMemo(() => pagedDisplayIndices.map((index) => items[index]), [items, pagedDisplayIndices]);
   const activeVirtualRowHeight = tableMode === "spreadsheet" ? 42 : VIRTUAL_ROW_HEIGHT;
   const virtualStart = Math.max(0, Math.floor(draftScrollTop / activeVirtualRowHeight) - VIRTUAL_OVERSCAN);
   const virtualCount = Math.ceil(VIRTUAL_VIEWPORT_HEIGHT / activeVirtualRowHeight) + VIRTUAL_OVERSCAN * 2;
   const virtualEnd = Math.min(pagedDisplayIndices.length, virtualStart + virtualCount);
-  const virtualDisplayIndices = pagedDisplayIndices.slice(virtualStart, virtualEnd);
+  const virtualDisplayIndices = React.useMemo(
+    () => pagedDisplayIndices.slice(virtualStart, virtualEnd),
+    [pagedDisplayIndices, virtualEnd, virtualStart],
+  );
   const virtualPaddingTop = virtualStart * activeVirtualRowHeight;
   const virtualPaddingBottom = Math.max(0, (pagedDisplayIndices.length - virtualEnd) * activeVirtualRowHeight);
   const pageStart = displayIndices.length ? safeDraftPage * DRAFT_PAGE_SIZE + 1 : 0;
@@ -648,6 +777,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const finalPageEndIndex = Math.min(items.length, finalPageStartIndex + FINAL_PAGE_SIZE);
   const finalPageItems = items.slice(finalPageStartIndex, finalPageEndIndex);
   const selectedIndices = selectedRows.size ? Array.from(selectedRows).sort((a, b) => a - b) : [];
+  const selectedRowIndex = selectedIndices.length === 1 ? selectedIndices[0] : null;
+  const selectedItem = selectedRowIndex !== null ? items[selectedRowIndex] : null;
+  const selectedItemBadges = selectedItem ? issueBadgesForItem(selectedItem) : [];
   const extractionSummary = React.useMemo(() => {
     const summary = items.reduce<Record<string, number>>((acc, item) => {
       const key = summaryKey(item);
@@ -692,14 +824,28 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   React.useEffect(() => {
     setDraftPage(0);
-  }, [statusFilter, quote?.id]);
+  }, [columnFilters, gridSort, statusFilter, quote?.id]);
 
   React.useEffect(() => {
     setDraftScrollTop(0);
     if (draftGridRef.current) {
       draftGridRef.current.scrollTop = 0;
     }
-  }, [safeDraftPage, statusFilter, quote?.id]);
+  }, [columnFilters, gridSort, safeDraftPage, statusFilter, quote?.id]);
+
+  React.useEffect(() => {
+    setActiveCell(null);
+    setSelectionAnchor(null);
+    setSelectionFocus(null);
+    setIsSelectingCells(false);
+  }, [columnPreset, quote?.id, tableMode]);
+
+  React.useEffect(() => {
+    if (!isSelectingCells) return undefined;
+    const stopSelecting = () => setIsSelectingCells(false);
+    window.addEventListener("mouseup", stopSelecting);
+    return () => window.removeEventListener("mouseup", stopSelecting);
+  }, [isSelectingCells]);
 
   React.useEffect(() => {
     const refresh = () => setCurrentUser(getCurrentAppUser());
@@ -784,11 +930,67 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   async function openQuotationScreen() {
     if (!quote) return;
-    await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>);
-    const advanced = await advanceQuoteStage(quote.id, "quote_prep", "Moved to final quotation", {});
-    setQuote(advanced);
-    setQuotes((prev) => prev.map((row) => (row.id === advanced.id ? quoteSummary(advanced) : row)));
-    router.replace(`/quotes/final?quote=${quote.id}`);
+    const linkedQuoteId = getString(quote.stage_meta?.linked_quote_id);
+    if (linkedQuoteId) {
+      if (hasUnsavedLocalEdits) {
+        const savedEnquiry = await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>);
+        if (savedEnquiry) await syncLinkedQuotationFromEnquiry(savedEnquiry, savedEnquiry.items);
+      }
+      const linked = await getQuote(linkedQuoteId);
+      setQuote(linked);
+      rememberRecentQuote(linked);
+      await refreshQuotes(linked.id);
+      router.replace(`/quotes/final?quote=${linked.id}`);
+      return;
+    }
+    const savedEnquiry = await savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>);
+    if (!savedEnquiry) return;
+    const now = new Date().toISOString();
+    const quotationMeta = appendActivity(
+      {
+        ...(savedEnquiry.stage_meta ?? {}),
+        source_enquiry_id: savedEnquiry.id,
+        source_enquiry_version: savedEnquiry.version,
+        source_enquiry_quote_no: savedEnquiry.quote_no,
+        created_from_enquiry_at: now,
+      },
+      {
+        kind: "workflow",
+        title: "Quotation created",
+        detail: `Created from enquiry ${savedEnquiry.quote_no || savedEnquiry.id}`,
+        user: currentUser.name || currentUser.id,
+      },
+    );
+    const quotation = await createQuote({
+      quote_no: savedEnquiry.quote_no,
+      customer: savedEnquiry.customer,
+      project_ref: savedEnquiry.project_ref,
+      custom_label: savedEnquiry.custom_label,
+      items: cloneJson(savedEnquiry.items),
+      quote_data: cloneJson(savedEnquiry.quote_data),
+      stage: "quote_prep",
+      stage_meta: quotationMeta,
+    } as Partial<Quote>);
+    const enquiryMeta = appendActivity(
+      {
+        ...(savedEnquiry.stage_meta ?? {}),
+        linked_quote_id: quotation.id,
+        linked_quote_no: quotation.quote_no,
+        linked_quote_version: quotation.version,
+        linked_quote_created_at: now,
+      },
+      {
+        kind: "workflow",
+        title: "Linked quotation created",
+        detail: quotation.quote_no || quotation.id,
+        user: currentUser.name || currentUser.id,
+      },
+    );
+    await patchQuote(savedEnquiry.id, { stage_meta: enquiryMeta } as Partial<Quote>);
+    setQuote(quotation);
+    rememberRecentQuote(quotation);
+    await refreshQuotes(quotation.id);
+    router.replace(`/quotes/final?quote=${quotation.id}`);
   }
 
   function closeQuotationScreen() {
@@ -796,7 +998,48 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       router.replace("/quotes");
       return;
     }
-    router.replace(`/quotes?quote=${quote.id}`);
+    const sourceEnquiryId = getString(quote.stage_meta?.source_enquiry_id);
+    router.replace(`/quotes?quote=${sourceEnquiryId || quote.id}`);
+  }
+
+  async function syncLinkedQuotationFromEnquiry(enquiry: Quote, nextItems: GasketItem[]) {
+    if (isFinalSection) return;
+    const linkedQuoteId = getString(enquiry.stage_meta?.linked_quote_id);
+    if (!linkedQuoteId) return;
+    try {
+      const linked = await getQuote(linkedQuoteId);
+      const currentQuoteData = { ...(linked.quote_data ?? {}) };
+      const nextRevNo = nextRevisionNo(currentQuoteData.rev_no);
+      const nextQuoteData = {
+        ...currentQuoteData,
+        rev_no: nextRevNo,
+        rev_date: todayDisplayDate(),
+      };
+      const nextStageMeta = appendActivity(
+        {
+          ...(linked.stage_meta ?? {}),
+          source_enquiry_id: enquiry.id,
+          source_enquiry_version: enquiry.version,
+          source_enquiry_updated_at: enquiry.updated_at,
+        },
+        {
+          kind: "workflow",
+          title: "Quotation revised from enquiry",
+          detail: `Revision ${nextRevNo} created after enquiry update`,
+          user: currentUser.name || currentUser.id,
+        },
+      );
+      const updatedQuotation = await patchQuote(linked.id, {
+        items: cloneJson(nextItems),
+        quote_data: nextQuoteData,
+        quote_no: linked.quote_no || getString(linked.quote_data?.quote_no),
+        stage_meta: nextStageMeta,
+      } as Partial<Quote>);
+      setQuotes((prev) => prev.map((row) => (row.id === updatedQuotation.id ? quoteSummary(updatedQuotation) : row)));
+      toast.success(`Linked quotation revised to rev ${nextRevNo}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Linked quotation revision failed");
+    }
   }
 
   async function removeQuote(row: Quote) {
@@ -846,8 +1089,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     }
   }
 
-  async function savePatch(payload: Partial<Quote>, success?: string) {
-    if (!quote) return;
+  async function savePatch(payload: Partial<Quote>, success?: string): Promise<Quote | undefined> {
+    if (!quote) return undefined;
     setSaving(true);
     try {
       const updated = await patchQuote(quote.id, payload);
@@ -855,8 +1098,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       setHasUnsavedLocalEdits(false);
       setQuotes((prev) => prev.map((row) => (row.id === updated.id ? quoteSummary(updated) : row)));
       if (success) toast.success(success);
+      return updated;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Save failed");
+      return undefined;
     } finally {
       setSaving(false);
     }
@@ -864,7 +1109,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   async function updateItems(nextItems: GasketItem[], success?: string) {
     invalidateMaterialPlan();
-    await savePatch({ items: nextItems } as Partial<Quote>, success);
+    const updated = await savePatch({ items: nextItems } as Partial<Quote>, success);
+    if (updated) await syncLinkedQuotationFromEnquiry(updated, nextItems);
   }
 
   async function runExtraction(sourceType: "email" | "excel", file?: File | null) {
@@ -985,7 +1231,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   async function exportCurrent(type: "pdf", mode: "preview" | "download" = "download") {
     if (!quote) return;
     if (mode === "download" && !canExportFinal) {
-      toast.error("Approval is required before downloading the final quotation");
+      toast.error("Approval is required before downloading the quotation");
       return;
     }
     setExporting(type);
@@ -1336,6 +1582,210 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     }
   }
 
+  function setColumnFilterValue(field: string, value: string) {
+    setColumnFilters((current) => {
+      const next = { ...current };
+      if (value.trim()) next[field] = value;
+      else delete next[field];
+      return next;
+    });
+  }
+
+  function toggleColumnSort(field: string) {
+    setGridSort((current) => {
+      if (!current || current.field !== field) return { field, direction: "asc" };
+      if (current.direction === "asc") return { field, direction: "desc" };
+      return null;
+    });
+  }
+
+  function clearGridFilters() {
+    setColumnFilters({});
+    setGridSort(null);
+  }
+
+  function selectGridCell(rowIndex: number, colIndex: number, extend: boolean) {
+    const nextCell = { rowIndex, colIndex };
+    const anchor = extend && selectionAnchor ? selectionAnchor : nextCell;
+    setActiveCell(nextCell);
+    setSelectionAnchor(anchor);
+    setSelectionFocus(nextCell);
+    const anchorPosition = displayIndexPositions.get(anchor.rowIndex) ?? -1;
+    const focusPosition = displayIndexPositions.get(nextCell.rowIndex) ?? -1;
+    let nextSelectedRows: Set<number>;
+    if (anchorPosition >= 0 && focusPosition >= 0) {
+      const start = Math.min(anchorPosition, focusPosition);
+      const end = Math.max(anchorPosition, focusPosition);
+      nextSelectedRows = new Set(displayIndices.slice(start, end + 1));
+    } else {
+      nextSelectedRows = new Set([rowIndex]);
+    }
+    setSelectedRows((current) => (sameNumberSet(current, nextSelectedRows) ? current : nextSelectedRows));
+  }
+
+  function focusGridCell(rowIndex: number, colIndex: number) {
+    window.requestAnimationFrame(() => {
+      const cell = draftGridRef.current?.querySelector<HTMLElement>(`[data-grid-row="${rowIndex}"][data-grid-col="${colIndex}"]`);
+      const focusTarget = cell?.querySelector<HTMLElement>("input, textarea, button, [tabindex]");
+      (focusTarget ?? cell)?.focus();
+    });
+  }
+
+  function moveActiveGridCell(rowDelta: number, colDelta: number, extend: boolean) {
+    if (!activeCell || !displayIndices.length || !activeTableColumns.length) return;
+    const currentPosition = Math.max(0, displayIndexPositions.get(activeCell.rowIndex) ?? -1);
+    const nextPosition = Math.max(0, Math.min(displayIndices.length - 1, currentPosition + rowDelta));
+    const nextCol = Math.max(0, Math.min(activeTableColumns.length - 1, activeCell.colIndex + colDelta));
+    const nextRow = displayIndices[nextPosition];
+    selectGridCell(nextRow, nextCol, extend);
+    focusGridCell(nextRow, nextCol);
+  }
+
+  function isGridCellSelected(rowIndex: number, colIndex: number) {
+    if (!selectedRange) return false;
+    const position = displayIndexPositions.get(rowIndex) ?? -1;
+    return position >= selectedRange.minPosition && position <= selectedRange.maxPosition && colIndex >= selectedRange.minCol && colIndex <= selectedRange.maxCol;
+  }
+
+  function isActiveGridCell(rowIndex: number, colIndex: number) {
+    return activeCell?.rowIndex === rowIndex && activeCell.colIndex === colIndex;
+  }
+
+  function applyGridPaste(text: string) {
+    const parsed = parseClipboardTable(text);
+    if (!parsed.length || !activeTableColumns.length) return false;
+    const startCell = activeCell ?? selectionAnchor;
+    if (!startCell) return false;
+    const startPosition = selectedRange?.minPosition ?? displayIndexPositions.get(startCell.rowIndex) ?? -1;
+    const startCol = selectedRange?.minCol ?? startCell.colIndex;
+    if (startPosition < 0 || startCol < 0) return false;
+    const singleValueFill = parsed.length === 1 && parsed[0].length === 1 && Boolean(selectedRange && selectedCellCount > 1);
+    const rowCount = singleValueFill && selectedRange ? selectedRange.maxPosition - selectedRange.minPosition + 1 : parsed.length;
+    const colCount = singleValueFill && selectedRange ? selectedRange.maxCol - selectedRange.minCol + 1 : Math.max(...parsed.map((row) => row.length));
+    const next = [...items];
+    let changed = 0;
+    for (let rowOffset = 0; rowOffset < rowCount; rowOffset += 1) {
+      const itemIndex = displayIndices[startPosition + rowOffset];
+      if (itemIndex === undefined || !next[itemIndex]) continue;
+      let row = next[itemIndex];
+      for (let colOffset = 0; colOffset < colCount; colOffset += 1) {
+        const column = activeTableColumns[startCol + colOffset];
+        if (!column || !isEditableGridColumn(column)) continue;
+        const rawValue = singleValueFill ? parsed[0][0] : parsed[rowOffset]?.[colOffset] ?? "";
+        const value = column.kind === "checkbox"
+          ? ["1", "TRUE", "YES", "Y"].includes(rawValue.trim().toUpperCase()) ? "true" : "false"
+          : rawValue;
+        row = setItemValue(row, column.field, value);
+        changed += 1;
+      }
+      next[itemIndex] = row;
+    }
+    if (!changed) {
+      toast.error("Paste did not target any editable cells");
+      return false;
+    }
+    setUndoItems({ label: "Undo paste", items });
+    invalidateMaterialPlan();
+    setQuote((current) => (current ? { ...current, items: next } : current));
+    setHasUnsavedLocalEdits(true);
+    toast.success(`Pasted ${changed} cell${changed === 1 ? "" : "s"}`);
+    return true;
+  }
+
+  function copyGridSelection(event: React.ClipboardEvent<HTMLDivElement>) {
+    if (!selectedRange) return;
+    const rows: string[] = [];
+    for (let position = selectedRange.minPosition; position <= selectedRange.maxPosition; position += 1) {
+      const rowIndex = displayIndices[position];
+      const item = items[rowIndex];
+      if (!item) continue;
+      const values: string[] = [];
+      for (let colIndex = selectedRange.minCol; colIndex <= selectedRange.maxCol; colIndex += 1) {
+        const column = activeTableColumns[colIndex];
+        values.push(column ? columnValue(item, column) : "");
+      }
+      rows.push(values.join("\t"));
+    }
+    event.clipboardData.setData("text/plain", rows.join("\n"));
+    event.preventDefault();
+  }
+
+  function clearSelectedGridCells() {
+    if (!selectedRange) return false;
+    const next = [...items];
+    let changed = 0;
+    for (let position = selectedRange.minPosition; position <= selectedRange.maxPosition; position += 1) {
+      const rowIndex = displayIndices[position];
+      if (rowIndex === undefined || !next[rowIndex]) continue;
+      let row = next[rowIndex];
+      for (let colIndex = selectedRange.minCol; colIndex <= selectedRange.maxCol; colIndex += 1) {
+        const column = activeTableColumns[colIndex];
+        if (!column || !isEditableGridColumn(column)) continue;
+        row = setItemValue(row, column.field, column.kind === "checkbox" ? "false" : "");
+        changed += 1;
+      }
+      next[rowIndex] = row;
+    }
+    if (!changed) return false;
+    setUndoItems({ label: "Undo clear", items });
+    invalidateMaterialPlan();
+    setQuote((current) => (current ? { ...current, items: next } : current));
+    setHasUnsavedLocalEdits(true);
+    return true;
+  }
+
+  function handleGridKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (tableMode !== "spreadsheet") return;
+    const target = event.target as HTMLElement | null;
+    const targetTag = target?.tagName;
+    const inDescriptionEditor = targetTag === "TEXTAREA";
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      if (!displayIndices.length || !activeTableColumns.length) return;
+      event.preventDefault();
+      const first = { rowIndex: displayIndices[0], colIndex: 0 };
+      const last = { rowIndex: displayIndices[displayIndices.length - 1], colIndex: activeTableColumns.length - 1 };
+      setActiveCell(first);
+      setSelectionAnchor(first);
+      setSelectionFocus(last);
+      const nextSelectedRows = new Set(displayIndices);
+      setSelectedRows((current) => (sameNumberSet(current, nextSelectedRows) ? current : nextSelectedRows));
+      return;
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && selectedCellCount > 1) {
+      if (clearSelectedGridCells()) event.preventDefault();
+      return;
+    }
+    if (event.key === "Escape") {
+      setSelectionAnchor(activeCell);
+      setSelectionFocus(activeCell);
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      moveActiveGridCell(0, event.shiftKey ? -1 : 1, false);
+      return;
+    }
+    if (event.key === "Enter" && !inDescriptionEditor) {
+      event.preventDefault();
+      moveActiveGridCell(event.shiftKey ? -1 : 1, 0, false);
+      return;
+    }
+    if (inDescriptionEditor || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActiveGridCell(-1, 0, event.shiftKey);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActiveGridCell(1, 0, event.shiftKey);
+    } else if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveActiveGridCell(0, -1, event.shiftKey);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      moveActiveGridCell(0, 1, event.shiftKey);
+    }
+  }
+
   function renderGridCell(index: number, item: GasketItem, column: TableColumn) {
     const rawValue = item[column.field];
     const validation = validateItemField(item, column.field);
@@ -1535,10 +1985,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 {isFinalSection ? "Quotation queue" : isMaterialSection ? "Material planning queue" : "Enquiry queue"}
               </div>
               <div>
-                <h2 className="text-2xl font-semibold tracking-normal">{isFinalSection ? "Final quotations" : isMaterialSection ? "Material planning" : "Enquiry"}</h2>
+                <h2 className="text-2xl font-semibold tracking-normal">{isFinalSection ? "Quotations" : isMaterialSection ? "Material planning" : "Enquiry"}</h2>
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                   {isFinalSection
-                    ? "Prepared and completed quotations are listed here for final review."
+                    ? "Prepared and completed quotations are listed here for review."
                     : isMaterialSection
                       ? "Select a cleaned enquiry to generate starter stock sizes, estimated weights, and review notes."
                     : "Email and Excel enquiries move through enquiry cleanup before quotation preparation."}
@@ -1563,7 +2013,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         <Card>
           <CardHeader className="gap-3 border-b md:flex-row md:items-center md:justify-between md:space-y-0">
             <div className="space-y-1">
-              <CardTitle>{isFinalSection ? "Final quotation queue" : isMaterialSection ? "Material planning queue" : "Enquiry queue"}</CardTitle>
+              <CardTitle>{isFinalSection ? "Quotation queue" : isMaterialSection ? "Material planning queue" : "Enquiry queue"}</CardTitle>
               <div className="text-sm text-muted-foreground">{visibleQuotes.length} workspace{visibleQuotes.length === 1 ? "" : "s"}</div>
             </div>
             <div className="relative w-full md:max-w-sm">
@@ -1613,7 +2063,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
                             {isFinalSection ? <FileSpreadsheet className="h-5 w-5" /> : isMaterialSection ? <Layers3 className="h-5 w-5" /> : <Inbox className="h-5 w-5" />}
                           </div>
-                          <div>{isFinalSection ? "No quotes are ready for final quotation yet." : isMaterialSection ? "No enquiries are ready for material planning." : "No enquiries match the current search."}</div>
+                          <div>{isFinalSection ? "No quotes are ready for quotation yet." : isMaterialSection ? "No enquiries are ready for material planning." : "No enquiries match the current search."}</div>
                           {isDraftSection && (
                             <Button onClick={startQuote}>
                               <Plus className="h-4 w-4" />
@@ -1675,7 +2125,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </Button>
                 <Button onClick={openQuotationScreen} disabled={!items.length}>
                   <ArrowRight className="h-4 w-4" />
-                  Final Quotation
+                  Quotation
                 </Button>
               </>
             )}
@@ -1885,7 +2335,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     <span>{readyCount} ready</span>
                     <span>{actionCount} need review</span>
                     {selectedIndices.length > 0 && <Badge variant="outline">{selectedIndices.length} selected</Badge>}
-                    {tableMode === "spreadsheet" && <Badge variant="muted">Streamlit-style editor</Badge>}
+                    {tableMode === "spreadsheet" && <Badge variant="muted">{selectedCellCount ? `${selectedCellCount} cells` : "Excel-style editor"}</Badge>}
+                    {filterCount > 0 && <Badge variant="outline">{filterCount} grid filter{filterCount === 1 ? "" : "s"}</Badge>}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1933,7 +2384,18 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     </SelectContent>
                   </Select>
                   <Button variant="secondary" onClick={() => setSelectedRows(new Set(displayIndices))}>Select all</Button>
-                  <Button variant="secondary" onClick={() => setSelectedRows(new Set())}>Clear</Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setSelectedRows(new Set());
+                      setActiveCell(null);
+                      setSelectionAnchor(null);
+                      setSelectionFocus(null);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                  <Button variant="secondary" onClick={clearGridFilters} disabled={!filterCount}>Clear filters</Button>
                   <Button variant="secondary" onClick={addBlankRow}>
                     <Plus className="h-4 w-4" />
                     Row
@@ -1944,7 +2406,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </Button>
                   <Button onClick={openQuotationScreen} disabled={!quote || !items.length}>
                     <ArrowRight className="h-4 w-4" />
-                    Final Quotation
+                    Quotation
                   </Button>
                 </div>
               </div>
@@ -2034,13 +2496,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </div>
               </details>
 
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <div className="min-w-0 space-y-3">
               <div className={`flex flex-wrap items-center justify-between gap-3 border bg-muted/30 px-3 py-2 text-sm ${tableMode === "spreadsheet" ? "rounded-none" : "rounded-md"}`}>
                 <div className="text-muted-foreground">
                   Showing {pageStart}-{pageEnd} of {displayIndices.length} visible row(s).
                   {tableMode === "spreadsheet"
-                    ? " Spreadsheet mode keeps the old Streamlit-style full-column order while preserving validation, filters, undo, and bulk actions."
+                    ? " Click or drag cells to select ranges. Paste Excel rows directly into the selected cell range."
                     : isLargeDraft
-                      ? " Compact columns are shown for large enquiries; select one row to edit all fields below."
+                      ? " Compact columns are shown for large enquiries; select one row to edit in the side panel."
                       : " Large enquiries are paged to keep the browser responsive."}
                 </div>
                 <div className="flex items-center gap-2">
@@ -2066,7 +2530,15 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
               <div
                 ref={draftGridRef}
+                tabIndex={0}
                 className={`max-h-[620px] overflow-auto border ${tableMode === "spreadsheet" ? "rounded-none bg-background" : "rounded-md"}`}
+                onCopy={copyGridSelection}
+                onKeyDown={handleGridKeyDown}
+                onPaste={(event) => {
+                  if (tableMode !== "spreadsheet") return;
+                  const text = event.clipboardData.getData("text/plain");
+                  if (text && applyGridPaste(text)) event.preventDefault();
+                }}
                 onScroll={(event) => setDraftScrollTop(event.currentTarget.scrollTop)}
               >
                 <Table className={`w-max min-w-full border-collapse text-xs ${tableMode === "spreadsheet" ? "[&_td]:border-r [&_td]:border-b [&_th]:border-r [&_th]:border-b" : ""}`}>
@@ -2077,8 +2549,41 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       </TableHead>
                       {tableMode !== "spreadsheet" && <TableHead className="sticky left-10 z-40 h-8 w-20 border-r bg-card px-2 text-center">Tools</TableHead>}
                       {activeTableColumns.map((column) => (
-                        <TableHead key={column.label} className={`${column.width ?? "min-w-36"} h-8 whitespace-nowrap border-r px-2 text-xs font-semibold ${tableMode === "spreadsheet" ? "bg-muted" : "bg-card"}`}>
-                          {column.label}
+                        <TableHead key={column.label} className={`${column.width ?? "min-w-36"} whitespace-nowrap border-r px-2 py-1 text-xs font-semibold ${tableMode === "spreadsheet" ? "bg-muted" : "bg-card"}`}>
+                          <div className="flex min-h-8 items-center justify-between gap-2">
+                            <span>{column.label}</span>
+                            <button
+                              type="button"
+                              className={`inline-flex h-6 w-6 items-center justify-center rounded-sm border text-muted-foreground hover:bg-background ${gridSort?.field === column.field ? "bg-background text-foreground" : ""}`}
+                              onClick={() => toggleColumnSort(column.field)}
+                              title={`Sort ${column.label}`}
+                            >
+                              {gridSort?.field === column.field && gridSort.direction === "desc" ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
+                          {tableMode === "spreadsheet" && (
+                            <div className="relative mt-1">
+                              <Search className="pointer-events-none absolute left-1.5 top-1.5 h-3 w-3 text-muted-foreground" />
+                              <input
+                                className="h-6 w-full min-w-0 rounded-none border bg-background pl-6 pr-6 text-xs font-normal outline-none focus:ring-1 focus:ring-ring"
+                                value={columnFilters[column.field] ?? ""}
+                                onChange={(event) => setColumnFilterValue(column.field, event.target.value)}
+                                onClick={(event) => event.stopPropagation()}
+                                placeholder="Filter"
+                                title="Use text, EMPTY, !EMPTY, >10, <=5, =value, or !=value"
+                              />
+                              {columnFilters[column.field] && (
+                                <button
+                                  type="button"
+                                  className="absolute right-1 top-1 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
+                                  onClick={() => setColumnFilterValue(column.field, "")}
+                                  title={`Clear ${column.label} filter`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </TableHead>
                       ))}
                     </TableRow>
@@ -2099,6 +2604,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           style={{ height: activeVirtualRowHeight }}
                           className={`${tableMode === "spreadsheet" ? "hover:bg-muted/30" : statusClass(item.status)} ${selected ? "outline outline-1 outline-primary" : ""}`}
                           onClick={() => {
+                            if (tableMode === "spreadsheet") return;
                             if (selectedRows.size === 1 && selected) return;
                             setSelectedRows(new Set([index]));
                           }}
@@ -2147,11 +2653,34 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                               </div>
                             </TableCell>
                           )}
-                          {activeTableColumns.map((column) => (
-                            <TableCell key={column.label} className="border-r p-0 align-top">
+                          {activeTableColumns.map((column, colIndex) => {
+                            const selectedCell = tableMode === "spreadsheet" && isGridCellSelected(index, colIndex);
+                            const activeGridCell = tableMode === "spreadsheet" && isActiveGridCell(index, colIndex);
+                            return (
+                            <TableCell
+                              key={column.label}
+                              data-grid-row={index}
+                              data-grid-col={colIndex}
+                              tabIndex={tableMode === "spreadsheet" ? 0 : undefined}
+                              className={`border-r p-0 align-top outline-none ${selectedCell ? "bg-primary/10 ring-1 ring-inset ring-primary/50" : ""} ${activeGridCell ? "ring-2 ring-inset ring-primary" : ""}`}
+                              onMouseDown={(event) => {
+                                if (tableMode !== "spreadsheet") return;
+                                selectGridCell(index, colIndex, event.shiftKey);
+                                setIsSelectingCells(true);
+                              }}
+                              onMouseEnter={() => {
+                                if (tableMode !== "spreadsheet" || !isSelectingCells) return;
+                                selectGridCell(index, colIndex, true);
+                              }}
+                              onFocus={() => {
+                                if (tableMode !== "spreadsheet") return;
+                                if (!isGridCellSelected(index, colIndex)) selectGridCell(index, colIndex, false);
+                              }}
+                            >
                               {renderGridCell(index, item, column)}
                             </TableCell>
-                          ))}
+                          );
+                          })}
                         </TableRow>
                       );
                     })}
@@ -2185,62 +2714,86 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </div>
                 </details>
               )}
+                </div>
 
-              {selectedIndices.length === 1 && items[selectedIndices[0]] && (
-                <div className={`grid gap-3 border bg-muted/20 p-3 lg:grid-cols-4 ${tableMode === "spreadsheet" ? "rounded-none" : "rounded-md"}`}>
-                  <Field
-                    label="Customer description"
-                    value={getString(items[selectedIndices[0]].raw_description)}
-                    onChange={(value) => updateItem(selectedIndices[0], "raw_description", value)}
-                    textarea
-                  />
-                  <Field
-                    label="GGPL description"
-                    value={getString(items[selectedIndices[0]].ggpl_description)}
-                    onChange={(value) => updateItem(selectedIndices[0], "ggpl_description", value)}
-                    textarea
-                  />
-                  <div className="space-y-1.5">
-                    <Label>Missing / review notes</Label>
-                    <textarea
-                      className="min-h-24 w-full resize-none rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground outline-none"
-                      value={notesFor(items[selectedIndices[0]]) || "No missing fields detected for this row."}
-                      readOnly
-                    />
-                  </div>
-                  <Field
-                    label="Clarification note"
-                    value={getString(items[selectedIndices[0]].clarification_note)}
-                    onChange={(value) => updateItem(selectedIndices[0], "clarification_note", value)}
-                    textarea
-                  />
-                  <div className="space-y-1.5">
-                    <Label>Review badges</Label>
-                    <div className="flex min-h-24 flex-wrap content-start gap-1.5 rounded-md border bg-background p-2">
-                      {issueBadgesForItem(items[selectedIndices[0]]).map((badge) => <Badge key={badge} variant="outline">{badge}</Badge>)}
-                      {!issueBadgesForItem(items[selectedIndices[0]]).length && <div className="text-sm text-muted-foreground">No row badges.</div>}
+                <aside className={`h-fit border bg-background p-3 xl:sticky xl:top-32 xl:max-h-[calc(100vh-9rem)] xl:overflow-auto ${tableMode === "spreadsheet" ? "rounded-none" : "rounded-md"}`}>
+                  <div className="flex items-start justify-between gap-3 border-b pb-3">
+                    <div>
+                      <div className="text-sm font-medium">Row editor</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {selectedItem && selectedRowIndex !== null
+                          ? `Row ${selectedRowIndex + 1}`
+                          : selectedIndices.length > 1
+                            ? `${selectedIndices.length} rows selected`
+                            : "Select one row"}
+                      </div>
                     </div>
+                    {selectedItem && selectedRowIndex !== null && <Badge variant="outline">{getString(selectedItem.status) || "draft"}</Badge>}
                   </div>
-                </div>
-              )}
 
-              <details className="rounded-md border p-3">
-                <summary className="cursor-pointer text-sm font-medium">All 50 item fields</summary>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  {selectedIndices.length === 1 ? ITEM_FIELDS.map((field) => {
-                    const idx = selectedIndices[0];
-                    return (
+                  {selectedItem && selectedRowIndex !== null ? (
+                    <div className="mt-3 space-y-3">
                       <Field
-                        key={field}
-                        label={field}
-                        value={getString(items[idx]?.[field])}
-                        onChange={(value) => updateItem(idx, field, value)}
-                        textarea={field === "raw_description" || field === "ggpl_description" || field === "flags"}
+                        label="Customer description"
+                        value={getString(selectedItem.raw_description)}
+                        onChange={(value) => updateItem(selectedRowIndex, "raw_description", value)}
+                        textarea
                       />
-                    );
-                  }) : <div className="text-sm text-muted-foreground">Select one row to edit every model field.</div>}
-                </div>
-              </details>
+                      <Field
+                        label="GGPL description"
+                        value={getString(selectedItem.ggpl_description)}
+                        onChange={(value) => updateItem(selectedRowIndex, "ggpl_description", value)}
+                        textarea
+                      />
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                        <Field label="Quantity" value={getString(selectedItem.quantity)} onChange={(value) => updateItem(selectedRowIndex, "quantity", value)} type="number" />
+                        <Field label="UoM" value={getString(selectedItem.uom)} onChange={(value) => updateItem(selectedRowIndex, "uom", value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Missing / review notes</Label>
+                        <textarea
+                          className="min-h-24 w-full resize-none rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground outline-none"
+                          value={notesFor(selectedItem) || "No missing fields detected for this row."}
+                          readOnly
+                        />
+                      </div>
+                      <Field
+                        label="Clarification note"
+                        value={getString(selectedItem.clarification_note)}
+                        onChange={(value) => updateItem(selectedRowIndex, "clarification_note", value)}
+                        textarea
+                      />
+                      <div className="space-y-1.5">
+                        <Label>Review badges</Label>
+                        <div className="flex min-h-20 flex-wrap content-start gap-1.5 rounded-md border bg-muted/20 p-2">
+                          {selectedItemBadges.map((badge) => <Badge key={badge} variant="outline">{badge}</Badge>)}
+                          {!selectedItemBadges.length && <div className="text-sm text-muted-foreground">No row badges.</div>}
+                        </div>
+                      </div>
+                      <details className="border p-3">
+                        <summary className="cursor-pointer text-sm font-medium">All item fields</summary>
+                        <div className="mt-3 space-y-3">
+                          {ITEM_FIELDS.map((field) => (
+                            <Field
+                              key={field}
+                              label={field}
+                              value={getString(selectedItem[field])}
+                              onChange={(value) => updateItem(selectedRowIndex, field, value)}
+                              textarea={field === "raw_description" || field === "ggpl_description" || field === "flags"}
+                            />
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-md border border-dashed bg-muted/20 p-3 text-sm text-muted-foreground">
+                      {selectedIndices.length > 1
+                        ? "Use bulk edit for multi-row changes, or select one row to edit its details here."
+                        : "Click a row or select a cell to edit its details here."}
+                    </div>
+                  )}
+                </aside>
+              </div>
 
               <div className="grid gap-4 lg:grid-cols-3">
                 <div className="rounded-md border p-3">
@@ -2602,6 +3155,21 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     <div>Risks: <span className="font-medium text-foreground">{qualityReport.risks.length}</span></div>
                     <div>Quote value: <span className="font-medium text-foreground">{grandTotal.toFixed(2)} {currency}</span></div>
                   </div>
+                  {qualityReport.risks.length > 0 && (
+                    <div className="mt-3 rounded-md border bg-muted/30 p-2">
+                      <div className="text-xs font-medium">Technical risk details</div>
+                      <div className="mt-2 space-y-1.5">
+                        {qualityReport.risks.slice(0, 6).map((risk) => (
+                          <div key={`${risk.title}-${risk.detail}`} className="text-xs">
+                            <span className={risk.severity === "high" ? "font-medium text-red-600" : "font-medium text-amber-700"}>{risk.title}</span>
+                            <span className="text-muted-foreground"> - {risk.detail}</span>
+                            {risk.rows?.length ? <span className="text-muted-foreground"> Rows {risk.rows.slice(0, 8).join(", ")}</span> : null}
+                          </div>
+                        ))}
+                        {qualityReport.risks.length > 6 && <div className="text-xs text-muted-foreground">+ {qualityReport.risks.length - 6} more risk checks</div>}
+                      </div>
+                    </div>
+                  )}
                   {pricingSummary.approvalRequired && (
                     <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
                       <div className="font-medium">Approval required</div>
@@ -2647,7 +3215,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     </Button>
                   </div>
                   {!canApprove && <div className="mt-2 text-xs text-muted-foreground">Only admin or approver users can approve or reject.</div>}
-                  {!canExportFinal && <div className="mt-1 text-xs text-muted-foreground">Final PDF download is locked until approval is completed.</div>}
+                  {!canExportFinal && <div className="mt-1 text-xs text-muted-foreground">Quotation PDF download is locked until approval is completed.</div>}
                 </div>
               </div>
 
@@ -2656,6 +3224,32 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <Field label="Quote date" value={getString(qd.quote_date)} onChange={(value) => updateQd("quote_date", value)} />
                 <Field label="Revision no" value={getString(qd.rev_no)} onChange={(value) => updateQd("rev_no", value)} />
                 <Field label="Revision date" value={getString(qd.rev_date)} onChange={(value) => updateQd("rev_date", value)} />
+              </div>
+              <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-2">
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    className="mt-1"
+                    type="checkbox"
+                    checked={Boolean(qd.include_customer_sl_no)}
+                    onChange={(event) => updateQd("include_customer_sl_no", event.target.checked)}
+                  />
+                  <span>
+                    <span className="block font-medium">Use customer SL No. in quotation PDF</span>
+                    <span className="block text-xs text-muted-foreground">When enabled, customer SL No. replaces the default serial number.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    className="mt-1"
+                    type="checkbox"
+                    checked={Boolean(qd.include_customer_item_code)}
+                    onChange={(event) => updateQd("include_customer_item_code", event.target.checked)}
+                  />
+                  <span>
+                    <span className="block font-medium">Add customer item code to quotation PDF</span>
+                    <span className="block text-xs text-muted-foreground">Keep disabled when the customer code is only for internal matching.</span>
+                  </span>
+                </label>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="Buyer name/address" value={getString(qd.buyer_name_address)} onChange={(value) => updateQd("buyer_name_address", value)} textarea />
@@ -2755,7 +3349,18 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           <TableCell>{index + 1}</TableCell>
                           <TableCell><Input className="w-24" value={getString(item.customer_sl_no)} onChange={(event) => updateItem(index, "customer_sl_no", event.target.value)} /></TableCell>
                           <TableCell><Input className="w-36" value={getString(item.customer_item_code)} onChange={(event) => updateItem(index, "customer_item_code", event.target.value)} /></TableCell>
-                          <TableCell className="min-w-96 text-xs">{item.status === "regret" ? "REGRET - CANNOT PRODUCE" : getString(item.ggpl_description || item.raw_description)}</TableCell>
+                          <TableCell className="min-w-96 text-xs">
+                            {item.status === "regret" ? (
+                              "REGRET - CANNOT PRODUCE"
+                            ) : (
+                              <div className="space-y-1">
+                                <div>{getString(item.raw_description || item.ggpl_description)}</div>
+                                {item.ggpl_description && item.ggpl_description !== item.raw_description && (
+                                  <div className="text-muted-foreground">GGPL: {getString(item.ggpl_description)}</div>
+                                )}
+                              </div>
+                            )}
+                          </TableCell>
                           <TableCell><Input className="w-24" type="number" value={getString(item.quantity)} onChange={(event) => updateItem(index, "quantity", event.target.value)} /></TableCell>
                           <TableCell>{getString(item.uom || "NOS")}</TableCell>
                           <TableCell>

@@ -53,6 +53,8 @@ def _sample_quote_data(currency: str = "INR") -> dict:
         "quote_date": "16 May 2026",
         "rev_no": "0",
         "rev_date": "",
+        "include_customer_sl_no": True,
+        "include_customer_item_code": True,
         "buyer_name_address": "ACME Industries\nMumbai",
         "customer_enq_no": "ENQ-123",
         "attention": "Procurement",

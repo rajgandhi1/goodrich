@@ -52,7 +52,7 @@ export function quoteNextAction(quote: Quote): string {
   if (quote.stage_meta?.clarification_status === "required") return "Resolve clarification";
   if (quality.risks.some((risk) => risk.severity === "high")) return "Technical review";
   if (quote.stage === "initial" || quote.stage === "review") return "Complete enquiry review";
-  if (quote.stage === "quote_prep" || quote.stage === "repricing") return "Prepare final quote";
+  if (quote.stage === "quote_prep" || quote.stage === "repricing") return "Prepare quotation";
   if (quote.stage === "sent") return "Follow up customer";
   if (due === "delayed") return "Recover delay";
   return "Monitor";

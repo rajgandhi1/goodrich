@@ -24,13 +24,13 @@ PAGE_W, PAGE_H = A4
 COMPANY_NAME = "GOODRICH GASKET PRIVATE LIMITED"
 ADDRESS_LINES = [
     "Regd.Office & Works :",
-    "40,Velichai Village,Next to: Pasupathi Eswaran Temple,",
-    "Opp.Road to: Pudupakkam Anjaneyar Hill Temple,",
+    "40, Velichai Village, Next to: Pasupathi Eswaran Temple,",
+    "Opp. Road to: Pudupakkam Anjaneyar Hill Temple,",
     "Vandalur-Kelambakkam Road,",
-    "Chennai - 600127,Tamil Nadu, India.",
-    "Tel:+91-44-67400004 - 99/+91-7824017150/7824017151",
+    "Chennai - 600127, Tamil Nadu, India.",
+    "Tel: +91-44-67400004 - 99 / +91-7824017150 / 7824017151",
     "Fax: +91-44-67400003",
-    "Email:goodrichgasket@gmail.com / info@flosil.com",
+    "Email: goodrichgasket@gmail.com / info@flosil.com",
     "Web: www.goodrichgasket.com / www.flosil.com",
 ]
 PAN_LINE = (
@@ -38,15 +38,15 @@ PAN_LINE = (
     "GSTIN NO : 33AABCG2902K1ZY"
 )
 GENERAL_TERMS = [
-    '1) The "purchase" fully acknowledges that he\\she has read the "General Terms of Quote" and agrees to mention the',
+    '1) The purchaser fully acknowledges that they have read the "General Terms of Quote" and agree to mention the',
     "above clauses in the Purchase Order.",
     '2) Products will be shipped only to the "Shipping Address" mentioned in the Purchase Order.',
-    "3) For any dispute jurisdiction will be Chennai city civil court or Chennai High Court Only.",
-    "4) The delivery quoted is subject to standard Force Majeure conditions which will be beyond our control like Lockdowns,",
-    "Natural disasters, Epidemics, Pandemics Act of God, Ordinance of all relevant Government Authorities and if there",
+    "3) For any dispute, jurisdiction will be Chennai city civil court or Chennai High Court only.",
+    "4) The delivery quoted is subject to standard Force Majeure conditions beyond our control, including lockdowns,",
+    "natural disasters, epidemics, pandemics, acts of God, ordinances of relevant Government Authorities, and if there",
     "is a delay on account of the above, Goodrich shall not be considered in default in the performance of its obligations.",
-    "5) The above offer pricing is ONLY applicable for the offered part numbers and quantitites despatched in one lot. GGPL",
-    "reserves the right to change the prices if the order is partial or dispatch in several shipments.",
+    "5) The above offer pricing is ONLY applicable for the offered part numbers and quantities dispatched in one lot. GGPL",
+    "reserves the right to change the prices if the order is partial or dispatched in several shipments.",
     "6) Ex-stock items are subject to prior sales.",
 ]
 
@@ -74,6 +74,14 @@ def _clean(text) -> str:
     return re.sub(r"\s+", " ", str(text or "").replace("\r", "\n")).strip()
 
 
+def _bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
 def _top(y: float) -> float:
     return PAGE_H - y
 
@@ -90,6 +98,10 @@ def _draw_page_outer_border(c: canvas.Canvas):
     c.setLineWidth(1.5)
     # Reference: x0=20.2 y0=40.2 x1=575.2 y1=819.5  (PDF coords, y=0 at bottom)
     c.rect(20.2, 40.2, 555.0, 779.3)
+
+
+def _draw_page_number(c: canvas.Canvas, page_no: int):
+    _draw(c, 555, 793, f"Page {page_no}", size=8, align="right")
 
 
 def _draw(c: canvas.Canvas, x: float, top: float, text: str, size=8, bold=False, align="left"):
@@ -254,17 +266,16 @@ def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
 # Column x-dividers; col widths derived automatically
 ITEM_COLS   = [20.2, 45.5, 83.8, 177.8, 345.5, 404.8, 437.8, 503.8, 575.2]
 _ITEM_COL_W = [ITEM_COLS[i+1] - ITEM_COLS[i] for i in range(len(ITEM_COLS)-1)]
-
 _TBL_TOP = 358   # "top" coord of table top edge
 _TBL_BTM = 785   # "top" coord of table bottom edge
-_PAGE_TURN_Y = 805
+_PAGE_TURN_Y = 793
 
 _PS_HDR  = ParagraphStyle('hdr',  fontName='Times-Bold',    fontSize=9,
                            leading=11, alignment=TA_CENTER)
-_PS_DESC = ParagraphStyle('desc', fontName='Times-Roman',   fontSize=9,
-                           leading=11, alignment=TA_LEFT)
-_PS_CUST = ParagraphStyle('cust', fontName='Times-Italic',  fontSize=7.5,
-                           leading=10, alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
+_PS_DESC = ParagraphStyle('desc', fontName='Times-Roman', fontSize=8.4,
+                          leading=10, alignment=TA_LEFT)
+_PS_GGPL = ParagraphStyle('ggpl', fontName='Times-Roman', fontSize=7.2,
+                          leading=8.5, alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
 
 _ITEM_TSTYLE = TableStyle([
     # Fonts
@@ -293,11 +304,52 @@ _ITEM_TSTYLE = TableStyle([
 ])
 
 
+def _item_columns(quote_data: dict):
+    include_customer_sl = _bool(quote_data.get("include_customer_sl_no"))
+    include_customer_code = _bool(quote_data.get("include_customer_item_code"))
+    first_header = "Cust<br/>SL.NO" if include_customer_sl else "Sl.<br/>No."
+    columns = [
+        ("serial", Paragraph(first_header, _PS_HDR), 25.3),
+        ("description", Paragraph("Material Description", _PS_HDR), 0),
+        ("quantity", Paragraph("Quantity", _PS_HDR), 59.3),
+        ("uom", Paragraph("UOM", _PS_HDR), 33.0),
+        ("unit", None, 66.0),
+        ("total", None, 71.4),
+    ]
+    if include_customer_code:
+        columns.insert(1, ("customer_item_code", Paragraph("Customer<br/>Item Code", _PS_HDR), 70.0))
+    fixed_width = sum(width for _, _, width in columns)
+    desc_width = ITEM_COLS[-1] - ITEM_COLS[0] - fixed_width
+    return [(key, header, desc_width if key == "description" else width) for key, header, width in columns]
+
+
+def _item_table_style(desc_col: int, qty_col: int, uom_col: int, unit_col: int, total_col: int) -> TableStyle:
+    return TableStyle([
+        ('FONTNAME',      (0, 0), (-1,  0), 'Times-Bold'),
+        ('FONTNAME',      (0, 1), (-1, -1), 'Times-Roman'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8.5),
+        ('ALIGN',         (0, 0), (0, -1), 'CENTER'),
+        ('ALIGN',         (desc_col, 0), (desc_col, 0), 'CENTER'),
+        ('ALIGN',         (desc_col, 1), (desc_col, -1), 'LEFT'),
+        ('ALIGN',         (qty_col, 0), (qty_col, -1), 'RIGHT'),
+        ('ALIGN',         (uom_col, 0), (uom_col, -1), 'CENTER'),
+        ('ALIGN',         (unit_col, 0), (total_col, -1), 'RIGHT'),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID',          (0, 0), (-1, -1), 1.0, colors.black),
+        ('LINEABOVE',     (0, 0), (-1,  0), 1.0, colors.black),
+        ('LINEBELOW',     (0, 0), (-1,  0), 1.0, colors.black),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 3),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 3),
+    ])
+
+
 def _description_cell(item: dict):
     """Return a Paragraph for the Material Description cell.
 
-    Shows the GGPL description in normal text, with the customer's original
-    description below it in small italic as a reference.
+    Shows the customer's description first, with the GGPL normalized
+    description below it in smaller text.
     """
     from reportlab.platypus import KeepInFrame
     if item.get("status") == "regret":
@@ -305,17 +357,14 @@ def _description_cell(item: dict):
     ggpl = _clean(item.get("ggpl_description") or item.get("description") or "")
     cust = _clean(item.get("raw_description") or "")
     if cust and cust != ggpl:
-        cust_short = cust[:150] + ("…" if len(cust) > 150 else "")
-        from reportlab.platypus import KeepInFrame
-        from reportlab.lib.units import mm
         return KeepInFrame(0, 0, [
-            Paragraph(ggpl, _PS_DESC),
-            Paragraph(f"Ref: {cust_short}", _PS_CUST),
+            Paragraph(cust, _PS_DESC),
+            Paragraph(f"GGPL: {ggpl}", _PS_GGPL),
         ], mode='shrink')
-    return Paragraph(ggpl, _PS_DESC)
+    return Paragraph(cust or ggpl, _PS_DESC)
 
 
-def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1, currency: str = "INR") -> Table:
+def _make_legacy_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1, currency: str = "INR", quote_data: dict | None = None) -> Table:
     """Build a platypus Table for a slice of items."""
     header = [
         Paragraph("Sl.<br/>No.",                       _PS_HDR),
@@ -346,6 +395,41 @@ def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_
     return t
 
 
+def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1, currency: str = "INR", quote_data: dict | None = None) -> Table:
+    quote_data = quote_data or {}
+    include_customer_sl = _bool(quote_data.get("include_customer_sl_no"))
+    columns = _item_columns(quote_data)
+    keys = [key for key, _, _ in columns]
+    header = [
+        Paragraph(f"Unit Price<br/>{currency}", _PS_HDR) if key == "unit" else
+        Paragraph(f"TOTAL PRICE<br/>{currency}", _PS_HDR) if key == "total" else
+        label
+        for key, label, _ in columns
+    ]
+    rows = [header]
+    for i, (item, unit) in enumerate(zip(items_slice, prices_slice)):
+        qty = _num(item.get("quantity"))
+        total = qty * unit
+        values = {
+            "serial": str(item.get("customer_sl_no") or start_serial + i) if include_customer_sl else str(start_serial + i),
+            "customer_item_code": str(item.get("customer_item_code") or ""),
+            "description": _description_cell(item),
+            "quantity": _fmt_qty(qty),
+            "uom": item.get("uom") or "NOS",
+            "unit": _fmt_amount(unit),
+            "total": _fmt_amount(total),
+        }
+        rows.append([values[key] for key in keys])
+    desc_col = keys.index("description")
+    qty_col = keys.index("quantity")
+    uom_col = keys.index("uom")
+    unit_col = keys.index("unit")
+    total_col = keys.index("total")
+    t = Table(rows, colWidths=[width for _, _, width in columns], repeatRows=1)
+    t.setStyle(_item_table_style(desc_col, qty_col, uom_col, unit_col, total_col))
+    return t
+
+
 def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, start: int):
     _draw_buyer_block(c, quote_data)
 
@@ -368,6 +452,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
             _prices_for(count),
             start_serial=start + 1,
             currency=currency,
+            quote_data=quote_data,
         )
         _, candidate_h = candidate.wrapOn(c, TABLE_W, AVAIL_H)
         if candidate_h > AVAIL_H:
@@ -379,7 +464,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     prices_slice = _prices_for(n_fit)
 
     # ── Build & draw the table ───────────────────────────────────────────────
-    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1, currency=currency)
+    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1, currency=currency, quote_data=quote_data)
     _, tbl_h = t.wrapOn(c, TABLE_W, AVAIL_H)
 
     tbl_pdf_y = _top(_TBL_TOP) - tbl_h             # lower-left in PDF coords
@@ -484,16 +569,16 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
         ("2. Validity",             f"{quote_data.get('validity_days', '7')} DAYS"),
         ("3. Packing &\nforwarding charges", quote_data.get("packing", "INCLUSIVE")),
         ("4. Freight",              quote_data.get("freight", "INCLUSIVE")),
-        ("5. Taxes and Duties",     f"Taxes and duties shall be paid at actuals as applicable at the time of shipment" + (f"-present GST is {_num(quote_data.get('gst_pct'), 18):g}%" if currency == "INR" else "")),
+        ("5. Taxes and Duties",     f"Taxes and duties shall be paid at actuals as applicable at the time of shipment" + (f"; present GST is {_num(quote_data.get('gst_pct'), 18):g}%" if currency == "INR" else "")),
         ("6. Payment Terms",        quote_data.get("payment_terms", "30% ADVANCE & 70% BALANCE BEFORE DISPATCH OF MATERIAL")),
-        ("7. Bank Charges",         quote_data.get("bank_charges", "Bank Charges at the customer side, shall to be customer account, unless agreed prior by Goodrich .")),
+        ("7. Bank Charges",         quote_data.get("bank_charges", "Bank charges at the customer side shall be to customer account unless agreed prior by Goodrich.")),
         ("8. Delivery Terms",       quote_data.get("delivery", "")),
         ("9. Insurance",            quote_data.get("insurance", "TO YOUR ACCOUNT")),
         ("10. Inspection",          quote_data.get("inspection", "")),
         ("11. HSN Code",            quote_data.get("hsn_code", "84841010")),
         ("12. LD Clause",           quote_data.get("ld_clause", "Not Applicable")),
-        ("13. Cancellation",        quote_data.get("cancellation", "Products are manufactured on order and hence Goodrich will not be able to accept cancellation of order or reduction in quantity. The product shall to invoiced as per the PO.")),
-        ("14. Minimum Order Value", quote_data.get("min_order_value", "Minimum Order Value is INR 10,000,No order can be processed below the same. If it is processed, INR 3500 shall be paid extra on document charges.")),
+        ("13. Cancellation",        quote_data.get("cancellation", "Products are manufactured on order and hence Goodrich will not be able to accept cancellation of order or reduction in quantity. The product shall be invoiced as per the PO.")),
+        ("14. Minimum Order Value", quote_data.get("min_order_value", "Minimum order value is INR 10,000. No order can be processed below the same. If processed, INR 3,500 shall be paid extra as document charges.")),
     ]
 
     top = 193
@@ -515,8 +600,8 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     _draw(c, 31, top, "Technical Notes :", size=9, bold=True)
     top += 17
     tech_notes = quote_data.get("technical_notes") or (
-        "1. Cerifications : MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n"
-        "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealablity test and Chemical test certificate."
+        "1. Certifications: MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n"
+        "2. Testing charges for gasket will be extra at actuals for tests other than compression, sealability, and chemical test certificate."
     )
     for raw in str(tech_notes).splitlines():
         for line in _wrap(raw, 535, "Times-Roman", 9):
@@ -541,8 +626,11 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     _draw(c, sig_mid_x, SIG_TOP + 54, "Authorised Signatory",         size=9, bold=True, align="center")
 
     # ── Footer (outside all borders) ─────────────────────────────────────────
-    _draw(c, 30,  SIG_BTM + 12, "Record Created on.:        Revision No :03        Revision Date : 10.10.2019", size=8)
-    _draw(c, 298, SIG_BTM + 24, "This is a Computer Generated Document Signature not Required", size=8, align="center")
+    record_date = quote_data.get("record_created_on") or quote_data.get("quote_date") or ""
+    rev_no = quote_data.get("rev_no") or "0"
+    rev_date = quote_data.get("rev_date") or ""
+    _draw(c, 30, SIG_BTM + 4, f"Record Created on.: {record_date}        Revision No : {rev_no}        Revision Date : {rev_date}", size=8)
+    _draw(c, 298, SIG_BTM + 12, "This is a Computer Generated Document. Signature not required.", size=8, align="center")
 
 
 def build_quotation_pdf(
@@ -557,6 +645,7 @@ def build_quotation_pdf(
     c.setAuthor("Goodrich Gasket Pvt. Ltd.")
 
     idx = 0
+    page_no = 1
     if not items:
         items = []
 
@@ -564,12 +653,15 @@ def build_quotation_pdf(
         _draw_header(c, quote_data, logo_path)
         idx = _draw_items_page(c, items, quote_data, idx)
         _draw_page_outer_border(c)
+        _draw_page_number(c, page_no)
         c.showPage()
+        page_no += 1
         if idx >= len(items):
             break
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
     _draw_terms_page(c, items, quote_data)
     _draw_page_outer_border(c)
+    _draw_page_number(c, page_no)
     c.save()
     return buf.getvalue()
