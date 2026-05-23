@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, RefreshCw, Save, Send } from "lucide-react";
+import { CheckCircle2, FileText, PackageCheck, RefreshCw, Save, Send, ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
 
 import { getString } from "@/components/quotes/item-validation";
@@ -161,19 +161,24 @@ export function VendorEnquiriesClient() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Card>
-        <CardHeader className="gap-3 border-b md:flex-row md:items-center md:justify-between md:space-y-0">
-          <div>
-            <CardTitle>Vendor enquiry workflow</CardTitle>
-            <div className="mt-1 text-sm text-muted-foreground">Create supplier enquiries from quote items or saved material plan rows.</div>
+        <CardHeader className="gap-3 border-b px-4 py-3 md:flex-row md:items-center md:justify-between md:space-y-0">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-background">
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <CardTitle className="text-base">Vendor enquiry workflow</CardTitle>
+              <div className="mt-1 text-xs text-muted-foreground">Create supplier enquiries from quote items or material plan rows.</div>
+            </div>
           </div>
-          <Button variant="secondary" onClick={() => refresh().catch((error) => toast.error(error.message))}>
+          <Button variant="secondary" size="sm" onClick={() => refresh().catch((error) => toast.error(error.message))}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
         </CardHeader>
-        <CardContent className="grid gap-4 pt-5 lg:grid-cols-[320px_1fr]">
+        <CardContent className="grid gap-3 p-3 lg:grid-cols-[300px_1fr]">
           <div className="space-y-2">
             <Label>Quote workspace</Label>
             <Select value={quote?.id ?? ""} onValueChange={(value) => selectQuote(value).catch((error) => toast.error(error.message))}>
@@ -186,7 +191,7 @@ export function VendorEnquiriesClient() {
             </Select>
             {quote && (
               <div className="rounded-md border p-3 text-sm">
-                <div className="font-medium">{quote.customer || quote.quote_no || "Untitled enquiry"}</div>
+                <div className="flex items-center gap-2 font-medium"><FileText className="h-4 w-4 text-muted-foreground" />{quote.customer || quote.quote_no || "Untitled enquiry"}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{quote.project_ref || quote.id}</div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge variant="outline">{stageLabel(quote.stage)}</Badge>
@@ -197,7 +202,11 @@ export function VendorEnquiriesClient() {
             )}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 rounded-md border bg-background p-3 md:grid-cols-4">
+            <div className="flex items-center gap-2 text-sm font-medium md:col-span-4">
+              <PackageCheck className="h-4 w-4" />
+              Create vendor enquiry
+            </div>
             <div className="space-y-1.5">
               <Label>Source</Label>
               <Select value={draft.source} onValueChange={(value) => updateDraft({ source: value as VendorEnquiry["source"] })}>
@@ -248,7 +257,7 @@ export function VendorEnquiriesClient() {
               <Input value={draft.remarks} onChange={(event) => updateDraft({ remarks: event.target.value })} />
             </div>
             <div className="flex items-end">
-              <Button onClick={() => saveEnquiry()} disabled={!quote || saving}>
+              <Button size="sm" onClick={() => saveEnquiry()} disabled={!quote || saving}>
                 <Save className="h-4 w-4" />
                 Save enquiry
               </Button>
@@ -258,8 +267,9 @@ export function VendorEnquiriesClient() {
       </Card>
 
       <Card>
-        <CardHeader className="border-b">
-          <CardTitle>Vendor comparison</CardTitle>
+        <CardHeader className="flex-row items-center justify-between space-y-0 border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base"><PackageCheck className="h-4 w-4" />Vendor comparison</CardTitle>
+          <Badge variant="outline">{enquiries.length} enquiry{enquiries.length === 1 ? "" : "ies"}</Badge>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-auto">

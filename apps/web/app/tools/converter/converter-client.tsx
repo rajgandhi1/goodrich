@@ -71,11 +71,11 @@ function Panel({ group }: { group: (typeof groups)[keyof typeof groups] }) {
   }, [pair]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{group.title}</CardTitle>
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b px-4 py-3">
+        <CardTitle className="flex items-center gap-2 text-base"><Calculator className="h-4 w-4" />{group.title}</CardTitle>
       </CardHeader>
-      <CardContent className="grid gap-3 md:grid-cols-[1fr_180px_auto_1fr_auto] md:items-end">
+      <CardContent className="grid gap-3 p-3 md:grid-cols-[1fr_180px_auto_1fr_auto] md:items-end">
         <div className="space-y-1.5">
           <Label>Value</Label>
           <Input type="number" value={value} onChange={(event) => setValue(event.target.value)} onBlur={run} />
@@ -89,7 +89,7 @@ function Panel({ group }: { group: (typeof groups)[keyof typeof groups] }) {
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={run}>
+        <Button size="sm" onClick={run}>
           <RefreshCw className="h-4 w-4" />
           Convert
         </Button>
@@ -97,7 +97,7 @@ function Panel({ group }: { group: (typeof groups)[keyof typeof groups] }) {
           <Label>Result</Label>
           <Input value={result} readOnly />
         </div>
-        <Button variant="secondary" aria-label="Copy result" onClick={() => navigator.clipboard.writeText(result).then(() => toast.success("Copied"))}>
+        <Button variant="secondary" size="sm" aria-label="Copy result" onClick={() => navigator.clipboard.writeText(result).then(() => toast.success("Copied"))}>
           <Copy className="h-4 w-4" />
         </Button>
       </CardContent>
@@ -107,15 +107,17 @@ function Panel({ group }: { group: (typeof groups)[keyof typeof groups] }) {
 
 export function ConverterClient() {
   return (
-    <Tabs defaultValue="length">
-      <TabsList className="flex h-auto flex-wrap justify-start">
+    <Tabs defaultValue="length" className="space-y-3">
+      <div className="rounded-lg border bg-card p-3 shadow-sm">
+        <TabsList className="flex h-auto flex-wrap justify-start">
         {Object.entries(groups).map(([key, group]) => (
-          <TabsTrigger key={key} value={key}>
-            <Calculator className="mr-2 h-4 w-4" />
+          <TabsTrigger key={key} value={key} className="gap-2">
+            <Calculator className="h-4 w-4" />
             {group.title}
           </TabsTrigger>
         ))}
-      </TabsList>
+        </TabsList>
+      </div>
       {Object.entries(groups).map(([key, group]) => (
         <TabsContent key={key} value={key}>
           <Panel group={group} />

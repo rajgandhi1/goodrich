@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Plus, ShieldCheck, Trash2, UserCog } from "lucide-react";
+import { Bell, Plus, ShieldCheck, Trash2, UserCog } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -100,12 +100,12 @@ export function SettingsClient() {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2">
       <Card>
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base"><UserCog className="h-4 w-4" />Account</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3 p-3">
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <div>
               <div className="text-sm font-medium">Authentication</div>
@@ -135,10 +135,10 @@ export function SettingsClient() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Preferences</CardTitle>
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base"><Bell className="h-4 w-4" />Preferences</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3 p-3">
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <Label htmlFor="email-alerts" className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-secondary" />
@@ -150,13 +150,13 @@ export function SettingsClient() {
       </Card>
 
       <Card className="lg:col-span-2">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UserCog className="h-5 w-5" />
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <UserCog className="h-4 w-4" />
             Admin user management
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3 p-3">
           {!canManage && (
             <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
               Only admin users can add users or change roles.
@@ -164,29 +164,34 @@ export function SettingsClient() {
           )}
 
           {canManage && (
-            <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[1fr_1fr_180px_auto] md:items-end">
-              <div className="space-y-1.5">
-                <Label>Name</Label>
-                <Input value={draftUser.name} onChange={(event) => setDraftUser((user) => ({ ...user, name: event.target.value }))} />
+            <details className="rounded-md border p-3">
+              <summary className="cursor-pointer text-sm font-medium">
+                <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" />Add user</span>
+              </summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_180px_auto] md:items-end">
+                <div className="space-y-1.5">
+                  <Label>Name</Label>
+                  <Input value={draftUser.name} onChange={(event) => setDraftUser((user) => ({ ...user, name: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Email</Label>
+                  <Input type="email" value={draftUser.email} onChange={(event) => setDraftUser((user) => ({ ...user, email: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Role</Label>
+                  <Select value={draftUser.role} onValueChange={(value) => setDraftUser((user) => ({ ...user, role: value as AppRole }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(roleLabels).map(([role, label]) => <SelectItem key={role} value={role}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button size="sm" onClick={addUser}>
+                  <Plus className="h-4 w-4" />
+                  Add
+                </Button>
               </div>
-              <div className="space-y-1.5">
-                <Label>Email</Label>
-                <Input type="email" value={draftUser.email} onChange={(event) => setDraftUser((user) => ({ ...user, email: event.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Role</Label>
-                <Select value={draftUser.role} onValueChange={(value) => setDraftUser((user) => ({ ...user, role: value as AppRole }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(roleLabels).map(([role, label]) => <SelectItem key={role} value={role}>{label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button onClick={addUser}>
-                <Plus className="h-4 w-4" />
-                Add
-              </Button>
-            </div>
+            </details>
           )}
 
           <div className="overflow-auto rounded-md border">

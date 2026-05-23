@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BarChart3, Calculator, FileCheck2, FileQuestion, FileSearch, FileText, Layers3, LayoutDashboard, Menu, Plus, Search, Settings, ShoppingCart, Upload } from "lucide-react";
+import { BarChart3, Calculator, CheckCircle2, FileCheck2, FileQuestion, FileSearch, FileText, Layers3, LayoutDashboard, Menu, Plus, Search, Settings, ShoppingCart, Upload } from "lucide-react";
 
 import { ThemeToggle } from "@/components/app-shell/theme-toggle";
 import { UserMenu } from "@/components/app-shell/user-menu";
@@ -15,8 +15,10 @@ import { cn } from "@/lib/utils";
 type NavItem = {
   href: string;
   label: string;
+  description?: string;
   icon: React.ComponentType<{ className?: string }>;
   roles?: AppRole[];
+  step?: string;
 };
 
 type NavSection = {
@@ -28,42 +30,42 @@ const everyone: AppRole[] = ["admin", "management", "approver", "sales", "estima
 
 const navSections: NavSection[] = [
   {
-    title: "Work Queue",
+    title: "Overview",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "management", "approver", "sales", "estimation", "technical", "planning", "purchase"] },
-      { href: "/quotes", label: "Enquiries", icon: FileText, roles: ["admin", "management", "sales", "estimation", "technical"] },
-      { href: "/history", label: "History", icon: FileSearch, roles: everyone },
+      { href: "/dashboard", label: "Today’s work", description: "Open tasks, delayed work, and team load", icon: LayoutDashboard, roles: ["admin", "management", "approver", "sales", "estimation", "technical", "planning", "purchase"] },
     ],
   },
   {
-    title: "Technical",
+    title: "Main workflow",
     items: [
-      { href: "/quotes", label: "Review Queue", icon: FileText, roles: ["admin", "management", "estimation", "technical"] },
-      { href: "/doc-assistant", label: "Doc Assistant", icon: FileQuestion, roles: ["admin", "management", "sales", "estimation", "technical"] },
-      { href: "/tools/converter", label: "Converter", icon: Calculator, roles: ["admin", "management", "estimation", "technical", "planning", "purchase"] },
+      { href: "/quotes", label: "Prepare enquiry", description: "Capture, clean, review, and assign sales rep", icon: FileText, roles: ["admin", "management", "sales", "estimation", "technical"], step: "1" },
+      { href: "/material-planning", label: "Plan materials", description: "Breakdown sizes and plan stock/purchase", icon: Layers3, roles: ["admin", "management", "planning", "purchase"], step: "2" },
+      { href: "/quotes/final", label: "Prepare quotation", description: "Pricing, terms, approval, and PDF", icon: FileCheck2, roles: ["admin", "management", "approver", "sales"], step: "3" },
+      { href: "/purchase-orders", label: "Customer PO", description: "Accepted quotations and order handover", icon: CheckCircle2, roles: ["admin", "management", "approver", "sales", "planning", "purchase"], step: "4" },
     ],
   },
   {
-    title: "Commercial",
+    title: "Support tools",
     items: [
-      { href: "/quotes/final", label: "Quotation", icon: FileCheck2, roles: ["admin", "management", "approver", "sales"] },
-      { href: "/purchase-orders", label: "Purchase Orders", icon: ShoppingCart, roles: ["admin", "management", "approver", "sales", "planning", "purchase"] },
-      { href: "/dashboard", label: "Approvals", icon: LayoutDashboard, roles: ["admin", "management", "approver"] },
-    ],
-  },
-  {
-    title: "Planning / Purchase",
-    items: [
-      { href: "/material-planning", label: "Material Planning", icon: Layers3, roles: ["admin", "management", "planning", "purchase"] },
-      { href: "/vendor-enquiries", label: "Vendor Enquiries", icon: ShoppingCart, roles: ["admin", "management", "planning", "purchase"] },
+      { href: "/doc-assistant", label: "Read documents", description: "Ask questions from customer files", icon: FileQuestion, roles: ["admin", "management", "sales", "estimation", "technical"] },
+      { href: "/vendor-enquiries", label: "Vendor RFQs", description: "Supplier enquiries and comparison", icon: ShoppingCart, roles: ["admin", "management", "planning", "purchase"] },
+      { href: "/tools/converter", label: "Unit converter", description: "Sizes, pressure, rating, torque", icon: Calculator, roles: ["admin", "management", "estimation", "technical", "planning", "purchase"] },
+      { href: "/history", label: "Activity history", description: "Exports, stage changes, and notes", icon: FileSearch, roles: everyone },
     ],
   },
   {
     title: "Admin",
     items: [
-      { href: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+      { href: "/settings", label: "Users & settings", description: "Roles, preferences, and access", icon: Settings, roles: ["admin"] },
     ],
   },
+];
+
+const workflowGuide = [
+  { step: "1", label: "Prepare enquiry", href: "/quotes" },
+  { step: "2", label: "Plan materials", href: "/material-planning" },
+  { step: "3", label: "Quote customer", href: "/quotes/final" },
+  { step: "4", label: "Receive PO", href: "/purchase-orders" },
 ];
 
 function SidebarNav({ activePath }: { activePath: string }) {
@@ -90,8 +92,31 @@ function SidebarNav({ activePath }: { activePath: string }) {
   const visibleSections = navSections
     .map((section) => ({ ...section, items: section.items.filter((item) => role === "admin" || !item.roles || item.roles.includes(role)) }))
     .filter((section) => section.items.length);
+  const visibleHrefs = new Set(visibleSections.flatMap((section) => section.items.map((item) => item.href)));
+  const visibleWorkflowGuide = workflowGuide.filter((item) => visibleHrefs.has(item.href));
   return (
     <nav className="space-y-5">
+      <div className="rounded-lg border bg-background p-3">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">Quote workflow</div>
+        <div className="space-y-1">
+          {visibleWorkflowGuide.map((item) => {
+            const active = activePath === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground",
+                  active && "bg-primary/10 text-foreground",
+                )}
+              >
+                <span className={cn("flex h-5 w-5 items-center justify-center rounded-full border text-[11px]", active && "border-primary bg-primary text-primary-foreground")}>{item.step}</span>
+                <span className="truncate">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
       {visibleSections.map((section) => (
         <div key={section.title} className="space-y-1">
           <div className="px-3 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">{section.title}</div>
@@ -103,12 +128,19 @@ function SidebarNav({ activePath }: { activePath: string }) {
                 key={`${section.title}-${item.href}-${item.label}`}
                 href={item.href}
                 className={cn(
-                  "flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  "flex items-start gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
                   active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
                 )}
               >
-                <Icon className="h-4 w-4" />
-                {item.label}
+                {item.step ? (
+                  <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px]", active ? "border-primary-foreground" : "border-border")}>{item.step}</span>
+                ) : (
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <span className="min-w-0">
+                  <span className="block truncate">{item.label}</span>
+                  {item.description && <span className={cn("block truncate text-[11px] font-normal", active ? "text-primary-foreground/80" : "text-muted-foreground")}>{item.description}</span>}
+                </span>
               </Link>
             );
           })}
@@ -145,7 +177,7 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen bg-background">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-card lg:block">
+      <aside className="fixed inset-y-0 left-0 hidden w-72 border-r bg-card lg:block">
         <div className="flex h-16 items-center gap-3 border-b px-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <BarChart3 className="h-5 w-5" />
@@ -160,7 +192,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="lg:pl-64">
+      <div className="lg:pl-72">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <Sheet>

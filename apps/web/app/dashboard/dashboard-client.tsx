@@ -63,21 +63,28 @@ export function DashboardClient() {
   const stageMax = Math.max(1, ...Object.values(metrics?.stage_counts ?? {}));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-normal">Operations dashboard</h1>
-          <div className="text-sm text-muted-foreground">
-            {metrics?.generated_at ? `Updated ${new Date(metrics.generated_at).toLocaleString("en-GB")}` : "Quote control room"}
+    <div className="space-y-4">
+      <div className="rounded-lg border bg-card p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
+              <ClipboardList className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold tracking-normal">Operations dashboard</h1>
+              <div className="text-xs text-muted-foreground">
+                {metrics?.generated_at ? `Updated ${new Date(metrics.generated_at).toLocaleString("en-GB")}` : "Quote control room"}
+              </div>
+            </div>
           </div>
+          <Button variant="secondary" size="sm" onClick={refresh}>
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
         </div>
-        <Button variant="secondary" onClick={refresh}>
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Intake" value={String(metrics?.new_enquiries_today ?? 0)} hint="New enquiries today" />
         <MetricCard label="Review" value={String(metrics?.pending_review ?? 0)} hint="Pending technical review" />
         <MetricCard label="Blocked" value={String(metrics?.clarification_required ?? 0)} hint="Clarifications required" />
@@ -85,12 +92,12 @@ export function DashboardClient() {
         <MetricCard label="Open value" value={formatCurrencyValue(metrics?.open_quote_value ?? metrics?.total_quote_value ?? 0)} hint={`${metrics?.high_value_enquiries ?? 0} high-value enquiries`} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         {urgent.length ? (
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarClock className="h-5 w-5" />
+            <CardHeader className="border-b px-4 py-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarClock className="h-4 w-4" />
                 Urgent work
               </CardTitle>
             </CardHeader>
@@ -138,9 +145,9 @@ export function DashboardClient() {
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
+          <CardHeader className="border-b px-4 py-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4" />
               Team workload
             </CardTitle>
           </CardHeader>
@@ -161,10 +168,10 @@ export function DashboardClient() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle>Stage funnel</CardTitle>
+          <CardHeader className="border-b px-4 py-3">
+            <CardTitle className="flex items-center gap-2 text-base"><ClipboardList className="h-4 w-4" />Stage funnel</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {Object.entries(metrics?.stage_counts ?? {}).map(([stage, count]) => (
@@ -180,8 +187,8 @@ export function DashboardClient() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle>Gasket type distribution</CardTitle>
+          <CardHeader className="border-b px-4 py-3">
+            <CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4" />Gasket type distribution</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {Object.entries(metrics?.gasket_type_distribution ?? {}).map(([type, count]) => (
@@ -198,7 +205,7 @@ export function DashboardClient() {
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-3">
         <EmptyState
           icon={FileText}
           title="Quote preparation"

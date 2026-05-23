@@ -1,6 +1,9 @@
+"use client";
+
 import { ArrowRight, ClipboardList, FileSpreadsheet, Layers3, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Quote } from "@/lib/api";
+import { getAppUsers, roleLabels } from "@/lib/auth/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +13,8 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { evaluateQuoteQuality } from "./quality-utils";
 import { formatCurrencyValue, quoteAgeDays, quoteDueState, quoteEstimatedValue, quoteNextAction } from "./queue-utils";
 import { QuoteSection, revisionLabel, stageLabel } from "./stage-utils";
+
+const CUSTOM_SALES_REP_VALUE = "__custom_sales_rep__";
 
 function ProgressBar({ value }: { value: number }) {
   const width = Math.max(0, Math.min(100, Math.round(value)));
@@ -38,6 +43,15 @@ export function QuoteSummaryRow({
   const isMaterialSection = section === "material";
   const rowQuality = evaluateQuoteQuality(quote, quote.items, quote.quote_data ?? {});
   const highRisks = rowQuality.risks.filter((risk) => risk.severity === "high").length;
+  const salesRepUsers = getAppUsers()
+    .filter((user) => user.active)
+    .sort((left, right) => {
+      const leftRank = left.role === "sales" ? 0 : 1;
+      const rightRank = right.role === "sales" ? 0 : 1;
+      return leftRank - rightRank || left.name.localeCompare(right.name);
+    });
+  const selectedOwnerId = String(quote.stage_meta?.owner_id || "");
+  const selectedOwnerValue = salesRepUsers.some((user) => user.id === selectedOwnerId) ? selectedOwnerId : CUSTOM_SALES_REP_VALUE;
 
   return (
     <TableRow className="cursor-pointer hover:bg-muted/60" onClick={() => onOpen(quote)}>
@@ -58,13 +72,32 @@ export function QuoteSummaryRow({
         </div>
       </TableCell>
       <TableCell>
-        <Input
-          className="h-8 w-32"
-          defaultValue={String(quote.stage_meta?.owner_name || "")}
-          placeholder="Unassigned"
-          onClick={(event) => event.stopPropagation()}
-          onBlur={(event) => onMetaChange(quote, { owner_name: event.target.value, owner_id: event.target.value.trim().toLowerCase().replace(/\s+/g, "-") || "" })}
-        />
+        <Select
+          value={selectedOwnerValue}
+          onValueChange={(value) => {
+            if (value === CUSTOM_SALES_REP_VALUE) return;
+            const user = salesRepUsers.find((row) => row.id === value);
+            if (!user) return;
+            onMetaChange(quote, {
+              owner_id: user.id,
+              owner_name: user.name,
+              owner_email: user.email,
+              owner_role: user.role,
+            });
+          }}
+        >
+          <SelectTrigger className="h-8 w-40" onClick={(event) => event.stopPropagation()}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {salesRepUsers.map((user) => (
+              <SelectItem key={user.id} value={user.id}>
+                {user.name} - {roleLabels[user.role]}
+              </SelectItem>
+            ))}
+            <SelectItem value={CUSTOM_SALES_REP_VALUE}>{String(quote.stage_meta?.owner_name || "Unassigned")}</SelectItem>
+          </SelectContent>
+        </Select>
       </TableCell>
       <TableCell>
         <Select value={String(quote.stage_meta?.priority || "normal")} onValueChange={(value) => onMetaChange(quote, { priority: value })}>

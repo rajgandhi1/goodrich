@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Download, FileText, RefreshCw, Search } from "lucide-react";
+import { Clock3, Download, FileText, ListFilter, RefreshCw, Search, Workflow } from "lucide-react";
 import { toast } from "sonner";
 
 import { API_BASE, Quote, QuoteStage, listQuotes } from "@/lib/api";
@@ -151,55 +151,68 @@ export function HistoryClient() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_180px_auto]">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search activity, customer, project, quote no" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <div className="rounded-lg border bg-card p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
+              <Clock3 className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold tracking-normal">Activity history</h1>
+              <div className="text-xs text-muted-foreground">{visible.length} visible event(s) from {events.length} total</div>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onClick={refresh}>
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
         </div>
-        <Select value={kind} onValueChange={setKind}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All activity</SelectItem>
-            <SelectItem value="stage">Stage changes</SelectItem>
-            <SelectItem value="export">Exports</SelectItem>
-            <SelectItem value="activity">Workflow activity</SelectItem>
-            <SelectItem value="vendor">Vendor enquiries</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={stage} onValueChange={setStage}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All stages</SelectItem>
-            {stages.map((item) => <SelectItem key={item} value={item}>{stageLabel(item)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Button variant="secondary" onClick={refresh}>
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_180px_180px]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-9" placeholder="Search customer, project, quote no, activity" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
+          <Select value={kind} onValueChange={setKind}>
+            <SelectTrigger><ListFilter className="h-4 w-4" /><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All activity</SelectItem>
+              <SelectItem value="stage">Stage changes</SelectItem>
+              <SelectItem value="export">Exports</SelectItem>
+              <SelectItem value="activity">Workflow activity</SelectItem>
+              <SelectItem value="vendor">Vendor enquiries</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={stage} onValueChange={setStage}>
+            <SelectTrigger><Workflow className="h-4 w-4" /><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All stages</SelectItem>
+              {stages.map((item) => <SelectItem key={item} value={item}>{stageLabel(item)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="rounded-md border p-3">
+      <div className="grid gap-2 md:grid-cols-3">
+        <div className="rounded-md border bg-background p-3">
           <div className="text-xs text-muted-foreground">Activity events</div>
           <div className="text-lg font-semibold">{events.length}</div>
         </div>
-        <div className="rounded-md border p-3">
+        <div className="rounded-md border bg-background p-3">
           <div className="text-xs text-muted-foreground">Stage changes</div>
           <div className="text-lg font-semibold">{events.filter((event) => event.kind === "stage").length}</div>
         </div>
-        <div className="rounded-md border p-3">
+        <div className="rounded-md border bg-background p-3">
           <div className="text-xs text-muted-foreground">Workflow events</div>
           <div className="text-lg font-semibold">{events.filter((event) => event.kind === "activity" || event.kind === "vendor").length}</div>
         </div>
       </div>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle>Activity history</CardTitle>
+        <CardHeader className="flex-row items-center justify-between border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base"><Clock3 className="h-4 w-4" />Timeline</CardTitle>
           <Badge variant="outline">{visible.length} events</Badge>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <div className="overflow-auto rounded-md border">
             <Table>
               <TableHeader>

@@ -16,9 +16,11 @@ import {
   FileSpreadsheet,
   FileText,
   Inbox,
+  ListFilter,
   Loader2,
   Mail,
   Layers3,
+  PanelRight,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -27,9 +29,11 @@ import {
   Send,
   ShieldCheck,
   ShoppingCart,
+  SlidersHorizontal,
   Trash2,
   Undo2,
   Upload,
+  WandSparkles,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -53,7 +57,7 @@ import {
   toNumber,
 } from "@/lib/api";
 import { addBackgroundJob } from "@/lib/background-jobs";
-import { canApproveQuotes, getCurrentAppUser, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { canApproveQuotes, getAppUsers, getCurrentAppUser, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import {
   buildMaterialBreakdown,
   buildMaterialInputs,
@@ -371,6 +375,7 @@ const BULK_DEFAULTS = {
   standard: "",
 };
 const BLANK_SELECT_VALUE = "__blank__";
+const CUSTOM_SALES_REP_VALUE = "__custom_sales_rep__";
 const LARGE_DRAFT_THRESHOLD = 250;
 const DRAFT_PAGE_SIZE = 500;
 const FINAL_PAGE_SIZE = 50;
@@ -773,15 +778,15 @@ function Field({
   );
 }
 
-function SummaryTile({
+function CompactMetric({
+  icon,
   label,
   value,
-  detail,
   tone = "neutral",
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string | number;
-  detail?: string;
   tone?: "neutral" | "ready" | "check" | "missing";
 }) {
   const toneClass =
@@ -791,12 +796,12 @@ function SummaryTile({
         ? "border-amber-200 bg-amber-50/70 text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100"
         : tone === "missing"
           ? "border-red-200 bg-red-50/70 text-red-950 dark:border-red-900 dark:bg-red-950/25 dark:text-red-100"
-          : "border-border bg-card";
+          : "border-border bg-background";
   return (
-    <div className={`rounded-md border p-3 ${toneClass}`}>
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-1 text-xl font-semibold tracking-normal">{value}</div>
-      {detail && <div className="mt-1 text-xs text-muted-foreground">{detail}</div>}
+    <div className={`inline-flex h-9 items-center gap-2 rounded-md border px-2.5 text-sm ${toneClass}`}>
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="font-semibold">{value}</span>
     </div>
   );
 }
@@ -843,6 +848,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     ...DEFAULT_MATERIAL_PLANNING_INPUTS,
   });
   const [currentUser, setCurrentUser] = React.useState(() => getCurrentAppUser());
+  const [appUsers, setAppUsers] = React.useState(() => getAppUsers());
   const [approvalComment, setApprovalComment] = React.useState("");
   const [draftScrollTop, setDraftScrollTop] = React.useState(0);
   const [undoItems, setUndoItems] = React.useState<{ label: string; items: GasketItem[] } | null>(null);
@@ -865,6 +871,16 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
   const items = React.useMemo(() => quote?.items ?? [], [quote?.items]);
+  const salesRepUsers = React.useMemo(
+    () => appUsers
+      .filter((user) => user.active)
+      .sort((left, right) => {
+        const leftRank = left.role === "sales" ? 0 : 1;
+        const rightRank = right.role === "sales" ? 0 : 1;
+        return leftRank - rightRank || left.name.localeCompare(right.name);
+      }),
+    [appUsers],
+  );
   const isLargeDraft = items.length > LARGE_DRAFT_THRESHOLD;
   const activeTableColumns = React.useMemo(
     () => (tableMode === "spreadsheet" ? streamlitColumns() : columnsForPreset(columnPreset, isLargeDraft)),
@@ -1028,7 +1044,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }, [isSelectingCells]);
 
   React.useEffect(() => {
-    const refresh = () => setCurrentUser(getCurrentAppUser());
+    const refresh = () => {
+      setAppUsers(getAppUsers());
+      setCurrentUser(getCurrentAppUser());
+    };
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
@@ -1245,7 +1264,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   async function updateQueueMeta(row: Quote, patch: Record<string, unknown>) {
     let nextStageMeta = { ...(row.stage_meta ?? {}), ...patch };
     const activityDetails = Object.entries(patch)
-      .filter(([key]) => ["owner_id", "owner_name", "priority", "due_date", "clarification_status"].includes(key))
+      .filter(([key]) => ["owner_id", "owner_name", "owner_email", "owner_role", "priority", "due_date", "clarification_status"].includes(key))
       .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value || "blank")}`);
     if (activityDetails.length) {
       nextStageMeta = appendActivity(nextStageMeta, {
@@ -1754,7 +1773,22 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     if (key === "currency") {
       next.fx_rate = defaultFx[getString(value)] ?? 1;
     }
-    setQuote((current) => (current ? { ...current, quote_data: next, quote_no: getString(next.quote_no) } : current));
+    setQuote((current) => (current ? { ...current, quote_data: next, quote_no: getString(qd.quote_no) } : current));
+    setHasUnsavedLocalEdits(true);
+  }
+
+  function selectSalesRep(userId: string) {
+    if (userId === CUSTOM_SALES_REP_VALUE) return;
+    const user = salesRepUsers.find((row) => row.id === userId);
+    if (!user) return;
+    const next = {
+      ...qd,
+      sales_rep_user_id: user.id,
+      rep_name: user.name,
+      rep_email: user.email,
+      rep_designation: roleLabels[user.role],
+    };
+    setQuote((current) => (current ? { ...current, quote_data: next, quote_no: getString(qd.quote_no) } : current));
     setHasUnsavedLocalEdits(true);
   }
 
@@ -2348,7 +2382,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <TableHeader>
                     <TableRow>
                       <TableHead>Workspace</TableHead>
-                      <TableHead className="w-36">Owner</TableHead>
+                      <TableHead className="w-44">Sales rep</TableHead>
                       <TableHead className="w-32">Priority</TableHead>
                       <TableHead className="w-40">Due / age</TableHead>
                       <TableHead className="w-48">Readiness</TableHead>
@@ -2405,12 +2439,22 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               <div className="mt-1 truncate text-sm text-muted-foreground">{quote.project_ref || quote.id}</div>
             </div>
             {!isQuotationSection && (
-              <div className="grid gap-3 sm:grid-cols-5">
-                <SummaryTile label="Items" value={items.length} detail={`${filteredItems.length} on this page`} />
-                <SummaryTile label="RFQ score" value={`${qualityReport.score}%`} detail={`${readiness}% item ready`} tone={qualityReport.score >= 80 ? "ready" : qualityReport.score >= 60 ? "check" : "missing"} />
-                <SummaryTile label="Ready" value={readyCount} detail={`${readiness}% complete`} tone="ready" />
-                <SummaryTile label="Review" value={checkCount} detail="Defaults used" tone="check" />
-                <SummaryTile label="Risks" value={qualityReport.risks.length} detail={`${qualityReport.risks.filter((risk) => risk.severity === "high").length} high`} tone={qualityReport.risks.some((risk) => risk.severity === "high") ? "missing" : qualityReport.risks.length ? "check" : "ready"} />
+              <div className="flex flex-wrap items-center gap-2">
+                <CompactMetric icon={<FileText className="h-3.5 w-3.5" />} label="Items" value={items.length} />
+                <CompactMetric
+                  icon={<ShieldCheck className="h-3.5 w-3.5" />}
+                  label="RFQ"
+                  value={`${qualityReport.score}%`}
+                  tone={qualityReport.score >= 80 ? "ready" : qualityReport.score >= 60 ? "check" : "missing"}
+                />
+                <CompactMetric icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="Ready" value={readyCount} tone="ready" />
+                <CompactMetric icon={<AlertCircle className="h-3.5 w-3.5" />} label="Review" value={checkCount} tone={checkCount ? "check" : "neutral"} />
+                <CompactMetric
+                  icon={<Ban className="h-3.5 w-3.5" />}
+                  label="Risk"
+                  value={qualityReport.risks.length}
+                  tone={qualityReport.risks.some((risk) => risk.severity === "high") ? "missing" : qualityReport.risks.length ? "check" : "ready"}
+                />
               </div>
             )}
           </div>
@@ -2439,77 +2483,75 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         </div>
 
         {!isQuotationSection && (
-          <div className="mt-5 grid gap-3 border-t pt-5 lg:grid-cols-[1fr_1fr]">
-            <div className="rounded-md border p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">RFQ completeness</div>
-                  <div className="text-xs text-muted-foreground">
-                    Commercial {qualityReport.quoteScore}% / Technical {qualityReport.technicalScore}% / Risk {qualityReport.riskScore}%
-                  </div>
-                </div>
-                <Badge variant={qualityReport.score >= 80 ? "secondary" : qualityReport.score >= 60 ? "warning" : "outline"}>{qualityReport.score}%</Badge>
+          <div className="mt-4 grid gap-3 border-t pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+            <details className="rounded-md border bg-background p-3" open={!quote.customer || !quote.project_ref}>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium">
+                <span className="inline-flex items-center gap-2"><FileText className="h-4 w-4" />Header details</span>
+                <Badge variant={quote.customer && quote.project_ref ? "secondary" : "outline"}>{quote.customer && quote.project_ref ? "Saved context" : "Needs context"}</Badge>
+              </summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                <Field label="Customer" value={quote.customer} onChange={(value) => setQuote({ ...quote, customer: value })} />
+                <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => setQuote({ ...quote, project_ref: value })} />
+                <Button
+                  variant="secondary"
+                  onClick={() => savePatch({ customer: quote.customer, project_ref: quote.project_ref } as Partial<Quote>, "Enquiry details saved")}
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </Button>
               </div>
-              <div className="mt-3">
-                <ProgressBar value={qualityReport.score} />
-              </div>
-              {qualityReport.missing.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {qualityReport.missing.slice(0, 5).map((item) => <Badge key={item} variant="outline">{item}</Badge>)}
-                  {qualityReport.missing.length > 5 && <Badge variant="muted">+{qualityReport.missing.length - 5} more</Badge>}
-                </div>
-              )}
-            </div>
+            </details>
 
-            <div className="rounded-md border p-3">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium">Technical risk check</div>
-                  <div className="text-xs text-muted-foreground">Flags missing data, standard mismatches, and non-standard items.</div>
+            <details className="rounded-md border bg-background p-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium">
+                <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" />Quality and risk</span>
+                <Badge variant={qualityReport.score >= 80 ? "secondary" : qualityReport.score >= 60 ? "warning" : "outline"}>{qualityReport.score}%</Badge>
+              </summary>
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>Commercial {qualityReport.quoteScore}% / Technical {qualityReport.technicalScore}% / Risk {qualityReport.riskScore}%</span>
+                  <span>{readiness}% item ready</span>
                 </div>
-                <Badge variant={qualityReport.risks.some((risk) => risk.severity === "high") ? "warning" : "secondary"}>
-                  {qualityReport.risks.length} risk{qualityReport.risks.length === 1 ? "" : "s"}
-                </Badge>
-              </div>
-              {qualityReport.risks.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No technical risks detected from the current enquiry data.</div>
-              ) : (
+                <ProgressBar value={qualityReport.score} />
+                {qualityReport.missing.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {qualityReport.missing.slice(0, 4).map((item) => <Badge key={item} variant="outline">{item}</Badge>)}
+                    {qualityReport.missing.length > 4 && <Badge variant="muted">+{qualityReport.missing.length - 4}</Badge>}
+                  </div>
+                )}
                 <div className="space-y-2">
-                  {qualityReport.risks.slice(0, 5).map((risk) => (
-                    <div key={`${risk.title}-${risk.detail}`} className="rounded-md bg-muted/40 px-2 py-1.5 text-xs">
-                      <span className="font-medium">{risk.title}</span>
-                      <span className="text-muted-foreground"> - {risk.detail}</span>
-                      {risk.rows?.length ? <span className="text-muted-foreground"> Rows {risk.rows.slice(0, 8).join(", ")}</span> : null}
-                    </div>
-                  ))}
-                  {qualityReport.risks.length > 5 && <div className="text-xs text-muted-foreground">+{qualityReport.risks.length - 5} more risk checks</div>}
+                  {qualityReport.risks.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">No technical risks detected.</div>
+                  ) : (
+                    qualityReport.risks.slice(0, 3).map((risk) => (
+                      <div key={`${risk.title}-${risk.detail}`} className="rounded-md bg-muted/40 px-2 py-1.5 text-xs">
+                        <span className="font-medium">{risk.title}</span>
+                        <span className="text-muted-foreground"> - {risk.detail}</span>
+                        {risk.rows?.length ? <span className="text-muted-foreground"> Rows {risk.rows.slice(0, 6).join(", ")}</span> : null}
+                      </div>
+                    ))
+                  )}
+                  {qualityReport.risks.length > 3 && <div className="text-xs text-muted-foreground">+{qualityReport.risks.length - 3} more risk checks</div>}
                 </div>
-              )}
-            </div>
+              </div>
+            </details>
           </div>
         )}
-
-        <div className="mt-5 grid gap-3 border-t pt-5 md:grid-cols-[1fr_1fr_auto] md:items-end">
-          <Field label="Customer" value={quote.customer} onChange={(value) => setQuote({ ...quote, customer: value })} />
-          <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => setQuote({ ...quote, project_ref: value })} />
-          <Button
-            variant="secondary"
-            onClick={() => savePatch({ customer: quote.customer, project_ref: quote.project_ref } as Partial<Quote>, "Enquiry details saved")}
-          >
-            <Save className="h-4 w-4" />
-            Save details
-          </Button>
-        </div>
       </div>
 
       {isDraftSection && (
-        <Card>
-          <CardHeader className="border-b">
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b px-4 py-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <CardTitle>Enquiry intake</CardTitle>
-                <div className="text-sm text-muted-foreground">
-                  {intakeCollapsed && !startingExtraction ? `${items.length} item(s) captured. Intake is minimized.` : "Email, Excel, and manual item capture"}
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-background">
+                  <Inbox className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="space-y-0.5">
+                  <CardTitle className="text-base">Capture enquiry</CardTitle>
+                  <div className="text-xs text-muted-foreground">
+                    {intakeCollapsed && !startingExtraction ? `${items.length} item(s) captured` : "Paste email, upload Excel, or add a quick manual row"}
+                  </div>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -2534,22 +2576,26 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             </div>
           </CardHeader>
           {intakeCollapsed && !startingExtraction ? (
-            <CardContent className="pt-5">
-              <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Intake minimized. Review and clean the extracted enquiry below.
+            <CardContent className="p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Capture is minimized. Continue reviewing the enquiry grid below.</span>
+                <Button variant="secondary" size="sm" onClick={() => setIntakeCollapsed(false)}>
+                  <ChevronDown className="h-4 w-4" />
+                  Open capture
+                </Button>
               </div>
             </CardContent>
           ) : (
-            <CardContent className="pt-5">
+            <CardContent className="p-3">
               <Tabs defaultValue="email">
-                <TabsList className="flex h-auto flex-wrap justify-start">
-                  <TabsTrigger value="email"><Mail className="mr-2 h-4 w-4" />Email</TabsTrigger>
-                  <TabsTrigger value="excel"><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</TabsTrigger>
-                  <TabsTrigger value="manual"><Plus className="mr-2 h-4 w-4" />Manual</TabsTrigger>
+                <TabsList className="grid h-auto w-full grid-cols-3 md:w-fit">
+                  <TabsTrigger value="email" className="gap-2"><Mail className="h-4 w-4" />Email</TabsTrigger>
+                  <TabsTrigger value="excel" className="gap-2"><FileSpreadsheet className="h-4 w-4" />Excel</TabsTrigger>
+                  <TabsTrigger value="manual" className="gap-2"><Plus className="h-4 w-4" />Manual</TabsTrigger>
                 </TabsList>
-                <TabsContent value="email" className="mt-4">
+                <TabsContent value="email" className="mt-3">
                   <textarea
-                    className="min-h-44 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    className="min-h-32 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
                     value={emailText}
                     onChange={(event) => setEmailText(event.target.value)}
                     placeholder="Paste raw customer enquiry email text"
@@ -2560,12 +2606,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       Process email enquiry
                     </Button>
                     <Button variant="secondary" onClick={() => setEmailText("")} disabled={!emailText}>
+                      <X className="h-4 w-4" />
                       Clear
                     </Button>
                   </div>
                 </TabsContent>
-                <TabsContent value="excel" className="mt-4">
-                  <div className="rounded-md border border-dashed p-5">
+                <TabsContent value="excel" className="mt-3">
+                  <div className="rounded-md border border-dashed p-3">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div className="flex items-center gap-3">
                         <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-background">
@@ -2584,11 +2631,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     Process Excel enquiry
                   </Button>
                 </TabsContent>
-                <TabsContent value="manual" className="mt-4">
+                <TabsContent value="manual" className="mt-3">
                   <div className="space-y-3">
                     <Field label="Customer description" value={getString(manualItem.raw_description)} onChange={(value) => setManualItem({ ...manualItem, raw_description: value })} textarea />
                     <details className="rounded-md border p-3">
-                      <summary className="cursor-pointer text-sm font-medium">Optional item details</summary>
+                      <summary className="cursor-pointer text-sm font-medium">
+                        <span className="inline-flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" />Optional item details</span>
+                      </summary>
                       <div className="mt-3 grid gap-3 md:grid-cols-3">
                         <Field label="Quantity" value={getString(manualItem.quantity)} onChange={(value) => setManualItem({ ...manualItem, quantity: Number(value) })} type="number" />
                         <Field label="UOM" value={getString(manualItem.uom)} onChange={(value) => setManualItem({ ...manualItem, uom: value })} />
@@ -2600,7 +2649,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     <div>
                       <Button onClick={addManualItem}>
                         <Plus className="h-4 w-4" />
-                        Finalize manual entry
+                        Add row
                       </Button>
                     </div>
                   </div>
@@ -2637,85 +2686,79 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             </>
           )}
           <Card className={tableMode === "spreadsheet" ? "rounded-none shadow-none" : ""}>
-            <CardHeader className={`sticky top-16 z-20 border-b bg-card/95 backdrop-blur ${tableMode === "spreadsheet" ? "px-3 py-3" : ""}`}>
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="space-y-1">
-                  <CardTitle>Enquiry items</CardTitle>
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <CardHeader className={`sticky top-16 z-20 border-b bg-card/95 backdrop-blur ${tableMode === "spreadsheet" ? "px-3 py-2" : "px-4 py-3"}`}>
+              <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-background">
+                    <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <CardTitle className="text-base">Enquiry items</CardTitle>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span>{items.length} items</span>
                     <span>{readyCount} ready</span>
                     <span>{actionCount} need review</span>
                     {selectedIndices.length > 0 && <Badge variant="outline">{selectedIndices.length} selected</Badge>}
                     {tableMode === "spreadsheet" && <Badge variant="muted">{selectedCellCount ? `${selectedCellCount} cells` : "Excel-style editor"}</Badge>}
                     {filterCount > 0 && <Badge variant="outline">{filterCount} grid filter{filterCount === 1 ? "" : "s"}</Badge>}
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Select value={tableMode} onValueChange={(value) => setTableMode(value as "guided" | "spreadsheet")}>
-                    <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="spreadsheet">Classic full table</SelectItem>
-                      <SelectItem value="guided">Guided review</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {tableMode === "guided" ? (
-                    <Select value={columnPreset} onValueChange={setColumnPreset}>
-                      <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-1">
+                    <Select value={tableMode} onValueChange={(value) => setTableMode(value as "guided" | "spreadsheet")}>
+                      <SelectTrigger className="h-8 w-40 border-0 bg-transparent"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="review">Review columns</SelectItem>
-                        <SelectItem value="commercial">Commercial</SelectItem>
-                        <SelectItem value="soft_cut">Soft cut</SelectItem>
-                        <SelectItem value="spiral_wound">Spiral wound</SelectItem>
-                        <SelectItem value="rtj">RTJ</SelectItem>
-                        <SelectItem value="kammprofile">Kammprofile</SelectItem>
-                        <SelectItem value="dji">DJI</SelectItem>
-                        <SelectItem value="isk">ISK</SelectItem>
-                        <SelectItem value="full_technical">Full technical</SelectItem>
+                        <SelectItem value="spreadsheet">Spreadsheet</SelectItem>
+                        <SelectItem value="guided">Guided review</SelectItem>
                       </SelectContent>
                     </Select>
-                  ) : (
-                    <Badge variant="outline" className="h-10 rounded-none px-3 text-xs">
-                      {activeTableColumns.length} columns
-                    </Badge>
-                  )}
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="issues">Issues</SelectItem>
-                      <SelectItem value="missing">Missing</SelectItem>
-                      <SelectItem value="missing_size">Missing size</SelectItem>
-                      <SelectItem value="missing_material">Missing material</SelectItem>
-                      <SelectItem value="missing_rating">Missing rating/class</SelectItem>
-                      <SelectItem value="low_confidence">Low confidence</SelectItem>
-                      <SelectItem value="drawing_required">Drawing required</SelectItem>
-                      <SelectItem value="duplicate_likely">Duplicate likely</SelectItem>
-                      <SelectItem value="non_gasket">Non-gasket</SelectItem>
-                      <SelectItem value="regret">Regret</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button variant="secondary" onClick={() => setSelectedRows(new Set(displayIndices))}>Select all</Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setSelectedRows(new Set());
-                      setActiveCell(null);
-                      setSelectionAnchor(null);
-                      setSelectionFocus(null);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                  <Button variant="secondary" onClick={clearGridFilters} disabled={!filterCount}>Clear filters</Button>
-                  <Button variant="secondary" onClick={addBlankRow}>
+                    {tableMode === "guided" ? (
+                      <Select value={columnPreset} onValueChange={setColumnPreset}>
+                        <SelectTrigger className="h-8 w-40 border-0 bg-transparent"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="review">Review columns</SelectItem>
+                          <SelectItem value="commercial">Commercial</SelectItem>
+                          <SelectItem value="soft_cut">Soft cut</SelectItem>
+                          <SelectItem value="spiral_wound">Spiral wound</SelectItem>
+                          <SelectItem value="rtj">RTJ</SelectItem>
+                          <SelectItem value="kammprofile">Kammprofile</SelectItem>
+                          <SelectItem value="dji">DJI</SelectItem>
+                          <SelectItem value="isk">ISK</SelectItem>
+                          <SelectItem value="full_technical">Full technical</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="outline" className="h-8 rounded-md px-3 text-xs">
+                        {activeTableColumns.length} columns
+                      </Badge>
+                    )}
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="h-8 w-40 border-0 bg-transparent"><ListFilter className="h-4 w-4" /><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="issues">Issues</SelectItem>
+                        <SelectItem value="missing">Missing</SelectItem>
+                        <SelectItem value="missing_size">Missing size</SelectItem>
+                        <SelectItem value="missing_material">Missing material</SelectItem>
+                        <SelectItem value="missing_rating">Missing rating/class</SelectItem>
+                        <SelectItem value="low_confidence">Low confidence</SelectItem>
+                        <SelectItem value="drawing_required">Drawing required</SelectItem>
+                        <SelectItem value="duplicate_likely">Duplicate likely</SelectItem>
+                        <SelectItem value="non_gasket">Non-gasket</SelectItem>
+                        <SelectItem value="regret">Regret</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={addBlankRow} title="Add row">
                     <Plus className="h-4 w-4" />
                     Row
                   </Button>
-                  <Button variant="secondary" onClick={persistInlineEdits}>
+                  <Button variant="secondary" size="sm" onClick={persistInlineEdits} title="Save enquiry items">
                     <Save className="h-4 w-4" />
                     Save
                   </Button>
-                  <Button onClick={openQuotationScreen} disabled={!quote || !items.length}>
+                  <Button size="sm" onClick={openQuotationScreen} disabled={!quote || !items.length}>
                     <ArrowRight className="h-4 w-4" />
                     Quotation
                   </Button>
@@ -2723,33 +2766,61 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               </div>
             </CardHeader>
             <CardContent className={tableMode === "spreadsheet" ? "space-y-3 p-3" : "space-y-4 pt-5"}>
-              <div className={`flex flex-wrap gap-2 ${tableMode === "spreadsheet" ? "rounded-none border bg-muted/20 p-2" : ""}`}>
-                <Button variant="secondary" onClick={() => recomputeRows(selectedIndices.length ? selectedIndices : displayIndices)}>
+              <div className={`flex flex-wrap items-center gap-2 ${tableMode === "spreadsheet" ? "rounded-md border bg-muted/20 p-2" : ""}`}>
+                <div className="flex flex-wrap gap-2 rounded-md border bg-background p-1">
+                <Button variant="ghost" size="sm" onClick={() => recomputeRows(selectedIndices.length ? selectedIndices : displayIndices)} title="Update generated descriptions">
                   <RefreshCw className="h-4 w-4" />
-                  {tableMode === "spreadsheet" ? "Update Descriptions" : `Update ${selectedIndices.length ? "selected" : "visible"}`}
+                  Update
                 </Button>
-                <Button variant="secondary" onClick={() => reprocessRows()}>
-                  {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  {tableMode === "spreadsheet" ? "Reprocess Text" : `Smart Parse ${selectedIndices.length ? "selected" : "visible"}`}
+                <Button variant="ghost" size="sm" onClick={() => reprocessRows()} title="Smart Parse selected or visible rows">
+                  {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
+                  Parse
                 </Button>
-                <Button variant="destructive" onClick={deleteSelectedRows} disabled={!selectedIndices.length}>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedRows(new Set(displayIndices))} title="Select all visible rows">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Select
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedRows(new Set());
+                    setActiveCell(null);
+                    setSelectionAnchor(null);
+                    setSelectionFocus(null);
+                  }}
+                  title="Clear row and cell selection"
+                >
+                  <X className="h-4 w-4" />
+                  Clear
+                </Button>
+                <Button variant="ghost" size="sm" onClick={clearGridFilters} disabled={!filterCount} title="Clear column filters">
+                  <ListFilter className="h-4 w-4" />
+                  Filters
+                </Button>
+                </div>
+                <Button variant="secondary" size="sm" onClick={toggleRegretSelected} disabled={!selectedIndices.length} title="Toggle regret for selected rows">
+                  <Ban className="h-4 w-4" />
+                  Regret
+                </Button>
+                <Button variant="destructive" size="sm" onClick={deleteSelectedRows} disabled={!selectedIndices.length}>
                   <Trash2 className="h-4 w-4" />
-                  {tableMode === "spreadsheet" ? `Delete (${selectedIndices.length || "none selected"})` : `Delete ${selectedIndices.length ? `(${selectedIndices.length})` : ""}`}
-                </Button>
-                <Button variant="secondary" onClick={toggleRegretSelected} disabled={!selectedIndices.length}>
-                  {tableMode === "spreadsheet" ? `Regret (${selectedIndices.length || "none selected"})` : "Toggle regret"}
+                  Delete{selectedIndices.length ? ` (${selectedIndices.length})` : ""}
                 </Button>
                 {undoItems && (
-                  <Button variant="secondary" onClick={restoreUndoItems}>
+                  <Button variant="secondary" size="sm" onClick={restoreUndoItems}>
                     <Undo2 className="h-4 w-4" />
                     {undoItems.label}
                   </Button>
                 )}
               </div>
 
-              <details className={tableMode === "spreadsheet" ? "border p-2" : "rounded-md border p-3"}>
+              <details className={tableMode === "spreadsheet" ? "rounded-md border p-2" : "rounded-md border p-3"}>
                 <summary className="cursor-pointer text-sm font-medium">
-                  Bulk Edit - targeting {selectedIndices.length ? `${selectedIndices.length} selected row(s)` : `all ${displayIndices.length} visible rows`}
+                  <span className="inline-flex items-center gap-2">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Bulk edit {selectedIndices.length ? `${selectedIndices.length} selected` : `${displayIndices.length} visible`}
+                  </span>
                 </summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-4 xl:grid-cols-8">
                   <div className="space-y-1.5">
@@ -2809,14 +2880,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
               <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_380px]">
                 <div className="min-w-0 space-y-3">
-              <div className={`flex flex-wrap items-center justify-between gap-3 border bg-muted/30 px-3 py-2 text-sm ${tableMode === "spreadsheet" ? "rounded-none" : "rounded-md"}`}>
-                <div className="text-muted-foreground">
-                  Showing {pageStart}-{pageEnd} of {displayIndices.length} visible row(s).
-                  {tableMode === "spreadsheet"
-                    ? " Click or drag cells to select ranges. Paste Excel rows directly into the selected cell range."
-                    : isLargeDraft
-                      ? " Compact columns are shown for large enquiries; select one row to edit in the side panel."
-                      : " Large enquiries are paged to keep the browser responsive."}
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                  <span>Showing {pageStart}-{pageEnd} of {displayIndices.length}</span>
+                  {tableMode === "spreadsheet" && <Badge variant="muted">Paste Excel ranges</Badge>}
+                  {isLargeDraft && tableMode !== "spreadsheet" && <Badge variant="muted">Compact large enquiry view</Badge>}
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -2856,7 +2924,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   <TableHeader className={tableMode === "spreadsheet" ? "sticky top-0 z-30 bg-muted" : "sticky top-0 z-30 bg-card"}>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className={`sticky left-0 z-40 h-8 w-10 border-r px-2 text-center ${tableMode === "spreadsheet" ? "bg-muted" : "bg-card"}`}>
-                        {tableMode === "spreadsheet" ? "☑" : "Sel"}
+                        {tableMode === "spreadsheet" ? <Check className="mx-auto h-3.5 w-3.5" /> : "Sel"}
                       </TableHead>
                       {tableMode !== "spreadsheet" && <TableHead className="sticky left-10 z-40 h-8 w-20 border-r bg-card px-2 text-center">Tools</TableHead>}
                       {activeTableColumns.map((column) => (
@@ -3010,8 +3078,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               </div>
 
               {tableMode === "spreadsheet" && (
-                <details className="border p-2">
-                  <summary className="cursor-pointer text-sm font-medium">Advanced review panels</summary>
+                <details className="rounded-md border p-2">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" />Advanced review panels</span>
+                  </summary>
                   <div className="mt-3 space-y-3">
                     <TechnicalIssuesPanel
                       items={items}
@@ -3030,7 +3100,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <aside className={`h-fit border bg-background p-3 xl:sticky xl:top-32 xl:max-h-[calc(100vh-9rem)] xl:overflow-auto ${tableMode === "spreadsheet" ? "rounded-none" : "rounded-md"}`}>
                   <div className="flex items-start justify-between gap-3 border-b pb-3">
                     <div>
-                      <div className="text-sm font-medium">Row editor</div>
+                      <div className="inline-flex items-center gap-2 text-sm font-medium"><PanelRight className="h-4 w-4" />Row editor</div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {selectedItem && selectedRowIndex !== null
                           ? `Row ${selectedRowIndex + 1}`
@@ -3168,47 +3238,57 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       )}
 
       {isMaterialSection && (
-        <Card>
-          <CardHeader className="border-b">
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b px-4 py-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="space-y-1">
-                <CardTitle>Material planning</CardTitle>
-                <div className="text-sm text-muted-foreground">
-                  Phase 1 builds the size/material breakdown from the enquiry. Phase 2 converts that reviewed breakdown into stock and purchase planning.
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-background">
+                  <Layers3 className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="space-y-0.5">
+                  <CardTitle className="text-base">Material planning</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant={materialBreakdown?.length ? "secondary" : "outline"}>Phase 1</Badge>
+                    <Badge variant={materialPlan ? "secondary" : "outline"}>Phase 2</Badge>
+                    <span>{items.length} enquiry item(s)</span>
+                  </div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {(materialBreakdown || materialPlan) && (
-                  <Button variant="secondary" onClick={() => saveMaterialPlan()}>
+                  <Button variant="secondary" size="sm" onClick={() => saveMaterialPlan()}>
                     <Save className="h-4 w-4" />
-                    Save workflow
+                    Save
                   </Button>
                 )}
                 {(materialBreakdown || materialPlan) && (
-                  <Button variant="secondary" onClick={clearMaterialPlan}>
+                  <Button variant="secondary" size="sm" onClick={clearMaterialPlan}>
                     <X className="h-4 w-4" />
                     Clear
                   </Button>
                 )}
-                <Button variant="secondary" onClick={generateMaterialBreakdown} disabled={!items.length}>
+                <Button variant="secondary" size="sm" onClick={generateMaterialBreakdown} disabled={!items.length}>
                   <Layers3 className="h-4 w-4" />
-                  {materialBreakdown ? "Update breakdown" : "Create breakdown"}
+                  {materialBreakdown ? "Update" : "Breakdown"}
                 </Button>
-                <Button onClick={generateMaterialPlan} disabled={!items.length || !materialBreakdown?.length}>
+                <Button size="sm" onClick={generateMaterialPlan} disabled={!items.length || !materialBreakdown?.length}>
                   <ArrowRight className="h-4 w-4" />
-                  {materialPlan ? "Update material plan" : "Create material plan"}
+                  {materialPlan ? "Update plan" : "Create plan"}
                 </Button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4 pt-5">
+          <CardContent className="space-y-3 p-3">
             {!materialBreakdown?.length ? (
-              <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Start with Phase 1. Create a breakdown to consolidate enquiry rows by size, pressure rating, thickness, winding, ring materials, filler, quantity, series, and remarks.
+              <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+                <Layers3 className="h-4 w-4 shrink-0" />
+                <span>Start with Phase 1 to consolidate rows by size, rating, thickness, materials, filler, quantity, series, and remarks.</span>
               </div>
             ) : (
               <details className="rounded-md border p-3" open>
-                <summary className="cursor-pointer text-sm font-medium">Phase 1 material breakdown</summary>
+                <summary className="cursor-pointer text-sm font-medium">
+                  <span className="inline-flex items-center gap-2"><Layers3 className="h-4 w-4" />Phase 1 material breakdown</span>
+                </summary>
                 <div className="mt-3 overflow-auto">
                   <Table>
                     <TableHeader>
@@ -3269,7 +3349,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             )}
 
             <details className="rounded-md border p-3" open>
-              <summary className="cursor-pointer text-sm font-medium">Phase 2 stock inputs</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                <span className="inline-flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" />Phase 2 stock inputs</span>
+              </summary>
               <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
                 <Field
                   label="Sheet width (mm)"
@@ -3370,7 +3452,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
             {materialInputs.length > 0 && (
               <details className="rounded-md border p-3" open>
-                <summary className="cursor-pointer text-sm font-medium">Material-specific inputs</summary>
+                <summary className="cursor-pointer text-sm font-medium">
+                  <span className="inline-flex items-center gap-2"><ListFilter className="h-4 w-4" />Material-specific inputs</span>
+                </summary>
                 <div className="mt-3 overflow-auto">
                   <Table>
                     <TableHeader>
@@ -3430,8 +3514,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             )}
 
             {!materialPlan ? (
-              <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Create a plan to see one consolidated output table for stock size, planned quantity, estimated purchase weight, and review notes.
+              <div className="flex items-center gap-3 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+                <ArrowRight className="h-4 w-4 shrink-0" />
+                <span>Create the Phase 2 plan to see stock size, planned quantity, purchase weight, shortage, and review notes.</span>
               </div>
             ) : (
               <>
@@ -3444,8 +3529,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                  <div className="rounded-md border p-3">
+                <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                  <div className="rounded-md border bg-background p-3">
                     <div className="text-xs text-muted-foreground">Components</div>
                     <div className="text-lg font-semibold">{materialPlan.totals.component_count}</div>
                   </div>
@@ -3453,19 +3538,19 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     <div className="text-xs text-muted-foreground">Sheet demand</div>
                     <div className="text-lg font-semibold">{materialPlan.totals.sheet_count.toFixed(0)}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="rounded-md border bg-background p-3">
                     <div className="text-xs text-muted-foreground">Estimated purchase weight</div>
                     <div className="text-lg font-semibold">{materialPlan.totals.total_weight_kg.toFixed(3)} kg</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="rounded-md border bg-background p-3">
                     <div className="text-xs text-muted-foreground">Shortage rows</div>
                     <div className="text-lg font-semibold">{materialPlan.rows.filter((row) => row.shortage_qty > 0).length}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="rounded-md border bg-background p-3">
                     <div className="text-xs text-muted-foreground">Suggested purchase</div>
                     <div className="text-lg font-semibold">{materialPlan.rows.reduce((sum, row) => sum + row.suggested_purchase_qty, 0).toFixed(2)}</div>
                   </div>
-                  <div className="rounded-md border p-3">
+                  <div className="rounded-md border bg-background p-3">
                     <div className="text-xs text-muted-foreground">Material cost impact</div>
                     <div className="text-lg font-semibold">{materialPlan.rows.reduce((sum, row) => sum + row.estimated_material_cost, 0).toFixed(2)}</div>
                   </div>
@@ -3493,7 +3578,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
                 {(materialPlan.grouped_summary ?? []).length > 0 && (
                   <details className="rounded-md border p-3">
-                    <summary className="cursor-pointer text-sm font-medium">Grouped purchase summary</summary>
+                    <summary className="cursor-pointer text-sm font-medium">
+                      <span className="inline-flex items-center gap-2"><ShoppingCart className="h-4 w-4" />Grouped purchase summary</span>
+                    </summary>
                     <div className="mt-3 overflow-auto">
                       <Table>
                         <TableHeader>
@@ -3594,7 +3681,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </div>
 
                 <details className="rounded-md border p-3">
-                  <summary className="cursor-pointer text-sm font-medium">Assumptions and review basis</summary>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4" />Assumptions and review basis</span>
+                  </summary>
                   <div className="mt-3 space-y-1 text-sm text-muted-foreground">
                     {materialPlan.assumptions.map((assumption) => (
                       <div key={assumption}>- {assumption}</div>
@@ -3609,397 +3698,426 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       )}
 
       {isQuotationSection && (
-        <Card>
-          <CardHeader className="space-y-3">
+        <Card className="overflow-hidden">
+          <CardHeader className="space-y-3 border-b px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1">
-                <CardTitle>Quotation preparation</CardTitle>
-                <div className="text-sm text-muted-foreground">{quote.customer || quote.quote_no || "Untitled enquiry"}</div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-md border bg-background">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="space-y-0.5">
+                  <CardTitle className="text-base">Quotation preparation</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>{quote.customer || quote.quote_no || "Untitled enquiry"}</span>
+                    <Badge variant={quotationStageBadgeVariant(quotationStage)}>{quotationStageMeta.label}</Badge>
+                    <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
+                  </div>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={closeQuotationScreen}>
+                <Button variant="secondary" size="sm" onClick={closeQuotationScreen}>
                   <RotateCcw className="h-4 w-4" />
                   Back to enquiry
                 </Button>
-                <Button variant="secondary" onClick={() => savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>, "Quotation saved")}>
+                <Button variant="secondary" size="sm" onClick={() => savePatch({ items, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>, "Quotation saved")}>
                   <Save className="h-4 w-4" />
                   Save
                 </Button>
-                <Button variant="secondary" onClick={() => exportCurrent("pdf", "preview")} disabled={!canExportFinal}>
+                <Button variant="secondary" size="sm" onClick={() => exportCurrent("pdf", "preview")} disabled={!canExportFinal}>
                   {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Preview PDF
+                  Preview
                 </Button>
-                <Button variant="secondary" onClick={markSent} disabled={approval.status !== "approved" || quote.stage === "sent"}>
+                <Button variant="secondary" size="sm" onClick={markSent} disabled={approval.status !== "approved" || quote.stage === "sent"}>
                   <Send className="h-4 w-4" />
-                  Mark sent
+                  Sent
                 </Button>
-                <Button variant="secondary" onClick={() => exportCurrent("xlsx")} disabled={!canExportFinal}>
+                <Button variant="secondary" size="sm" onClick={() => exportCurrent("xlsx")} disabled={!canExportFinal}>
                   {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-                  Download Excel
+                  Excel
                 </Button>
-                <Button onClick={() => exportCurrent("pdf")} disabled={!canExportFinal}>
+                <Button size="sm" onClick={() => exportCurrent("pdf")} disabled={!canExportFinal}>
                   {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Download PDF
+                  PDF
                 </Button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-5">
-              <div className="space-y-3 rounded-md border p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">Quotation stages</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Current stage: <span className="font-medium text-foreground">{quotationStageMeta.label}</span> / {quotationStageMeta.owner}
+          <CardContent className="space-y-3 p-3">
+            <div className="space-y-3">
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.75fr)]">
+                <div className="rounded-md border bg-background p-3">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Quotation header and workflow</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Edit customer context and stage before working through the tabs below.</div>
                     </div>
+                    <Badge variant={quote.customer && quote.project_ref ? "secondary" : "outline"}>{quote.customer && quote.project_ref ? "Context ready" : "Needs context"}</Badge>
                   </div>
-                  <Badge variant={quotationStageBadgeVariant(quotationStage)}>{quotationStageMeta.label}</Badge>
+                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_minmax(240px,0.75fr)_auto] lg:items-end">
+                    <Field label="Customer" value={quote.customer} onChange={(value) => setQuote({ ...quote, customer: value })} />
+                    <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => setQuote({ ...quote, project_ref: value })} />
+                    <div className="space-y-1.5">
+                      <Label>Quotation stage</Label>
+                      <Select value={quotationStage} onValueChange={(value) => setQuotationStage(value as QuotationStageId)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {QUOTATION_STAGES.map((stage, index) => (
+                            <SelectItem key={stage.id} value={stage.id}>{index + 1}. {stage.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => savePatch({ customer: quote.customer, project_ref: quote.project_ref, quote_data: qd, quote_no: getString(qd.quote_no) } as Partial<Quote>, "Quotation header saved")}
+                    >
+                      <Save className="h-4 w-4" />
+                      Save header
+                    </Button>
+                  </div>
+                  <div className="mt-3 grid gap-3 border-t pt-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-1.5">
+                      <Label>Sales rep</Label>
+                      <Select
+                        value={salesRepUsers.some((user) => user.id === getString(qd.sales_rep_user_id)) ? getString(qd.sales_rep_user_id) : CUSTOM_SALES_REP_VALUE}
+                        onValueChange={selectSalesRep}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {salesRepUsers.map((user) => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.name} - {roleLabels[user.role]}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={CUSTOM_SALES_REP_VALUE}>{getString(qd.rep_name) || "Custom sales rep"}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Field label="Rep designation" value={getString(qd.rep_designation)} onChange={(value) => updateQd("rep_designation", value)} />
+                    <Field label="Rep contact" value={getString(qd.rep_contact)} onChange={(value) => updateQd("rep_contact", value)} />
+                    <Field label="Rep email" value={getString(qd.rep_email)} onChange={(value) => updateQd("rep_email", value)} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge variant={quotationStageBadgeVariant(quotationStage)}>{quotationStageIndex + 1}. {quotationStageMeta.label}</Badge>
+                    <Badge variant="outline">{quotationStageMeta.owner}</Badge>
+                    <span className="text-xs text-muted-foreground">{quotationStageMeta.description}</span>
+                  </div>
                 </div>
-                <div className="grid gap-3 md:grid-cols-[minmax(260px,360px)_1fr]">
-                  <div className="space-y-1.5">
-                    <Label>Quotation stage</Label>
-                    <Select value={quotationStage} onValueChange={(value) => setQuotationStage(value as QuotationStageId)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {QUOTATION_STAGES.map((stage, index) => (
-                          <SelectItem key={stage.id} value={stage.id}>
-                            {index + 1}. {stage.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+
+                <div className="rounded-md border bg-background p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="inline-flex items-center gap-2 text-sm font-medium"><ShieldCheck className="h-4 w-4" />Quote status</div>
+                    <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
                   </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-sm font-medium">{quotationStageIndex + 1}. {quotationStageMeta.label}</div>
-                      <Badge variant="outline">{quotationStageMeta.owner}</Badge>
-                    </div>
-                    <div className="mt-2 text-sm leading-6 text-muted-foreground">{quotationStageMeta.description}</div>
+                  <div className="flex flex-wrap gap-2">
+                    <CompactMetric icon={<FileText className="h-3.5 w-3.5" />} label="Rows" value={items.length} />
+                    <CompactMetric icon={<Download className="h-3.5 w-3.5" />} label="Total" value={`${grandTotal.toFixed(2)} ${currency}`} tone="ready" />
+                    <CompactMetric
+                      icon={<ShieldCheck className="h-3.5 w-3.5" />}
+                      label="Approval"
+                      value={approval.status}
+                      tone={pricingSummary.approvalRequired ? "check" : approval.status === "approved" ? "ready" : "neutral"}
+                    />
                   </div>
-                </div>
-                <div className="grid gap-2 md:grid-cols-4">
-                  {quotationChecklist.map((item) => (
-                    <div key={item.label} className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 text-xs">
-                      {item.done ? <Check className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
-                      <span className={item.done ? "text-foreground" : "text-muted-foreground"}>{item.label}</span>
-                    </div>
-                  ))}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {quotationChecklist.map((item) => (
+                      <div key={item.label} className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs">
+                        {item.done ? <Check className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
+                        <span className={item.done ? "text-foreground" : "text-muted-foreground"}>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
-                <div className="rounded-md border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="flex items-center gap-2 text-sm font-medium">
-                        <ShieldCheck className="h-4 w-4" />
-                        Approval workflow
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Current user: {currentUser.name} ({roleLabels[currentUser.role]})
+              <Tabs defaultValue="setup" className="min-w-0 space-y-3">
+                <TabsList className="grid h-auto grid-cols-2 md:grid-cols-5">
+                  <TabsTrigger value="setup" className="gap-2"><FileText className="h-4 w-4" />Setup</TabsTrigger>
+                  <TabsTrigger value="pricing" className="gap-2"><SlidersHorizontal className="h-4 w-4" />Pricing</TabsTrigger>
+                  <TabsTrigger value="items" className="gap-2"><FileSpreadsheet className="h-4 w-4" />Items</TabsTrigger>
+                  <TabsTrigger value="terms" className="gap-2"><ListFilter className="h-4 w-4" />Terms</TabsTrigger>
+                  <TabsTrigger value="approval" className="gap-2"><ShieldCheck className="h-4 w-4" />Approval</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="setup" className="space-y-3">
+                  <div className="rounded-md border bg-background p-3">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Quotation identity</div>
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <Field label="Quote no" value={getString(qd.quote_no)} onChange={(value) => updateQd("quote_no", value)} />
+                      <Field label="Quote date" value={getString(qd.quote_date)} onChange={(value) => updateQd("quote_date", value)} />
+                      <Field label="Revision no" value={getString(qd.rev_no)} onChange={(value) => updateQd("rev_no", value)} />
+                      <Field label="Revision date" value={getString(qd.rev_date)} onChange={(value) => updateQd("rev_date", value)} />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-2">
+                    <label className="flex items-start gap-3 text-sm">
+                      <input className="mt-1" type="checkbox" checked={Boolean(qd.include_customer_sl_no)} onChange={(event) => updateQd("include_customer_sl_no", event.target.checked)} />
+                      <span>
+                        <span className="block font-medium">Use customer SL No. in quotation PDF</span>
+                        <span className="block text-xs text-muted-foreground">When enabled, customer SL No. replaces the default serial number.</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 text-sm">
+                      <input className="mt-1" type="checkbox" checked={Boolean(qd.include_customer_item_code)} onChange={(event) => updateQd("include_customer_item_code", event.target.checked)} />
+                      <span>
+                        <span className="block font-medium">Add customer item code to quotation PDF</span>
+                        <span className="block text-xs text-muted-foreground">Keep disabled when the customer code is only for internal matching.</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="rounded-md border bg-background p-3">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Buyer details</div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Buyer name/address" value={getString(qd.buyer_name_address)} onChange={(value) => updateQd("buyer_name_address", value)} textarea />
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Field label="Customer enquiry no" value={getString(qd.customer_enq_no)} onChange={(value) => updateQd("customer_enq_no", value)} />
+                        <Field label="Attention" value={getString(qd.attention)} onChange={(value) => updateQd("attention", value)} />
+                        <Field label="Designation" value={getString(qd.designation)} onChange={(value) => updateQd("designation", value)} />
+                        <Field label="Contact no" value={getString(qd.contact_no)} onChange={(value) => updateQd("contact_no", value)} />
+                        <Field label="Email" value={getString(qd.email)} onChange={(value) => updateQd("email", value)} />
                       </div>
                     </div>
-                    <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
                   </div>
-                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-                    <div>RFQ score: <span className="font-medium text-foreground">{qualityReport.score}%</span></div>
-                    <div>Risks: <span className="font-medium text-foreground">{qualityReport.risks.length}</span></div>
-                    <div>Quote value: <span className="font-medium text-foreground">{grandTotal.toFixed(2)} {currency}</span></div>
+
+                </TabsContent>
+
+                <TabsContent value="pricing" className="space-y-3">
+                  <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Subtotal</div><div className="text-lg font-semibold">{subtotal.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Discount</div><div className="text-lg font-semibold">{discount.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">GST</div><div className="text-lg font-semibold">{gst.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Grand total</div><div className="text-lg font-semibold">{grandTotal.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Cost total</div><div className="text-lg font-semibold">{pricingSummary.costTotal.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Gross margin</div><div className="text-lg font-semibold">{pricingSummary.grossMarginPct === null ? "-" : `${pricingSummary.grossMarginPct.toFixed(1)}%`}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Lowest margin</div><div className="text-lg font-semibold">{pricingSummary.lowestLineMarginPct === null ? "-" : `${pricingSummary.lowestLineMarginPct.toFixed(1)}%`}</div></div>
                   </div>
-                  {qualityReport.risks.length > 0 && (
-                    <div className="mt-3 rounded-md border bg-muted/30 p-2">
-                      <div className="text-xs font-medium">Technical risk details</div>
-                      <div className="mt-2 space-y-1.5">
-                        {qualityReport.risks.slice(0, 6).map((risk) => (
-                          <div key={`${risk.title}-${risk.detail}`} className="text-xs">
-                            <span className={risk.severity === "high" ? "font-medium text-red-600" : "font-medium text-amber-700"}>{risk.title}</span>
-                            <span className="text-muted-foreground"> - {risk.detail}</span>
-                            {risk.rows?.length ? <span className="text-muted-foreground"> Rows {risk.rows.slice(0, 8).join(", ")}</span> : null}
-                          </div>
-                        ))}
-                        {qualityReport.risks.length > 6 && <div className="text-xs text-muted-foreground">+ {qualityReport.risks.length - 6} more risk checks</div>}
+
+                  <div className="rounded-md border bg-background p-3">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-medium"><SlidersHorizontal className="h-4 w-4" />Commercial controls</div>
+                    <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+                      <div className="space-y-1.5">
+                        <Label>Currency</Label>
+                        <Select value={currency} onValueChange={(value) => updateQd("currency", value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>{currencies.map((cur) => <SelectItem key={cur} value={cur}>{cur}</SelectItem>)}</SelectContent>
+                        </Select>
                       </div>
+                      <Field label="FX rate" value={getString(qd.fx_rate)} onChange={(value) => updateQd("fx_rate", Number(value))} type="number" />
+                      <Field label="Discount %" value={getString(qd.discount_pct)} onChange={(value) => updateQd("discount_pct", Number(value))} type="number" />
+                      <Field label="Approval discount %" value={getString(qd.discount_approval_pct)} onChange={(value) => updateQd("discount_approval_pct", Number(value))} type="number" />
+                      <Field label="Minimum margin %" value={getString(qd.minimum_margin_pct)} onChange={(value) => updateQd("minimum_margin_pct", Number(value))} type="number" />
+                      <div className="space-y-1.5">
+                        <Label>GST type</Label>
+                        <Select value={getString(qd.gst_type || "IGST")} onValueChange={(value) => updateQd("gst_type", value)} disabled={currency !== "INR"}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="IGST">IGST</SelectItem>
+                            <SelectItem value="CGST+SGST">CGST+SGST</SelectItem>
+                            <SelectItem value="UGST">UGST</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Field label="GST %" value={getString(qd.gst_pct)} onChange={(value) => updateQd("gst_pct", Number(value))} type="number" />
                     </div>
-                  )}
+                  </div>
+
                   {pricingSummary.approvalRequired && (
-                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/70 p-2 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
-                      <div className="font-medium">Approval required</div>
-                      <ul className="mt-1 space-y-1">
+                    <div className="rounded-md border border-amber-200 bg-amber-50/70 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100">
+                      <div className="font-medium">Commercial approval required</div>
+                      <ul className="mt-2 space-y-1 text-xs">
                         {pricingSummary.approvalReasons.map((reason) => <li key={reason}>- {reason}</li>)}
                       </ul>
                     </div>
                   )}
-                  {approval.requested_by && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Requested by {approval.requested_by}{approval.requested_at ? ` on ${new Date(approval.requested_at).toLocaleString()}` : ""}
-                    </div>
-                  )}
-                  {approval.decided_by && (
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {approval.status === "approved" ? "Approved" : "Rejected"} by {approval.decided_by}{approval.decided_at ? ` on ${new Date(approval.decided_at).toLocaleString()}` : ""}
-                    </div>
-                  )}
-                  {approval.comments && <div className="mt-2 rounded-md bg-muted/40 p-2 text-xs">{approval.comments}</div>}
-                  {approval.required_changes && <div className="mt-2 rounded-md bg-muted/40 p-2 text-xs">Required changes: {approval.required_changes}</div>}
-                </div>
+                </TabsContent>
 
-                <div className="rounded-md border p-3">
-                  <Label>Approval comments</Label>
-                  <textarea
-                    className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                    value={approvalComment}
-                    onChange={(event) => setApprovalComment(event.target.value)}
-                    placeholder="Reason, exception approval, price override, or rejection comments"
-                  />
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={requestApproval} disabled={approval.status === "pending" || approval.status === "approved"}>
-                      <ShieldCheck className="h-4 w-4" />
-                      Request approval
-                    </Button>
-                    <Button onClick={() => decideApproval("approved")} disabled={!canApprove || approval.status !== "pending"}>
-                      <CheckCircle2 className="h-4 w-4" />
-                      Approve
-                    </Button>
-                    <Button variant="secondary" onClick={() => decideApproval("rejected")} disabled={!canApprove || approval.status !== "pending"}>
-                      <Ban className="h-4 w-4" />
-                      Reject
-                    </Button>
+                <TabsContent value="items" className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                    <div className="text-muted-foreground">Showing {items.length ? finalPageStartIndex + 1 : 0}-{finalPageEndIndex} of {items.length} quotation row(s).</div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setFinalPage((page) => Math.max(0, page - 1))} disabled={safeFinalPage <= 0}>Previous</Button>
+                      <span className="text-xs text-muted-foreground">Page {safeFinalPage + 1} of {finalPageCount}</span>
+                      <Button variant="secondary" size="sm" onClick={() => setFinalPage((page) => Math.min(finalPageCount - 1, page + 1))} disabled={safeFinalPage >= finalPageCount - 1}>Next</Button>
+                    </div>
                   </div>
-                  {!canApprove && <div className="mt-2 text-xs text-muted-foreground">Only admin or approver users can approve or reject.</div>}
-                  {!canExportFinal && <div className="mt-1 text-xs text-muted-foreground">Quotation export is locked only for commercial approval items such as margin or discount exceptions.</div>}
-                </div>
-              </div>
 
-              <div className="grid gap-3 md:grid-cols-4">
-                <Field label="Quote no" value={getString(qd.quote_no)} onChange={(value) => updateQd("quote_no", value)} />
-                <Field label="Quote date" value={getString(qd.quote_date)} onChange={(value) => updateQd("quote_date", value)} />
-                <Field label="Revision no" value={getString(qd.rev_no)} onChange={(value) => updateQd("rev_no", value)} />
-                <Field label="Revision date" value={getString(qd.rev_date)} onChange={(value) => updateQd("rev_date", value)} />
-              </div>
-              <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-2">
-                <label className="flex items-start gap-3 text-sm">
-                  <input
-                    className="mt-1"
-                    type="checkbox"
-                    checked={Boolean(qd.include_customer_sl_no)}
-                    onChange={(event) => updateQd("include_customer_sl_no", event.target.checked)}
-                  />
-                  <span>
-                    <span className="block font-medium">Use customer SL No. in quotation PDF</span>
-                    <span className="block text-xs text-muted-foreground">When enabled, customer SL No. replaces the default serial number.</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 text-sm">
-                  <input
-                    className="mt-1"
-                    type="checkbox"
-                    checked={Boolean(qd.include_customer_item_code)}
-                    onChange={(event) => updateQd("include_customer_item_code", event.target.checked)}
-                  />
-                  <span>
-                    <span className="block font-medium">Add customer item code to quotation PDF</span>
-                    <span className="block text-xs text-muted-foreground">Keep disabled when the customer code is only for internal matching.</span>
-                  </span>
-                </label>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Buyer name/address" value={getString(qd.buyer_name_address)} onChange={(value) => updateQd("buyer_name_address", value)} textarea />
-                <div className="grid gap-3 md:grid-cols-2">
-                  <Field label="Customer enquiry no" value={getString(qd.customer_enq_no)} onChange={(value) => updateQd("customer_enq_no", value)} />
-                  <Field label="Attention" value={getString(qd.attention)} onChange={(value) => updateQd("attention", value)} />
-                  <Field label="Designation" value={getString(qd.designation)} onChange={(value) => updateQd("designation", value)} />
-                  <Field label="Contact no" value={getString(qd.contact_no)} onChange={(value) => updateQd("contact_no", value)} />
-                  <Field label="Email" value={getString(qd.email)} onChange={(value) => updateQd("email", value)} />
-                </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-4">
-                <Field label="Rep name" value={getString(qd.rep_name)} onChange={(value) => updateQd("rep_name", value)} />
-                <Field label="Rep designation" value={getString(qd.rep_designation)} onChange={(value) => updateQd("rep_designation", value)} />
-                <Field label="Rep contact" value={getString(qd.rep_contact)} onChange={(value) => updateQd("rep_contact", value)} />
-                <Field label="Rep email" value={getString(qd.rep_email)} onChange={(value) => updateQd("rep_email", value)} />
-              </div>
-              <div className="grid gap-3 md:grid-cols-5">
-                <div className="space-y-1.5">
-                  <Label>Currency</Label>
-                  <Select value={currency} onValueChange={(value) => updateQd("currency", value)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>{currencies.map((cur) => <SelectItem key={cur} value={cur}>{cur}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-                <Field label="FX rate" value={getString(qd.fx_rate)} onChange={(value) => updateQd("fx_rate", Number(value))} type="number" />
-                <Field label="Discount %" value={getString(qd.discount_pct)} onChange={(value) => updateQd("discount_pct", Number(value))} type="number" />
-                <Field label="Approval discount %" value={getString(qd.discount_approval_pct)} onChange={(value) => updateQd("discount_approval_pct", Number(value))} type="number" />
-                <Field label="Minimum margin %" value={getString(qd.minimum_margin_pct)} onChange={(value) => updateQd("minimum_margin_pct", Number(value))} type="number" />
-                <div className="space-y-1.5">
-                  <Label>GST type</Label>
-                  <Select value={getString(qd.gst_type || "IGST")} onValueChange={(value) => updateQd("gst_type", value)} disabled={currency !== "INR"}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="IGST">IGST</SelectItem>
-                      <SelectItem value="CGST+SGST">CGST+SGST</SelectItem>
-                      <SelectItem value="UGST">UGST</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Field label="GST %" value={getString(qd.gst_pct)} onChange={(value) => updateQd("gst_pct", Number(value))} type="number" />
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                <div className="text-muted-foreground">
-                  Showing {items.length ? finalPageStartIndex + 1 : 0}-{finalPageEndIndex} of {items.length} quotation row(s).
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setFinalPage((page) => Math.max(0, page - 1))}
-                    disabled={safeFinalPage <= 0}
-                  >
-                    Previous
-                  </Button>
-                  <span className="text-xs text-muted-foreground">Page {safeFinalPage + 1} of {finalPageCount}</span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setFinalPage((page) => Math.min(finalPageCount - 1, page + 1))}
-                    disabled={safeFinalPage >= finalPageCount - 1}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-
-              <div className="max-h-[620px] overflow-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>#</TableHead>
-                      <TableHead>Cust Sl.No</TableHead>
-                      <TableHead>Customer item code</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>UOM</TableHead>
-                      <TableHead>Cost/unit</TableHead>
-                      <TableHead>Target margin %</TableHead>
-                      <TableHead>Base INR unit price</TableHead>
-                      <TableHead>{currency} unit price</TableHead>
-                      <TableHead>Margin %</TableHead>
-                      <TableHead>Discount impact</TableHead>
-                      <TableHead>Total {currency}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {finalPageItems.map((item, pageIndex) => {
-                      const index = finalPageStartIndex + pageIndex;
-                      const price = unitPrices[index] ?? 0;
-                      const converted = currency === "INR" ? price : price / (fxRate || 1);
-                      const total = item.status === "regret" ? 0 : converted * toNumber(item.quantity);
-                      const pricingLine = pricingSummary.lines[index];
-                      return (
-                        <TableRow key={index}>
-                          <TableCell>{index + 1}</TableCell>
-                          <TableCell><Input className="w-24" value={getString(item.customer_sl_no)} onChange={(event) => updateItem(index, "customer_sl_no", event.target.value)} /></TableCell>
-                          <TableCell><Input className="w-36" value={getString(item.customer_item_code)} onChange={(event) => updateItem(index, "customer_item_code", event.target.value)} /></TableCell>
-                          <TableCell className="min-w-96 text-xs">
-                            {item.status === "regret" ? (
-                              "REGRET - CANNOT PRODUCE"
-                            ) : (
-                              <div className="space-y-1">
-                                <div>{getString(item.raw_description || item.ggpl_description)}</div>
-                                {item.ggpl_description && item.ggpl_description !== item.raw_description && (
-                                  <div className="text-muted-foreground">GGPL: {getString(item.ggpl_description)}</div>
-                                )}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell><Input className="w-24" type="number" value={getString(item.quantity)} onChange={(event) => updateItem(index, "quantity", event.target.value)} /></TableCell>
-                          <TableCell>{getString(item.uom || "NOS")}</TableCell>
-                          <TableCell>
-                            <Input
-                              className="w-28"
-                              type="number"
-                              value={getString(costPrices[index] ?? 0)}
-                              onChange={(event) => {
-                                const next = [...costPrices];
-                                next[index] = Number(event.target.value);
-                                updateQd("cost_prices", next);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              className="w-28"
-                              type="number"
-                              value={getString(targetMargins[index] ?? minimumMarginPct)}
-                              onChange={(event) => {
-                                const next = [...targetMargins];
-                                next[index] = Number(event.target.value);
-                                updateQd("target_margins_pct", next);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              className="w-32"
-                              type="number"
-                              value={getString(price)}
-                              onChange={(event) => {
-                                const next = [...unitPrices];
-                                next[index] = Number(event.target.value);
-                                updateQd("unit_prices", next);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell>{converted.toFixed(2)}</TableCell>
-                          <TableCell className={pricingLine?.marginPct !== null && pricingLine?.marginPct !== undefined && pricingLine.marginPct < minimumMarginPct ? "text-red-600" : ""}>
-                            {pricingLine?.marginPct === null || pricingLine?.marginPct === undefined ? "-" : pricingLine.marginPct.toFixed(1)}
-                          </TableCell>
-                          <TableCell>{(pricingLine?.discountImpact ?? 0).toFixed(2)}</TableCell>
-                          <TableCell>{total.toFixed(2)}</TableCell>
+                  <div className="max-h-[620px] overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>#</TableHead>
+                          <TableHead>Cust Sl.No</TableHead>
+                          <TableHead>Customer item code</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>UOM</TableHead>
+                          <TableHead>Cost/unit</TableHead>
+                          <TableHead>Target margin %</TableHead>
+                          <TableHead>Base INR unit price</TableHead>
+                          <TableHead>{currency} unit price</TableHead>
+                          <TableHead>Margin %</TableHead>
+                          <TableHead>Discount impact</TableHead>
+                          <TableHead>Total {currency}</TableHead>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Subtotal</div><div className="text-lg font-semibold">{subtotal.toFixed(2)}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Discount</div><div className="text-lg font-semibold">{discount.toFixed(2)}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">GST</div><div className="text-lg font-semibold">{gst.toFixed(2)}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Grand total</div><div className="text-lg font-semibold">{grandTotal.toFixed(2)}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Cost total</div><div className="text-lg font-semibold">{pricingSummary.costTotal.toFixed(2)}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Gross margin</div><div className="text-lg font-semibold">{pricingSummary.grossMarginPct === null ? "-" : `${pricingSummary.grossMarginPct.toFixed(1)}%`}</div></div>
-                <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Lowest line margin</div><div className="text-lg font-semibold">{pricingSummary.lowestLineMarginPct === null ? "-" : `${pricingSummary.lowestLineMarginPct.toFixed(1)}%`}</div></div>
-              </div>
+                      </TableHeader>
+                      <TableBody>
+                        {finalPageItems.map((item, pageIndex) => {
+                          const index = finalPageStartIndex + pageIndex;
+                          const price = unitPrices[index] ?? 0;
+                          const converted = currency === "INR" ? price : price / (fxRate || 1);
+                          const total = item.status === "regret" ? 0 : converted * toNumber(item.quantity);
+                          const pricingLine = pricingSummary.lines[index];
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>{index + 1}</TableCell>
+                              <TableCell><Input className="w-24" value={getString(item.customer_sl_no)} onChange={(event) => updateItem(index, "customer_sl_no", event.target.value)} /></TableCell>
+                              <TableCell><Input className="w-36" value={getString(item.customer_item_code)} onChange={(event) => updateItem(index, "customer_item_code", event.target.value)} /></TableCell>
+                              <TableCell className="min-w-96 text-xs">
+                                {item.status === "regret" ? (
+                                  "REGRET - CANNOT PRODUCE"
+                                ) : (
+                                  <div className="space-y-1">
+                                    <div>{getString(item.raw_description || item.ggpl_description)}</div>
+                                    {item.ggpl_description && item.ggpl_description !== item.raw_description && <div className="text-muted-foreground">GGPL: {getString(item.ggpl_description)}</div>}
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell><Input className="w-24" type="number" value={getString(item.quantity)} onChange={(event) => updateItem(index, "quantity", event.target.value)} /></TableCell>
+                              <TableCell>{getString(item.uom || "NOS")}</TableCell>
+                              <TableCell>
+                                <Input className="w-28" type="number" value={getString(costPrices[index] ?? 0)} onChange={(event) => {
+                                  const next = [...costPrices];
+                                  next[index] = Number(event.target.value);
+                                  updateQd("cost_prices", next);
+                                }} />
+                              </TableCell>
+                              <TableCell>
+                                <Input className="w-28" type="number" value={getString(targetMargins[index] ?? minimumMarginPct)} onChange={(event) => {
+                                  const next = [...targetMargins];
+                                  next[index] = Number(event.target.value);
+                                  updateQd("target_margins_pct", next);
+                                }} />
+                              </TableCell>
+                              <TableCell>
+                                <Input className="w-32" type="number" value={getString(price)} onChange={(event) => {
+                                  const next = [...unitPrices];
+                                  next[index] = Number(event.target.value);
+                                  updateQd("unit_prices", next);
+                                }} />
+                              </TableCell>
+                              <TableCell>{converted.toFixed(2)}</TableCell>
+                              <TableCell className={pricingLine?.marginPct !== null && pricingLine?.marginPct !== undefined && pricingLine.marginPct < minimumMarginPct ? "text-red-600" : ""}>
+                                {pricingLine?.marginPct === null || pricingLine?.marginPct === undefined ? "-" : pricingLine.marginPct.toFixed(1)}
+                              </TableCell>
+                              <TableCell>{(pricingLine?.discountImpact ?? 0).toFixed(2)}</TableCell>
+                              <TableCell>{total.toFixed(2)}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </TabsContent>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                {[
-                  ["price_basis", "Price basis"],
-                  ["validity_days", "Validity days"],
-                  ["packing", "Packing"],
-                  ["freight", "Freight"],
-                  ["payment_terms", "Payment terms"],
-                  ["bank_charges", "Bank charges"],
-                  ["delivery", "Delivery"],
-                  ["inspection", "Inspection"],
-                  ["insurance", "Insurance"],
-                  ["hsn_code", "HSN code"],
-                  ["ld_clause", "LD clause"],
-                  ["cancellation", "Cancellation"],
-                  ["min_order_value", "Minimum order value"],
-                  ["technical_notes", "Technical notes"],
-                ].map(([key, label]) => (
-                  <Field
-                    key={key}
-                    label={label}
-                    value={getString(qd[key])}
-                    onChange={(value) => updateQd(key, value)}
-                    textarea={["payment_terms", "cancellation", "min_order_value", "technical_notes"].includes(key)}
-                  />
-                ))}
-              </div>
+                <TabsContent value="terms" className="space-y-3">
+                  <div className="rounded-md border bg-background p-3">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-medium"><ListFilter className="h-4 w-4" />Commercial and technical terms</div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {[
+                        ["price_basis", "Price basis"],
+                        ["validity_days", "Validity days"],
+                        ["packing", "Packing"],
+                        ["freight", "Freight"],
+                        ["payment_terms", "Payment terms"],
+                        ["bank_charges", "Bank charges"],
+                        ["delivery", "Delivery"],
+                        ["inspection", "Inspection"],
+                        ["insurance", "Insurance"],
+                        ["hsn_code", "HSN code"],
+                        ["ld_clause", "LD clause"],
+                        ["cancellation", "Cancellation"],
+                        ["min_order_value", "Minimum order value"],
+                        ["technical_notes", "Technical notes"],
+                      ].map(([key, label]) => (
+                        <Field
+                          key={key}
+                          label={label}
+                          value={getString(qd[key])}
+                          onChange={(value) => updateQd(key, value)}
+                          textarea={["payment_terms", "cancellation", "min_order_value", "technical_notes"].includes(key)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="approval" className="space-y-3">
+                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr]">
+                    <div className="rounded-md border bg-background p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="h-4 w-4" />Approval workflow</div>
+                          <div className="mt-1 text-xs text-muted-foreground">Current user: {currentUser.name} ({roleLabels[currentUser.role]})</div>
+                        </div>
+                        <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
+                        <div>RFQ score: <span className="font-medium text-foreground">{qualityReport.score}%</span></div>
+                        <div>Risks: <span className="font-medium text-foreground">{qualityReport.risks.length}</span></div>
+                        <div>Quote value: <span className="font-medium text-foreground">{grandTotal.toFixed(2)} {currency}</span></div>
+                      </div>
+                      {qualityReport.risks.length > 0 && (
+                        <div className="mt-3 rounded-md border bg-muted/30 p-2">
+                          <div className="text-xs font-medium">Technical risk details</div>
+                          <div className="mt-2 space-y-1.5">
+                            {qualityReport.risks.slice(0, 8).map((risk) => (
+                              <div key={`${risk.title}-${risk.detail}`} className="text-xs">
+                                <span className={risk.severity === "high" ? "font-medium text-red-600" : "font-medium text-amber-700"}>{risk.title}</span>
+                                <span className="text-muted-foreground"> - {risk.detail}</span>
+                                {risk.rows?.length ? <span className="text-muted-foreground"> Rows {risk.rows.slice(0, 8).join(", ")}</span> : null}
+                              </div>
+                            ))}
+                            {qualityReport.risks.length > 8 && <div className="text-xs text-muted-foreground">+ {qualityReport.risks.length - 8} more risk checks</div>}
+                          </div>
+                        </div>
+                      )}
+                      {approval.requested_by && <div className="mt-2 text-xs text-muted-foreground">Requested by {approval.requested_by}{approval.requested_at ? ` on ${new Date(approval.requested_at).toLocaleString()}` : ""}</div>}
+                      {approval.decided_by && <div className="mt-1 text-xs text-muted-foreground">{approval.status === "approved" ? "Approved" : "Rejected"} by {approval.decided_by}{approval.decided_at ? ` on ${new Date(approval.decided_at).toLocaleString()}` : ""}</div>}
+                      {approval.comments && <div className="mt-2 rounded-md bg-muted/40 p-2 text-xs">{approval.comments}</div>}
+                      {approval.required_changes && <div className="mt-2 rounded-md bg-muted/40 p-2 text-xs">Required changes: {approval.required_changes}</div>}
+                    </div>
+
+                    <div className="rounded-md border bg-background p-3">
+                      <Label>Approval comments</Label>
+                      <textarea
+                        className="mt-1 min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                        value={approvalComment}
+                        onChange={(event) => setApprovalComment(event.target.value)}
+                        placeholder="Reason, exception approval, price override, or rejection comments"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button variant="secondary" onClick={requestApproval} disabled={approval.status === "pending" || approval.status === "approved"}>
+                          <ShieldCheck className="h-4 w-4" />
+                          Request approval
+                        </Button>
+                        <Button onClick={() => decideApproval("approved")} disabled={!canApprove || approval.status !== "pending"}>
+                          <CheckCircle2 className="h-4 w-4" />
+                          Approve
+                        </Button>
+                        <Button variant="secondary" onClick={() => decideApproval("rejected")} disabled={!canApprove || approval.status !== "pending"}>
+                          <Ban className="h-4 w-4" />
+                          Reject
+                        </Button>
+                      </div>
+                      {!canApprove && <div className="mt-2 text-xs text-muted-foreground">Only admin or approver users can approve or reject.</div>}
+                      {!canExportFinal && <div className="mt-1 text-xs text-muted-foreground">Quotation export is locked only for commercial approval items such as margin or discount exceptions.</div>}
+                    </div>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </div>
           </CardContent>
         </Card>
       )}

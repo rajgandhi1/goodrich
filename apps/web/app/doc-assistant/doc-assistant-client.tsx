@@ -108,16 +108,16 @@ export function DocAssistantClient() {
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-8rem)] gap-4 xl:grid-cols-[340px_minmax(0,1fr)_300px]">
+    <div className="grid min-h-[calc(100vh-8rem)] gap-3 xl:grid-cols-[300px_minmax(0,1fr)_260px]">
       <Card className="overflow-hidden">
-        <CardHeader className="border-b">
+        <CardHeader className="border-b px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <CardTitle>Documents</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4" />Documents</CardTitle>
             <Badge variant={sessionId ? "secondary" : "muted"}>{documents.length} loaded</Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4 p-4">
-          <div className="rounded-md border border-dashed bg-muted/20 p-4">
+        <CardContent className="space-y-3 p-3">
+          <div className="rounded-md border border-dashed bg-muted/20 p-3">
             <Input
               ref={fileInputRef}
               type="file"
@@ -125,7 +125,7 @@ export function DocAssistantClient() {
               accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.txt"
               onChange={(event) => upload(event.target.files)}
             />
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
                 <Upload className="h-4 w-4" />
                 Upload
@@ -150,29 +150,30 @@ export function DocAssistantClient() {
               </div>
             ))}
             {!documents.length && (
-              <div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">No document loaded.</div>
+              <div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">Upload a PDF, Excel, Word, CSV, or text file.</div>
             )}
           </div>
 
-          <Button variant="destructive" onClick={resetAll} disabled={!sessionId && !documents.length && !chat.length} className="w-full">
-            Reset workspace
+          <Button variant="destructive" size="sm" onClick={resetAll} disabled={!sessionId && !documents.length && !chat.length} className="w-full">
+            <Trash2 className="h-4 w-4" />
+            Reset
           </Button>
         </CardContent>
       </Card>
 
       <Card className="flex min-h-0 flex-col overflow-hidden">
-        <CardHeader className="border-b">
+        <CardHeader className="border-b px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
-              <CardTitle>Document Q&A</CardTitle>
-              <div className="text-sm text-muted-foreground">Answers use the loaded document text and cite filenames where possible.</div>
+              <CardTitle className="flex items-center gap-2 text-base"><Bot className="h-4 w-4" />Document Q&A</CardTitle>
+              <div className="text-xs text-muted-foreground">Answers use loaded document text and cite filenames where possible.</div>
             </div>
             <Badge variant="outline">GPT-5.2 default</Badge>
           </div>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-4 p-4">
-          <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-background p-4">
-            <div className="space-y-4">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-3">
+          <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-background p-3">
+            <div className="space-y-3">
               {chat.map((message, index) => (
                 <div key={index} className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                   {message.role === "assistant" && (
@@ -197,7 +198,7 @@ export function DocAssistantClient() {
                 </div>
               )}
               {!chat.length && !loading && (
-                <div className="flex h-[360px] items-center justify-center rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
+                <div className="flex h-[320px] items-center justify-center rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
                   <div className="flex items-center gap-2">
                     <MessageSquare className="h-4 w-4" />
                     Upload documents and ask a question.
@@ -208,9 +209,9 @@ export function DocAssistantClient() {
             </div>
           </div>
 
-          <div className="rounded-md border bg-card p-3">
+          <div className="rounded-md border bg-card p-2">
             <textarea
-              className="min-h-24 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              className="min-h-20 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={(event) => {
@@ -221,8 +222,8 @@ export function DocAssistantClient() {
               }}
               placeholder="Ask about specifications, missing details, risks, or quoted requirements"
             />
-            <div className="mt-3 flex justify-end">
-              <Button onClick={() => ask(question)} disabled={loading || !question.trim()}>
+            <div className="mt-2 flex justify-end">
+              <Button size="sm" onClick={() => ask(question)} disabled={loading || !question.trim()}>
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Ask
               </Button>
@@ -232,12 +233,13 @@ export function DocAssistantClient() {
       </Card>
 
       <Card className="overflow-hidden">
-        <CardHeader className="border-b">
-          <CardTitle>Prompts</CardTitle>
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base"><MessageSquare className="h-4 w-4" />Quick prompts</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 p-4">
+        <CardContent className="space-y-2 p-3">
           {quickQuestions.map((item) => (
             <Button key={item} variant="secondary" className="h-auto w-full justify-start whitespace-normal text-left" onClick={() => ask(item)} disabled={!sessionId || loading}>
+              <Send className="h-4 w-4 shrink-0" />
               {item}
             </Button>
           ))}
