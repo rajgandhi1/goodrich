@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Circle,
+  Copy,
   Download,
   FileUp,
   FileSpreadsheet,
@@ -431,6 +432,7 @@ function storedMaterialPlan(quote: Quote | null): MaterialPlan | null {
     const shortage = row.shortage_qty ?? Math.max(0, required + reserved - available);
     return {
       ...row,
+      purchase_uom: row.purchase_uom ?? (row.reqd_qty_sheets !== null && row.reqd_qty_sheets !== undefined ? "SHEETS" : "KG"),
       available_qty: available,
       reserved_qty: reserved,
       shortage_qty: shortage,
@@ -456,7 +458,7 @@ function storedMaterialBreakdown(quote: Quote | null): MaterialBreakdownRow[] | 
     return {
       reviewed: Boolean(candidate.reviewed),
       line_no: toNumber(candidate.line_no, index + 1),
-      gasket_type: getString(candidate.gasket_type),
+      gasket_type: getString(candidate.gasket_type || "SOFT_CUT"),
       size_inch: getString(candidate.size_inch),
       pressure_rating: getString(candidate.pressure_rating),
       thickness: getString(candidate.thickness),
@@ -2271,7 +2273,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         };
       });
       const grouped = nextRows.reduce<MaterialPlan["grouped_summary"]>((acc, row) => {
-        const group = `${row.type} / ${row.thickness_mm ?? "-"} mm / ${row.preferred_vendor || "Vendor TBD"}`;
+        const group = `${row.type} / ${row.purchase_uom} / ${row.thickness_mm ?? "-"} mm / ${row.preferred_vendor || "Vendor TBD"}`;
         const currentGroup = acc.find((item) => item.group === group);
         if (currentGroup) {
           currentGroup.rows += 1;
@@ -2295,6 +2297,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   function formatStockSize(row: MaterialPlan["rows"][number]) {
+    if (row.purchase_uom === "NOS" && row.width_mm === null && row.length_mm === null && row.thickness_mm === null) {
+      return "Kit/set count";
+    }
     if (row.length_mm === "COIL") {
       return `${row.width_mm ?? "-"} mm wide coil${row.thickness_mm ? ` x ${row.thickness_mm} mm thk` : ""}`;
     }
@@ -2308,8 +2313,106 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     if (row.reqd_qty_sheets !== null) {
       return `${row.reqd_qty_sheets.toFixed(0)} sheet${row.reqd_qty_sheets === 1 ? "" : "s"}`;
     }
-    if (row.reqd_qty_kg !== null) return "Weight based";
+    if (row.reqd_qty_kg !== null) return `${row.reqd_qty_kg.toFixed(2)} ${row.purchase_uom?.toLowerCase() || "kg"}`;
     return "Needs dimensions";
+  }
+
+  function exportFileStem(suffix: string) {
+    const base = getString(quote?.quote_no || quote?.customer || quote?.id || "material-plan")
+      .replace(/[^\w.-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "material-plan";
+    return `${base}-${suffix}`;
+  }
+
+  function encodeExportCell(value: unknown, delimiter: "," | "\t") {
+    const text = value === true ? "Yes" : value === false ? "No" : getString(value);
+    if (delimiter === "\t") return text.replace(/\t/g, " ").replace(/\r?\n/g, " ");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function rowsToText(rows: unknown[][], delimiter: "," | "\t") {
+    return rows.map((row) => row.map((cell) => encodeExportCell(cell, delimiter)).join(delimiter)).join("\r\n");
+  }
+
+  function downloadRowsAsCsv(filename: string, rows: unknown[][]) {
+    if (rows.length <= 1) {
+      toast.error("No rows to export");
+      return;
+    }
+    const blob = new Blob([`\uFEFF${rowsToText(rows, ",")}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyRowsToClipboard(label: string, rows: unknown[][]) {
+    if (rows.length <= 1) {
+      toast.error("No rows to copy");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(rowsToText(rows, "\t"));
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error("Could not copy table data");
+    }
+  }
+
+  function phase1ExportRows() {
+    return [
+      ["Review", "SL", "Gasket type", "Size (inch)", "Pressure rating", "Thickness", "Primary material", "Secondary / inner", "Outer / hardware", "Filler / facing / seals", "Qty", "UOM", "Series", "Remarks", "OD mm", "ID mm", "Source rows"],
+      ...(materialBreakdown ?? []).map((row) => [
+        row.reviewed,
+        row.line_no,
+        row.gasket_type,
+        row.size_inch,
+        row.pressure_rating,
+        row.thickness,
+        row.winding,
+        row.inner_ring,
+        row.outer_ring,
+        row.filler,
+        row.qty,
+        row.uom,
+        row.series,
+        row.remarks,
+        row.od_mm ?? "",
+        row.id_mm ?? "",
+        row.source_rows,
+      ]),
+    ];
+  }
+
+  function phase2ExportRows() {
+    return [
+      ["Review", "SL.NO.", "Stock type", "Stock size", "Purchase UOM", "Planned qty", "Est. purchase qty", "Available", "Reserved", "Shortage", "Suggested purchase", "Vendor", "Lead days", "Material cost", "Priority", "Source rows", "Notes", "Planner review"],
+      ...(materialPlan?.rows ?? []).map((row) => [
+        row.reviewed,
+        row.sl_no,
+        row.type,
+        formatStockSize(row),
+        row.purchase_uom,
+        formatPlanQuantity(row),
+        row.reqd_qty_sheets ?? row.reqd_qty_kg ?? "Needs dimensions",
+        row.available_qty,
+        row.reserved_qty,
+        row.shortage_qty,
+        row.suggested_purchase_qty,
+        row.preferred_vendor,
+        row.lead_time_days,
+        row.estimated_material_cost,
+        row.production_priority,
+        row.source_count,
+        row.notes,
+        row.planner_notes,
+      ]),
+    ];
   }
 
   if (!quote) {
@@ -3275,6 +3378,22 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   <ArrowRight className="h-4 w-4" />
                   {materialPlan ? "Update plan" : "Create plan"}
                 </Button>
+                <Button variant="secondary" size="sm" onClick={() => copyRowsToClipboard("Phase 1 breakdown", phase1ExportRows())} disabled={!materialBreakdown?.length}>
+                  <Copy className="h-4 w-4" />
+                  Copy P1
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => downloadRowsAsCsv(`${exportFileStem("phase-1-breakdown")}.csv`, phase1ExportRows())} disabled={!materialBreakdown?.length}>
+                  <Download className="h-4 w-4" />
+                  CSV P1
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => copyRowsToClipboard("Phase 2 material plan", phase2ExportRows())} disabled={!materialPlan}>
+                  <Copy className="h-4 w-4" />
+                  Copy P2
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => downloadRowsAsCsv(`${exportFileStem("phase-2-material-plan")}.csv`, phase2ExportRows())} disabled={!materialPlan}>
+                  <Download className="h-4 w-4" />
+                  CSV P2
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -3295,13 +3414,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <TableRow>
                         <TableHead className="w-20">Review</TableHead>
                         <TableHead className="w-16">SL</TableHead>
+                        <TableHead className="w-32">Type</TableHead>
                         <TableHead className="w-28">Size (inch)</TableHead>
                         <TableHead className="w-32">Pressure rating</TableHead>
                         <TableHead className="w-28">Thickness</TableHead>
-                        <TableHead className="w-36">Winding</TableHead>
-                        <TableHead className="w-36">Inner ring</TableHead>
-                        <TableHead className="w-36">Outer ring</TableHead>
-                        <TableHead className="w-44">Filler</TableHead>
+                        <TableHead className="w-36">Primary material</TableHead>
+                        <TableHead className="w-36">Secondary / inner</TableHead>
+                        <TableHead className="w-36">Outer / hardware</TableHead>
+                        <TableHead className="w-44">Filler / facing / seals</TableHead>
                         <TableHead className="w-28">Qty</TableHead>
                         <TableHead className="w-24">UOM</TableHead>
                         <TableHead className="w-32">Series</TableHead>
@@ -3323,6 +3443,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                             />
                           </TableCell>
                           <TableCell>{row.line_no}</TableCell>
+                          <TableCell><Input className="w-28" value={row.gasket_type} onChange={(event) => updateBreakdownRow(index, { gasket_type: event.target.value.toUpperCase() })} /></TableCell>
                           <TableCell><Input className="w-24" value={row.size_inch} onChange={(event) => updateBreakdownRow(index, { size_inch: event.target.value })} /></TableCell>
                           <TableCell><Input className="w-28" value={row.pressure_rating} onChange={(event) => updateBreakdownRow(index, { pressure_rating: event.target.value })} /></TableCell>
                           <TableCell><Input className="w-24" value={row.thickness} onChange={(event) => updateBreakdownRow(index, { thickness: event.target.value })} /></TableCell>
@@ -3616,8 +3737,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                         <TableHead className="w-16">SL.NO.</TableHead>
                         <TableHead className="min-w-72">Stock type</TableHead>
                         <TableHead className="min-w-44">Stock size</TableHead>
+                        <TableHead className="w-28">UOM</TableHead>
                         <TableHead className="w-36">Planned qty</TableHead>
-                        <TableHead className="w-40">Est. purchase wt.</TableHead>
+                        <TableHead className="w-40">Est. purchase qty</TableHead>
                         <TableHead className="w-32">Available</TableHead>
                         <TableHead className="w-32">Reserved</TableHead>
                         <TableHead className="w-32">Shortage</TableHead>
@@ -3644,8 +3766,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           <TableCell>{row.sl_no}</TableCell>
                           <TableCell className="text-sm font-medium">{row.type}</TableCell>
                           <TableCell className="text-sm">{formatStockSize(row)}</TableCell>
+                          <TableCell className="text-sm">{row.purchase_uom}</TableCell>
                           <TableCell className="text-sm">{formatPlanQuantity(row)}</TableCell>
-                          <TableCell className="text-sm">{row.reqd_qty_kg === null ? "Needs dimensions" : `${row.reqd_qty_kg.toFixed(2)} kg`}</TableCell>
+                          <TableCell className="text-sm">{row.reqd_qty_sheets ?? row.reqd_qty_kg ?? "Needs dimensions"}</TableCell>
                           <TableCell><Input className="w-28" type="number" value={getString(row.available_qty)} onChange={(event) => updatePlanRow(index, { available_qty: Number(event.target.value) })} /></TableCell>
                           <TableCell><Input className="w-28" type="number" value={getString(row.reserved_qty)} onChange={(event) => updatePlanRow(index, { reserved_qty: Number(event.target.value) })} /></TableCell>
                           <TableCell className={row.shortage_qty > 0 ? "font-medium text-red-600" : "text-sm"}>{row.shortage_qty.toFixed(2)}</TableCell>
