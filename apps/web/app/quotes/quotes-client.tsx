@@ -64,7 +64,7 @@ import {
   toNumber,
 } from "@/lib/api";
 import { addBackgroundJob } from "@/lib/background-jobs";
-import { canApproveQuotes, canEditQuotes, getAppUsers, getCurrentAppUser, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { canApproveQuotes, canEditQuotes, getAppUsers, getCurrentAppUser, resolveAppUserName, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import {
   buildMaterialBreakdown,
   DEFAULT_MATERIAL_PLANNING_INPUTS,
@@ -82,7 +82,7 @@ import { itemMatchesSmartFilter, quoteDueState, quoteHasClarification, quoteIsHi
 import { QuoteSummaryRow } from "@/components/quotes/quote-summary-row";
 import { appendActivity } from "@/components/quotes/activity-utils";
 import { QuoteTimeline } from "@/components/quotes/quote-timeline";
-import { DRAFT_STAGES, ENQUIRY_STAGES, EnquiryStageId, FINAL_STAGES, PO_STAGES, QuoteSection, enquiryStageFromQuote, enquiryStageLabel, revisionLabel, stageLabel } from "@/components/quotes/stage-utils";
+import { DRAFT_STAGES, ENQUIRY_STAGES, EnquiryStageId, FINAL_STAGES, PO_STAGES, QuoteSection, enquiryStageFromQuote, revisionLabel, stageLabel } from "@/components/quotes/stage-utils";
 import { issueBadgesForItem, TechnicalIssuesPanel } from "@/components/quotes/technical-issues-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -502,6 +502,7 @@ function spreadsheetColumnName(index: number) {
 }
 
 const BULK_DEFAULTS = {
+  status: "(no change)",
   gasket_type: "(no change)",
   moc: "",
   rating: "",
@@ -544,6 +545,12 @@ const SHEET_INPUT_CLASS = "h-8 rounded-none border-0 bg-transparent px-2 py-1 te
 const SHEET_SELECT_CLASS = "h-8 rounded-none border-0 bg-transparent px-2 py-1 text-xs shadow-none focus:ring-1 focus:ring-emerald-600";
 const SHEET_TEXTAREA_CLASS = "min-h-8 w-full min-w-80 resize-none rounded-none border-0 bg-transparent px-2 py-1 text-xs shadow-none outline-none focus:ring-1 focus:ring-emerald-600";
 const STATUS_OPTIONS = ["ready", "check", "missing", "regret"] as const;
+const STATUS_LABELS: Record<(typeof STATUS_OPTIONS)[number], string> = {
+  ready: "Ready",
+  check: "Check",
+  missing: "Missing",
+  regret: "Regret",
+};
 const MATERIAL_PHASE2_UOMS = ["SHEETS", "KG", "COIL", "RINGS", "NOS"] as const;
 const FILTER_STORAGE_KEY = "gq_quote_saved_filters";
 const RECENT_QUOTES_KEY = "gq_recent_quotes";
@@ -1202,8 +1209,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       }),
     [appUsers],
   );
+  const quotationSalesRepLabel = resolveAppUserName([qd.rep_name, qd.rep_email, qd.sales_rep_user_id], appUsers, "Custom sales rep");
   const selectedEnquiryOwnerId = getString(quote?.stage_meta?.owner_id);
   const selectedEnquiryOwnerValue = salesRepUsers.some((user) => user.id === selectedEnquiryOwnerId) ? selectedEnquiryOwnerId : CUSTOM_SALES_REP_VALUE;
+  const selectedEnquiryOwnerLabel = resolveAppUserName([
+    quote?.stage_meta?.owner_name,
+    quote?.stage_meta?.owner_email,
+    quote?.stage_meta?.owner_id,
+  ], appUsers, "Unassigned");
   const createdByUser = React.useMemo(() => {
     if (!quote?.created_by) return undefined;
     const createdBy = quote.created_by.toLowerCase();
@@ -1216,8 +1229,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     ? roleLabels[createdByRoleFromMeta as keyof typeof roleLabels]
     : createdByUser?.role ? roleLabels[createdByUser.role] : "User";
   const createdByUsername = createdByUsernameFromMeta || createdByUser?.id || getString(quote?.created_by);
-  const createdByLabel = createdByUsername
-    ? `${createdByUsername} - ${createdByRoleLabel}`
+  const createdByDisplayName = resolveAppUserName([
+    createdByNameFromMeta,
+    quote?.stage_meta?.created_by_email,
+    createdByUsername,
+  ], appUsers);
+  const createdByLabel = createdByDisplayName
+    ? `${createdByDisplayName} - ${createdByRoleLabel}`
     : createdByNameFromMeta || "Not recorded";
   const currentEnquiryStage = quote ? enquiryStageFromQuote(quote) : "draft";
   const enquiryMarketType = getString(quote?.stage_meta?.market_type);
@@ -1236,6 +1254,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       .map((item, index) => ({ item, index }))
       .filter(({ item }) => {
         if (statusFilter === "issues") return item.status === "check" || item.status === "missing";
+        if (statusFilter === "ready") return item.status === "ready";
         if (statusFilter === "missing") return item.status === "missing";
         if (statusFilter === "regret") return item.status === "regret";
         if (statusFilter !== "all") return itemMatchesSmartFilter(item, statusFilter);
@@ -2491,6 +2510,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     const next = [...items];
     target.forEach((index) => {
       let row = next[index] ?? blankItem(index + 1);
+      if (bulkValues.status !== "(no change)") row = setItemValue(row, "status", bulkValues.status);
       if (bulkValues.gasket_type !== "(no change)") row = setItemValue(row, "gasket_type", bulkValues.gasket_type);
       if (bulkValues.moc.trim()) row = setItemValue(row, "moc", bulkValues.moc.trim().toUpperCase());
       if (bulkValues.rating.trim()) row = setItemValue(row, "rating", bulkValues.rating.trim());
@@ -2681,7 +2701,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     } else if (!DRAFT_STAGES.has(row.stage)) {
       return false;
     }
-    if (queueFilter === "my_work" && row.stage_meta?.owner_id !== currentUser.id && row.stage_meta?.owner_name !== currentUser.name) return false;
+    if (queueFilter === "my_work" && row.stage_meta?.owner_id !== currentUser.id && row.stage_meta?.owner_name !== currentUser.name && row.stage_meta?.owner_email !== currentUser.email) return false;
     if (queueFilter === "due_today" && quoteDueState(row) !== "today") return false;
     if (queueFilter === "delayed" && quoteDueState(row) !== "delayed") return false;
     if (queueFilter === "clarification" && !quoteHasClarification(row)) return false;
@@ -3006,11 +3026,32 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       : GRID_TEXTAREA_CLASS;
     const displayClass = `flex h-8 min-w-0 items-center overflow-hidden px-2 py-1 text-xs ${cellClass}`;
     if (!canEditLineItems) {
+      if (column.field === "status") {
+        const status = getString(item.status) || "missing";
+        return (
+          <div className={`${displayClass} gap-1.5 bg-muted/30 text-muted-foreground`} title={validation?.message || status}>
+            {statusIcon[status]}
+            <span className="truncate">{STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status}</span>
+          </div>
+        );
+      }
       const displayValue = column.field === "flags" ? notesFor(item) : columnValue(item, column);
       return (
         <div className={`${displayClass} bg-muted/30 text-muted-foreground`} title={validation?.message || displayValue}>
           <span className="truncate">{displayValue}</span>
         </div>
+      );
+    }
+    if (column.field === "status") {
+      return (
+        <Select value={getString(rawValue) || "missing"} onValueChange={(value) => updateItem(index, "status", value)}>
+          <SelectTrigger className={`${tableMode === "spreadsheet" ? SHEET_SELECT_CLASS : inputClass} ${cellClass} w-full min-w-28 justify-between`} title={validation?.message || "Set row status"}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{STATUS_LABELS[value]}</SelectItem>)}
+          </SelectContent>
+        </Select>
       );
     }
     if (tableMode === "spreadsheet" && !isEditingGridCell(index, colIndex)) {
@@ -3052,7 +3093,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+            {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{STATUS_LABELS[value]}</SelectItem>)}
           </SelectContent>
         </Select>
       );
@@ -3531,7 +3572,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </TableHeader>
                 <TableBody>
                   {visibleQuotes.map((row) => (
-                    <QuoteSummaryRow key={row.id} quote={row} section={section} onOpen={openQuote} onDelete={removeQuote} onMetaChange={updateQueueMeta} canDelete={canEditQuote} />
+                    <QuoteSummaryRow key={row.id} quote={row} section={section} appUsers={appUsers} onOpen={openQuote} onDelete={removeQuote} onMetaChange={updateQueueMeta} canDelete={canEditQuote} />
                   ))}
                   {!visibleQuotes.length && (
                     <TableRow>
@@ -3846,7 +3887,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             <details className="rounded-md border bg-background p-2.5" open>
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium">
                 <span className="inline-flex items-center gap-2"><PanelRight className="h-4 w-4" />Assignment</span>
-                <Badge variant="outline">{enquiryStageLabel(currentEnquiryStage)}</Badge>
+                <Badge variant="outline">{selectedEnquiryOwnerLabel}</Badge>
               </summary>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
@@ -3873,7 +3914,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           {user.name} - {roleLabels[user.role]}
                         </SelectItem>
                       ))}
-                      <SelectItem value={CUSTOM_SALES_REP_VALUE}>{getString(quote.stage_meta?.owner_name) || "Unassigned"}</SelectItem>
+                      <SelectItem value={CUSTOM_SALES_REP_VALUE}>{selectedEnquiryOwnerLabel}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -4185,6 +4226,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <SelectTrigger className="h-8 w-40 border-0 bg-transparent"><ListFilter className="h-4 w-4" /><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="ready">Ready</SelectItem>
                         <SelectItem value="issues">Issues</SelectItem>
                         <SelectItem value="missing">Missing</SelectItem>
                         <SelectItem value="missing_size">Missing size</SelectItem>
@@ -4290,6 +4332,16 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </span>
                 </summary>
                 <div className="mt-3 grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+                  <div className="space-y-1.5">
+                    <Label>Status</Label>
+                    <Select value={bulkValues.status} onValueChange={(value) => setBulkValue("status", value)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="(no change)">(no change)</SelectItem>
+                        {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{STATUS_LABELS[value]}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="space-y-1.5">
                     <Label>Type</Label>
                     <Select value={bulkValues.gasket_type} onValueChange={(value) => setBulkValue("gasket_type", value)}>
@@ -4548,6 +4600,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                               className={`border-r p-0 align-top outline-none ${selectedCell ? "bg-emerald-50 ring-1 ring-inset ring-emerald-400/60 dark:bg-emerald-950/20" : ""} ${activeGridCell ? "ring-2 ring-inset ring-emerald-600" : ""}`}
                               onMouseDown={(event) => {
                                 if (tableMode !== "spreadsheet") return;
+                                if ((event.target as HTMLElement).closest("button,input,textarea,[role='combobox']")) return;
                                 event.preventDefault();
                                 selectGridCell(index, colIndex, event.shiftKey);
                                 setIsSelectingCells(true);
@@ -4633,7 +4686,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+                            {STATUS_OPTIONS.map((value) => <SelectItem key={value} value={value}>{STATUS_LABELS[value]}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -5352,7 +5405,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                               {user.name} - {roleLabels[user.role]}
                             </SelectItem>
                           ))}
-                          <SelectItem value={CUSTOM_SALES_REP_VALUE}>{getString(qd.rep_name) || "Custom sales rep"}</SelectItem>
+                          <SelectItem value={CUSTOM_SALES_REP_VALUE}>{quotationSalesRepLabel}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -5714,7 +5767,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       )}
 
       {canSaveProgress && (
-        <div className="fixed bottom-4 right-4 z-50">
+        <div className="fixed bottom-4 right-20 z-50 sm:right-24">
           <Button
             className="h-11 shadow-lg"
             onClick={() => saveCurrentProgress()}

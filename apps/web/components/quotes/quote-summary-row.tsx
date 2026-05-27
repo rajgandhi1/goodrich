@@ -3,6 +3,8 @@
 import { ArrowRight, ClipboardList, FileSpreadsheet, Layers3, ShoppingCart, Trash2 } from "lucide-react";
 
 import { Quote } from "@/lib/api";
+import type { AppUser } from "@/lib/auth/users";
+import { resolveAppUserName } from "@/lib/auth/users";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
@@ -16,6 +18,7 @@ export function QuoteSummaryRow({
   section,
   onOpen,
   onDelete,
+  appUsers,
   canDelete = true,
 }: {
   quote: Quote;
@@ -23,6 +26,7 @@ export function QuoteSummaryRow({
   onOpen: (quote: Quote) => void;
   onDelete: (quote: Quote) => void;
   onMetaChange: (quote: Quote, patch: Record<string, unknown>) => void;
+  appUsers: AppUser[];
   canDelete?: boolean;
 }) {
   const isFinalSection = section === "final";
@@ -36,6 +40,14 @@ export function QuoteSummaryRow({
   const priority = String(quote.stage_meta?.priority || "normal");
   const workflowLabel = isFinalSection || isPoSection ? stageLabel(quote.stage) : enquiryStageLabel(quote);
   const ageLabel = isPoSection ? "PO" : isFinalSection ? "quote" : "old";
+  const salesRepLabel = resolveAppUserName([
+    quote.stage_meta?.owner_name,
+    quote.stage_meta?.owner_email,
+    quote.stage_meta?.owner_id,
+    quote.quote_data?.rep_name,
+    quote.quote_data?.rep_email,
+    quote.quote_data?.sales_rep_user_id,
+  ], appUsers, "Unassigned");
 
   return (
     <TableRow className="cursor-pointer hover:bg-muted/40" onClick={() => onOpen(quote)}>
@@ -51,6 +63,7 @@ export function QuoteSummaryRow({
             </div>
             <div className="truncate text-sm font-medium">{quote.customer || quote.custom_label || "No customer"}</div>
             {quote.project_ref ? <div className="truncate text-xs text-muted-foreground">{quote.project_ref}</div> : null}
+            <div className="truncate text-xs text-muted-foreground">Sales rep: {salesRepLabel}</div>
           </div>
         </div>
       </TableCell>

@@ -5,7 +5,7 @@ import { AlertTriangle, CalendarClock, ClipboardList, FileText, History, Refresh
 import { toast } from "sonner";
 
 import { DashboardMetrics, Quote, getDashboardMetrics, listQuotes } from "@/lib/api";
-import { canEditQuotes, getCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { canEditQuotes, getAppUsers, getCurrentAppUser, resolveAppUserName, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import { formatCurrencyValue, quoteAgeDays, quoteDueState, quoteEstimatedValue, quoteNextAction } from "@/components/quotes/queue-utils";
 import { stageLabel } from "@/components/quotes/stage-utils";
 import { EmptyState } from "@/components/app-shell/empty-state";
@@ -37,6 +37,7 @@ export function DashboardClient() {
   const [metrics, setMetrics] = React.useState<DashboardMetrics | null>(null);
   const [quotes, setQuotes] = React.useState<Quote[]>([]);
   const [currentUser, setCurrentUser] = React.useState(() => getCurrentAppUser());
+  const [appUsers, setAppUsers] = React.useState(() => getAppUsers());
 
   async function refresh() {
     try {
@@ -53,7 +54,10 @@ export function DashboardClient() {
   }, []);
 
   React.useEffect(() => {
-    const refreshUser = () => setCurrentUser(getCurrentAppUser());
+    const refreshUser = () => {
+      setCurrentUser(getCurrentAppUser());
+      setAppUsers(getAppUsers());
+    };
     window.addEventListener(USERS_CHANGED_EVENT, refreshUser);
     window.addEventListener("storage", refreshUser);
     return () => {
@@ -133,7 +137,7 @@ export function DashboardClient() {
                         <a href={quoteHref(quote)} className="font-medium hover:underline">{quote.customer || "Untitled customer"}</a>
                         <div className="text-xs text-muted-foreground">{quote.project_ref || quote.quote_no || quote.id}</div>
                       </TableCell>
-                      <TableCell>{String(quote.stage_meta?.owner_name || "Unassigned")}</TableCell>
+                      <TableCell>{resolveAppUserName([quote.stage_meta?.owner_name, quote.stage_meta?.owner_email, quote.stage_meta?.owner_id], appUsers, "Unassigned")}</TableCell>
                       <TableCell><Badge variant="outline">{stageLabel(quote.stage)}</Badge></TableCell>
                       <TableCell>{quoteAgeDays(quote)}d</TableCell>
                       <TableCell>
@@ -167,7 +171,7 @@ export function DashboardClient() {
             {(metrics?.owner_workload ?? []).map((owner) => (
               <div key={owner.owner_id} className="rounded-md border p-3">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium">{owner.owner_name}</div>
+                  <div className="font-medium">{resolveAppUserName([owner.owner_name, owner.owner_id], appUsers, "Unassigned")}</div>
                   <Badge variant={owner.delayed_count ? "warning" : "outline"}>{owner.open_count} open</Badge>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">

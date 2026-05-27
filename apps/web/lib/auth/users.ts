@@ -175,6 +175,29 @@ export function findAppUserByUsername(username?: string) {
   return getAppUsers().find((user) => user.id === cleanUsername || user.email.toLowerCase() === String(username || "").trim().toLowerCase());
 }
 
+export function resolveAppUserName(values: unknown | unknown[], users: AppUser[] = getAppUsers(), fallback = "") {
+  const candidates = (Array.isArray(values) ? values : [values])
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const lower = candidate.toLowerCase();
+    const username = normalizeUsername(candidate);
+    const user = users.find((row) =>
+      row.id.toLowerCase() === lower ||
+      row.id === username ||
+      row.email.toLowerCase() === lower ||
+      normalizeUsername(row.email) === username ||
+      row.name.toLowerCase() === lower,
+    );
+    if (user) return user.name || user.id;
+  }
+
+  const first = candidates[0] ?? "";
+  if (!first) return fallback;
+  return first.includes("@") ? first.split("@")[0] : first;
+}
+
 export function authenticateAppUser(username?: string, password?: string) {
   if (!hasStorage()) return;
   const user = findAppUserByUsername(username);
