@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BarChart3, CheckCircle2, FileCheck2, FileQuestion, FileSearch, FileText, Layers3, LayoutDashboard, Menu, Plus, Settings } from "lucide-react";
+import { BarChart3, CheckCircle2, FileCheck2, FileQuestion, FileSearch, FileText, Layers3, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Plus, Settings } from "lucide-react";
 
 import { ThemeToggle } from "@/components/app-shell/theme-toggle";
 import { UserMenu } from "@/components/app-shell/user-menu";
@@ -60,7 +60,7 @@ const navSections: NavSection[] = [
   },
 ];
 
-function SidebarNav({ activePath }: { activePath: string }) {
+function SidebarNav({ activePath, collapsed = false }: { activePath: string; collapsed?: boolean }) {
   const [role, setRole] = React.useState<AppRole>("admin");
   const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
   const [recent, setRecent] = React.useState<Array<{ id: string; label: string; href: string }>>([]);
@@ -98,10 +98,10 @@ function SidebarNav({ activePath }: { activePath: string }) {
     .map((section) => ({ ...section, items: section.items.filter((item) => !item.capability || canRole(role, item.capability, accessSettings)) }))
     .filter((section) => section.items.length);
   return (
-    <nav className="space-y-5">
+    <nav className={cn("space-y-5", collapsed && "space-y-4")}>
       {visibleSections.map((section) => (
         <div key={section.title} className="space-y-1">
-          <div className="px-3 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">{section.title}</div>
+          {!collapsed && <div className="px-3 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">{section.title}</div>}
           {section.items.map((item) => {
             const Icon = item.icon;
             const active = activePath === item.href;
@@ -111,24 +111,28 @@ function SidebarNav({ activePath }: { activePath: string }) {
                 href={item.href}
                 className={cn(
                   "flex items-start gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                  collapsed && "justify-center px-2",
                   active && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground",
                 )}
+                title={collapsed ? item.description ? `${item.label} - ${item.description}` : item.label : undefined}
               >
                 {item.step ? (
                   <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px]", active ? "border-primary-foreground" : "border-border")}>{item.step}</span>
                 ) : (
                   <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                 )}
+                {!collapsed && (
                 <span className="min-w-0">
                   <span className="block truncate">{item.label}</span>
                   {item.description && <span className={cn("block truncate text-[11px] font-normal", active ? "text-primary-foreground/80" : "text-muted-foreground")}>{item.description}</span>}
                 </span>
+                )}
               </Link>
             );
           })}
         </div>
       ))}
-      {recent.length > 0 && (
+      {recent.length > 0 && !collapsed && (
         <div className="space-y-1 border-t pt-4">
           <div className="px-3 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">Recent</div>
           {recent.slice(0, 4).map((item) => (
@@ -159,12 +163,18 @@ export function AppShell({
 }) {
   const [role, setRole] = React.useState<AppRole>("admin");
   const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   React.useEffect(() => {
     const refresh = () => {
       setRole(getCurrentAppUser().role);
       setAccessSettings(getAccessSettings());
     };
     refresh();
+    try {
+      setSidebarCollapsed(window.localStorage.getItem("gq_sidebar_collapsed") === "1");
+    } catch {
+      setSidebarCollapsed(false);
+    }
     getAccessSettingsRemote()
       .then((settings) => {
         const normalized = normalizeAccessSettings(settings);
@@ -181,26 +191,44 @@ export function AppShell({
       window.removeEventListener("storage", refresh);
     };
   }, []);
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem("gq_sidebar_collapsed", sidebarCollapsed ? "1" : "0");
+    } catch {
+      // Ignore storage failures in private mode or constrained contexts.
+    }
+  }, [sidebarCollapsed]);
   return (
     <div className="min-h-screen bg-background">
-      <aside className="fixed inset-y-0 left-0 hidden w-72 flex-col border-r bg-card lg:flex">
+      <aside className={cn("fixed inset-y-0 left-0 hidden flex-col border-r bg-card lg:flex", sidebarCollapsed ? "w-16" : "w-72")}>
         <div className="flex h-16 items-center gap-3 border-b px-5">
           <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <BarChart3 className="h-5 w-5" />
           </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold">GGPL Quote</div>
-            <div className="truncate text-xs text-muted-foreground">Goodrich Gasket Pvt. Ltd.</div>
-          </div>
+          {!sidebarCollapsed && (
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">GGPL Quote</div>
+              <div className="truncate text-xs text-muted-foreground">Goodrich Gasket Pvt. Ltd.</div>
+            </div>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <SidebarNav activePath={activePath} />
+          <SidebarNav activePath={activePath} collapsed={sidebarCollapsed} />
         </div>
       </aside>
 
-      <div className="lg:pl-72">
+      <div className={cn(sidebarCollapsed ? "lg:pl-16" : "lg:pl-72")}>
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:px-6">
           <div className="flex min-w-0 items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden lg:inline-flex"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => setSidebarCollapsed((value) => !value)}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+            </Button>
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Open navigation">

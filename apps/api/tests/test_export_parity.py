@@ -147,11 +147,11 @@ def test_pdf_continuation_pages_skip_buyer_block_and_final_items_show_totals():
     direct = build_quotation_pdf(items, quote_data, logo_path=_logo_path())
     text = extract_pdf_text(direct)
     assert "Total Quantity" in text
-    assert "Total Price (INR)" in text
+    assert "Price (INR)" in text
     assert "7000.00" in text
     assert "Tax Breakup" in text
     assert "IGST @ 18%" in text
-    assert "Total Combined Price (INR)" in text
+    assert "Total Price (INR)" in text
     assert "7847.00" in text
     with pdfplumber.open(io.BytesIO(direct)) as pdf:
         assert len(pdf.pages) > 3

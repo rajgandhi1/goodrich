@@ -13,7 +13,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
-from reportlab.platypus import Table, TableStyle, Paragraph
+from reportlab.platypus import Table, TableStyle, Paragraph, Flowable
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -28,9 +28,7 @@ ADDRESS_LINES = [
     "Opp. Road to: Pudupakkam Anjaneyar Hill Temple,",
     "Vandalur-Kelambakkam Road,",
     "Chennai - 600127, Tamil Nadu, India.",
-    "Tel: +91-44-67400004 - 99 / +91-7824017150/7824017151",
-    "Fax: +91-44-67400003",
-    "Email: goodrichgasket@gmail.com / info@flosil.com",
+    "Email: info@flosil.com",
 ]
 PAN_LINE = (
     "IT PAN No.:AABCG2902K        CIN : U27209TN1987PTC014031        "
@@ -65,7 +63,10 @@ def _num(value, default=0.0) -> float:
 
 
 def _fmt_qty(value) -> str:
-    return f"{_num(value):.2f}"
+    qty = _num(value)
+    if abs(qty - round(qty)) < 0.0001:
+        return str(int(round(qty)))
+    return f"{qty:.2f}"
 
 
 def _fmt_amount(value, comma: bool = False) -> str:
@@ -117,6 +118,38 @@ def _draw(c: canvas.Canvas, x: float, top: float, text: str, size=8, bold=False,
         c.drawCentredString(x, y, text)
     else:
         c.drawString(x, y, text)
+
+
+class _FitText(Flowable):
+    def __init__(self, text: str, size: float = 8.8, bold: bool = False, align: str = "left"):
+        super().__init__()
+        self.text = str(text or "")
+        self.size = size
+        self.bold = bold
+        self.align = align
+        self.font = "Times-Bold" if bold else "Times-Roman"
+        self.width = 0
+        self.height = size + 3
+
+    def wrap(self, availWidth, availHeight):
+        self.width = availWidth
+        return availWidth, self.height
+
+    def draw(self):
+        text_width = max(pdfmetrics.stringWidth(self.text, self.font, self.size), 1)
+        scale = min(1.0, max(0.45, self.width / text_width))
+        drawn_width = text_width * scale
+        x = 0
+        if self.align == "right":
+            x = self.width - drawn_width
+        elif self.align == "center":
+            x = (self.width - drawn_width) / 2
+        text = self.canv.beginText()
+        text.setTextOrigin(x, 0)
+        text.setFont(self.font, self.size)
+        text.setHorizScale(scale * 100)
+        text.textLine(self.text)
+        self.canv.drawText(text)
 
 
 def _wrap(text: str, width: float, font="Times-Roman", size=8) -> list[str]:
@@ -181,6 +214,7 @@ def _draw_general_terms_page(c: canvas.Canvas):
         size=10,
         leading=12,
     )
+    return top + 22
 
 
 def _draw_numbered_term(c: canvas.Canvas, x: float, top: float, text: str, width: float, size=10, leading=12) -> float:
@@ -249,8 +283,8 @@ def _draw_other_term_row(
 
     remaining = " ".join(words)
     if remaining:
-        for line in _wrap(remaining, right_x - label_x, "Times-Roman", size):
-            _draw(c, label_x, top, line, size=size)
+        for line in _wrap(remaining, right_x - value_x, "Times-Roman", size):
+            _draw(c, value_x, top, line, size=size)
             top += leading
     return top
 
@@ -272,7 +306,7 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
 
     # ── Layout constants — matched to reference PDF measurements ─────────────
     LEFT,   RIGHT    = 20.2,  575.2    # page content left / right
-    H_TOP,  H_BTM   = 21.5,  147.3    # header top / bottom (top-coords)
+    H_TOP,  H_BTM   = 21.5,  114.5    # header top / bottom (top-coords)
     LOGO_DIV         = 150.0           # vertical: logo column | company column
     DIVX             = 387.5           # vertical: company column | SALES QUOTATION
     ADDR_X           = 154.0           # address text left edge
@@ -321,27 +355,33 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
     right_center = (DIVX + RIGHT) / 2             # ≈ 481.35
     _draw(c, right_center, _y(32.7, 9.5), "SALES QUOTATION", size=9.5, bold=True, align="center")
 
-    # ── Quote details (y-positions matched to reference glyph-tops) ───────────
+    # ── Quote details (kept as a compact aligned stack) ─────────────────────
     lx = DIVX + 7                                 # ≈ 394.5
-    _draw(c, lx,      _y(57.2, 9), "QUOTATION NO.:",  size=9, bold=True)
-    _draw(c, lx,      _y(70.7, 9), quote_data.get("quote_no", ""),    size=9)
-    _draw(c, lx,      _y(86.0, 9), "Date:",   size=9, bold=True)
-    _draw(c, lx + 43, _y(86.0, 9), quote_data.get("quote_date", ""), size=9)
-    _draw(c, lx,     _y(103.0, 9), "Rev. No.:",   size=9, bold=True)
-    _draw(c, lx + 52,_y(103.0, 9), quote_data.get("rev_no", "0"),    size=9)
-    _draw(c, lx,     _y(116.0, 9), "Rev. Date:", size=9, bold=True)
-    _draw(c, lx + 58,_y(116.0, 9), quote_data.get("rev_date", ""),   size=9)
+    value_x = lx + 90
+    meta_rows = [
+        ("QUOTATION NO.", quote_data.get("quote_no", ""), _y(57.2, 9)),
+        ("Date:", quote_data.get("quote_date", ""), _y(69.0, 9)),
+        ("Rev. No.:", quote_data.get("rev_no", "0"), _y(81.0, 9)),
+        ("Rev. Date:", quote_data.get("rev_date", ""), _y(93.0, 9)),
+    ]
+    for label, value, top in meta_rows:
+        if label == "QUOTATION NO.":
+            _draw(c, lx, top, label, size=9, bold=True)
+            _draw(c, lx + 74, top, ":", size=9, bold=True)
+        else:
+            _draw(c, lx, top, label, size=9, bold=True)
+        _draw(c, value_x, top, value, size=9)
 
-    # ── PAN / CIN / GSTIN (glyph-top matched to reference y=155.4) ───────────
+    # ── PAN / CIN / GSTIN ──────────────────────────────────────────────────
     if show_pan:
-        _draw(c,  31, _y(155.4, 8.5), "IT PAN No.:AABCG2902K",       size=8.5, bold=True)
-        _draw(c, 216, _y(155.4, 8.5), "CIN : U27209TN1987PTC014031", size=8.5, bold=True)
-        _draw(c, 424, _y(155.4, 8.5), "GSTIN NO : 33AABCG2902K1ZY",  size=8.5, bold=True)
+        _draw(c,  31, _y(117.3, 8.5), "IT PAN No.:AABCG2902K",       size=8.5, bold=True)
+        _draw(c, 216, _y(117.3, 8.5), "CIN : U27209TN1987PTC014031", size=8.5, bold=True)
+        _draw(c, 424, _y(117.3, 8.5), "GSTIN NO : 33AABCG2902K1ZY",  size=8.5, bold=True)
 
 
-_HDR_BTM   = 147.3  # "top" coord of header bottom (matches reference)
+_HDR_BTM   = 114.5  # "top" coord of header bottom
 _BUYER_BTM = 358.3  # "top" coord of buyer-block bottom / table top
-_PAN_SEP   = 166.1  # separator below the PAN line (matches reference)
+_PAN_SEP   = 131.1  # separator below the PAN line
 _FIELD_SEP = 261.5  # separator above customer-fields (matches reference)
 _COL_DIV   = 318    # vertical divider in buyer block (left | right fields)
 
@@ -392,11 +432,12 @@ def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
     c.line(_COL_DIV, _top(_FIELD_SEP), _COL_DIV, _top(_BUYER_BTM))  # column divider
 
     # ── Content (all y-coords are reference glyph-tops, converted via _y()) ─────
-    _draw(c, 25,  _y(171.2, 9), "Name & Address of the Buyer :", size=9, bold=True)
+    buyer_offset = -18.0
+    _draw(c, 25,  _y(171.2 + buyer_offset, 9), "Name & Address of the Buyer :", size=9, bold=True)
 
     buyer_lines = _buyer_address_lines(quote_data)
     for ref_top, line in zip([185.7, 202.7, 219.7, 236.7, 253.7], buyer_lines):
-        _draw(c, 26, _y(ref_top, 9), line, size=9)
+        _draw(c, 26, _y(ref_top + buyer_offset, 9), line, size=9)
 
     label_x, value_x = 24, 109
     # Reference glyph-tops for each field row
@@ -606,53 +647,96 @@ def _make_totals_table(items: list[dict], quote_data: dict) -> Table:
     currency = quote_data.get("currency", "INR")
     total_qty, subtotal, discount_amt, taxable, gst_amt, grand_total = _totals(items, quote_data)
     discount_pct = _num(quote_data.get("discount_pct"))
+    quarter_width = (ITEM_COLS[-1] - ITEM_COLS[4]) / 4.0
+
+    def _qty_text(value) -> str:
+        try:
+            return f"{int(round(float(value)))}"
+        except (TypeError, ValueError):
+            return "0"
+
+    def label(text: str) -> _FitText:
+        return _FitText(text, size=7.8, bold=True)
+
+    def value(text: str) -> _FitText:
+        return _FitText(text, size=7.8, bold=True, align="right")
+
     rows = [
         [
-            Paragraph("Total Quantity", _PS_SUMMARY_BOLD),
-            Paragraph(f"Total Price ({currency})", _PS_SUMMARY_BOLD),
+            label("Total Quantity"),
+            value(_qty_text(total_qty)),
+            label(f"Price ({currency})"),
+            value(_fmt_amount(subtotal)),
         ],
-        [_fmt_qty(total_qty), _fmt_amount(subtotal)],
     ]
 
     if discount_amt:
-        rows.append(["", Paragraph(f"Discount ({discount_pct:g}%): -{_fmt_amount(discount_amt)}", _PS_SUMMARY)])
-        rows.append(["", Paragraph(f"Taxable Value ({currency}): {_fmt_amount(taxable)}", _PS_SUMMARY_BOLD)])
+        rows.append([
+            label(""),
+            label(""),
+            label(f"Discount ({discount_pct:g}%):"),
+            value(f"-{_fmt_amount(discount_amt)}"),
+        ])
+        rows.append([
+            label(""),
+            label(""),
+            label(f"Taxable Value ({currency}):"),
+            value(_fmt_amount(taxable)),
+        ])
 
-    tax_header_index = len(rows)
-    rows.append(["", Paragraph("Tax Breakup", _PS_SUMMARY_BOLD)])
+    rows.append([
+        label(""),
+        label(""),
+        label("Tax Breakup"),
+        label(""),
+    ])
+
     if currency == "INR":
         tax_rows = [(name, pct, amount) for name, pct, amount in _gst_rows(quote_data, gst_amt) if pct or amount]
         if not tax_rows:
             tax_rows = [("GST", 0, 0)]
         for name, pct, amount in tax_rows:
-            rows.append(["", Paragraph(f"{name} @ {pct:g}%: {_fmt_amount(amount)}", _PS_SUMMARY)])
+            rows.append([
+                label(""),
+                label(""),
+                label(f"{name} @ {pct:g}%:"),
+                value(_fmt_amount(amount)),
+            ])
     else:
-        rows.append(["", Paragraph("Taxes & Duties: At actuals", _PS_SUMMARY)])
+        rows.append([
+            label(""),
+            label(""),
+            label("Taxes & Duties:"),
+            value("At actuals"),
+        ])
 
-    final_index = len(rows)
     rows.append([
-        "",
-        Paragraph(f"Total Combined Price ({currency}): {_fmt_amount(grand_total)}", _PS_SUMMARY_BOLD),
+        label(""),
+        label(""),
+        label(f"Total Price ({currency}):"),
+        value(_fmt_amount(grand_total)),
     ])
 
-    table = Table(rows, colWidths=[92.3, 137.4])
+    table = Table(rows, colWidths=[quarter_width] * 4)
     style = TableStyle([
-        ('BOX', (0, 0), (-1, -1), 1.0, colors.black),
-        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
         ('FONTNAME', (0, 0), (-1, -1), 'Times-Roman'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8.8),
-        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+        ('FONTSIZE', (0, 0), (-1, -1), 7.8),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('ALIGN', (2, 0), (2, -1), 'LEFT'),
+        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-        ('SPAN', (1, tax_header_index), (1, tax_header_index)),
-        ('BACKGROUND', (1, tax_header_index), (1, tax_header_index), colors.HexColor("#F2F2F2")),
-        ('FONTNAME', (0, final_index), (-1, final_index), 'Times-Bold'),
-        ('BACKGROUND', (1, final_index), (1, final_index), colors.HexColor("#E8E8E8")),
-        ('LINEABOVE', (0, final_index), (-1, final_index), 1.0, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('LINEABOVE', (0, 0), (1, 0), 1.0, colors.black),
+        ('LINEBELOW', (0, 0), (1, 0), 1.0, colors.black),
+        ('LINEBEFORE', (0, 0), (0, 0), 1.0, colors.black),
+        ('LINEAFTER', (0, 0), (0, 0), 0.5, colors.black),
+        ('LINEAFTER', (1, 0), (1, 0), 1.0, colors.black),
+        ('BOX', (2, 0), (3, -1), 1.0, colors.black),
+        ('INNERGRID', (2, 0), (3, -1), 0.5, colors.black),
     ])
     table.setStyle(style)
     return table
@@ -667,12 +751,10 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     currency    = quote_data.get("currency", "INR")
     TABLE_X = ITEM_COLS[0]
     TABLE_W = ITEM_COLS[-1] - ITEM_COLS[0]
-    TOTALS_X = ITEM_COLS[4]
-    TOTALS_W = ITEM_COLS[-1] - TOTALS_X
     table_top = _TBL_TOP if first_items_page else _PAN_SEP
     AVAIL_H = _TBL_BTM - table_top
     totals_table = _make_totals_table(items, quote_data)
-    _, totals_h = totals_table.wrapOn(c, TOTALS_W, AVAIL_H)
+    _, totals_h = totals_table.wrapOn(c, ITEM_COLS[-1] - ITEM_COLS[4], AVAIL_H)
 
     def _prices_for(count: int) -> list[float]:
         return [
@@ -715,8 +797,8 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
     t.drawOn(c, TABLE_X, tbl_pdf_y)
 
     if is_final_items_page:
-        totals_pdf_y = tbl_pdf_y - _TOTALS_GAP - totals_h
-        totals_table.drawOn(c, TOTALS_X, totals_pdf_y)
+        totals_pdf_y = max(60, tbl_pdf_y - _TOTALS_GAP - totals_h)
+        totals_table.drawOn(c, ITEM_COLS[4], totals_pdf_y)
 
     # ── Extend column dividers into the blank rows below the table ───────────
     next_start = start + n_fit
@@ -806,12 +888,8 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
         top,
     )
 
-    # ── Signature and acceptance block, kept together as one unit ────────────
-    signature_top = max(top + 18, 472)
-    if signature_top + 182 > 785:
-        return True, 472
-    _draw_signature_block(c, signature_top)
-    return False, None
+    # ── Signature and acceptance block are drawn on the same page by caller ──
+    return top
 
 
 def build_quotation_pdf(
@@ -841,25 +919,18 @@ def build_quotation_pdf(
             break
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
-    needs_signature_page, signature_top = _draw_terms_page(c, items, quote_data)
+    _draw_terms_page(c, items, quote_data)
     _draw_page_outer_border(c)
     _draw_page_number(c, page_no)
-    if needs_signature_page:
-        c.showPage()
-        page_no += 1
-        _draw_header(c, quote_data, logo_path, show_pan=False)
-        _draw_signature_block(c, signature_top or 472)
-        _draw_page_outer_border(c)
-        _draw_page_number(c, page_no)
-        c.showPage()
-        page_no += 1
-    else:
-        c.showPage()
-        page_no += 1
+    c.showPage()
+    page_no += 1
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
-    _draw_general_terms_page(c)
+    general_terms_top = _draw_general_terms_page(c)
+    _draw_signature_block(c, max(general_terms_top + 8, 414))
     _draw_page_outer_border(c)
     _draw_page_number(c, page_no)
+    c.showPage()
+    page_no += 1
     c.save()
     return buf.getvalue()
