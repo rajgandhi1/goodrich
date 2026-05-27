@@ -122,6 +122,10 @@ const defaultFx: Record<string, number> = {
   JPY: 0.56,
 };
 
+const DEFAULT_TECHNICAL_NOTES =
+  "1. Certifications: MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n" +
+  "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealability test and chemical analysis.";
+
 const quoteDefaults: Record<string, unknown> = {
   quote_no: "",
   quote_date: new Date().toLocaleDateString("en-GB"),
@@ -167,8 +171,16 @@ const quoteDefaults: Record<string, unknown> = {
   min_order_value: "Minimum Order Value is INR 10,000,No order can be processed below the same. If processed, INR 3,500 shall be paid extra on document charges.",
   technical_deviation_remarks: "",
   commercial_tnc: "",
-  technical_notes: "",
+  technical_notes: DEFAULT_TECHNICAL_NOTES,
 };
+
+function quoteDataWithDefaults(data?: Record<string, unknown> | null): Record<string, unknown> {
+  const next = { ...quoteDefaults, ...(data ?? {}) };
+  if (typeof next.technical_notes !== "string" || !next.technical_notes.trim()) {
+    next.technical_notes = DEFAULT_TECHNICAL_NOTES;
+  }
+  return next;
+}
 
 const SALES_DETAIL_QUOTE_DATA_FIELDS = new Set([
   "buyer_name_address",
@@ -1198,7 +1210,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const initialRouteLoaded = React.useRef(false);
   const newQuoteRequest = React.useRef<string | null>(null);
 
-  const qd = React.useMemo(() => ({ ...quoteDefaults, ...(quote?.quote_data ?? {}) }), [quote?.quote_data]);
+  const qd = React.useMemo(() => quoteDataWithDefaults(quote?.quote_data), [quote?.quote_data]);
   const items = React.useMemo(() => quote?.items ?? [], [quote?.items]);
   const salesRepUsers = React.useMemo(
     () => appUsers
@@ -1699,7 +1711,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         customer: "",
         project_ref: "",
         items: [],
-        quote_data: quoteDefaults,
+        quote_data: quoteDataWithDefaults(),
         stage: "initial",
         stage_meta: {
           enquiry_stage: "draft",
@@ -2542,7 +2554,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     invalidateMaterialPlan();
     const created = await createQuote({
       items: [],
-      quote_data: quoteDefaults,
+      quote_data: quoteDataWithDefaults(),
       stage: "initial",
       stage_meta: {
         enquiry_stage: "draft",

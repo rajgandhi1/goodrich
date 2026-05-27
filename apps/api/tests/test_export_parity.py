@@ -107,6 +107,21 @@ def test_excel_export_service_matches_current_python_exporter():
     assert "Commercial terms remain subject to final PO acceptance." in values
 
 
+def test_blank_technical_notes_use_default_export_text():
+    items = _sample_items()
+    quote_data = {**_sample_quote_data(), "technical_notes": ""}
+    expected_certification = "1. Certifications: MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic."
+    expected_testing = "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealability test and chemical analysis."
+
+    workbook = openpyxl.load_workbook(io.BytesIO(build_quotation_excel(items, quote_data, logo_path=_logo_path())), data_only=True)
+    values = [cell for row in workbook.active.iter_rows(values_only=True) for cell in row]
+    assert f"{expected_certification}\n{expected_testing}" in values
+
+    text = extract_pdf_text(build_quotation_pdf(items, quote_data, logo_path=_logo_path()))
+    assert expected_certification in text
+    assert expected_testing in text
+
+
 def test_pdf_export_service_text_matches_current_python_exporter():
     items = _sample_items()
     quote_data = _sample_quote_data("USD")

@@ -273,9 +273,9 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
     # ── Layout constants — matched to reference PDF measurements ─────────────
     LEFT,   RIGHT    = 20.2,  575.2    # page content left / right
     H_TOP,  H_BTM   = 21.5,  147.3    # header top / bottom (top-coords)
-    LOGO_DIV         = 132.5           # vertical: logo column | company column
+    LOGO_DIV         = 150.0           # vertical: logo column | company column
     DIVX             = 387.5           # vertical: company column | SALES QUOTATION
-    ADDR_X           = 136.0           # address text left edge
+    ADDR_X           = 154.0           # address text left edge
 
     # ── Internal header lines (no separate header rect — outer drawn per-page) ─
     c.setLineWidth(1.0)
@@ -296,8 +296,11 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
             if h > h_max:
                 h = h_max
                 w = h * iw / ih
-            img_bottom = _top(H_BTM - 4)          # 4px above header bottom line
-            c.drawImage(image, LEFT + 4, img_bottom, width=w, height=h,
+            header_top_y = _top(H_TOP)
+            header_bottom_y = _top(H_BTM)
+            img_bottom = header_bottom_y + ((header_top_y - header_bottom_y) - h) / 2
+            img_left = LEFT + (LOGO_DIV - LEFT - w) / 2
+            c.drawImage(image, img_left, img_bottom, width=w, height=h,
                         preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
@@ -333,9 +336,9 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
 
     # ── PAN / CIN / GSTIN (glyph-top matched to reference y=155.4) ───────────
     if show_pan:
-        _draw(c,  31, _y(155.4, 8.5), "IT PAN No.:AABCG2902K",       size=8.5)
-        _draw(c, 216, _y(155.4, 8.5), "CIN : U27209TN1987PTC014031", size=8.5)
-        _draw(c, 424, _y(155.4, 8.5), "GSTIN NO : 33AABCG2902K1ZY",  size=8.5)
+        _draw(c,  31, _y(155.4, 8.5), "IT PAN No.:AABCG2902K",       size=8.5, bold=True)
+        _draw(c, 216, _y(155.4, 8.5), "CIN : U27209TN1987PTC014031", size=8.5, bold=True)
+        _draw(c, 424, _y(155.4, 8.5), "GSTIN NO : 33AABCG2902K1ZY",  size=8.5, bold=True)
 
 
 _HDR_BTM   = 147.3  # "top" coord of header bottom (matches reference)
@@ -345,6 +348,10 @@ _FIELD_SEP = 261.5  # separator above customer-fields (matches reference)
 _COL_DIV   = 318    # vertical divider in buyer block (left | right fields)
 
 L, R = 20.2, 575.2  # page left / right (match outer rect)
+DEFAULT_TECHNICAL_NOTES = (
+    "1. Certifications: MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n"
+    "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealability test and chemical analysis."
+)
 
 
 def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
@@ -358,8 +365,7 @@ def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
     c.line(_COL_DIV, _top(_FIELD_SEP), _COL_DIV, _top(_BUYER_BTM))  # column divider
 
     # ── Content (all y-coords are reference glyph-tops, converted via _y()) ─────
-    _draw(c, 25,  _y(171.2, 9), "Name & Address of the Buyer :", size=9)
-    _draw(c, 555, _y(171.2, 9), "GOODRICH/MKT/REC03", size=9, align="right")
+    _draw(c, 25,  _y(171.2, 9), "Name & Address of the Buyer :", size=9, bold=True)
 
     buyer_lines = str(quote_data.get("buyer_name_address", "")).splitlines()
     for ref_top, line in zip([185.7, 202.7, 219.7, 236.7, 253.7], buyer_lines):
@@ -682,7 +688,12 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
         quote_data.get("commercial_tnc", ""),
         top,
     )
-    top = _draw_paragraph_block(c, "Technical Notes :", quote_data.get("technical_notes", ""), top)
+    top = _draw_paragraph_block(
+        c,
+        "Technical Notes :",
+        quote_data.get("technical_notes") or DEFAULT_TECHNICAL_NOTES,
+        top,
+    )
 
     # ── Signature and acceptance block, kept together as one unit ────────────
     signature_top = max(top + 18, 472)

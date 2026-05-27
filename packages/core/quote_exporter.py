@@ -16,8 +16,7 @@ COMPANY_ADDRESS_LINES = [
     "Regd. Office & Works: 40, Velichai Village, Next to: Pasupathi Eswaran Temple,",
     "Opp.Road to: Pudupakkam Anjaneyar Hill Temple, Vandalur-Kelambakkam Road,",
     "Chennai - 600127, Tamil Nadu, India.",
-    "Tel: +91-44-67400004 - 99 / +91-7824017150/7824017151   Fax: +91-44-67400003",
-    "Email: goodrichgasket@gmail.com / info@flosil.com",
+    "Email: info@flosil.com",
     "IT PAN No.: AABCG2902K   CIN: U27209TN1987PTC014031   GSTIN NO: 33AABCG2902K1ZY",
 ]
 
@@ -37,6 +36,11 @@ GENERAL_TERMS = (
     "12. Pricing Validity: Pricing is applicable only for the offered part numbers and quantities dispatched in one lot. Goodrich reserves the right to revise prices for partial or multiple shipments.\n"
     "13. Ex-Stock Items: Ex-stock items are subject to prior sales.\n"
     "We trust that our rates are competitive and our terms and conditions are acceptable. We look forward to receiving your valued order."
+)
+
+DEFAULT_TECHNICAL_NOTES = (
+    "1. Certifications: MTC to EN10204-3.1 for metallic parts and EN10204-2.1 for non-metallic.\n"
+    "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealability test and chemical analysis."
 )
 
 # ---------------------------------------------------------------------------
@@ -450,7 +454,7 @@ def build_quotation_excel(
             row += 1
 
     # ── Technical Notes ──────────────────────────────────────────────────────
-    tech_notes = quote_data.get('technical_notes', '')
+    tech_notes = quote_data.get('technical_notes') or DEFAULT_TECHNICAL_NOTES
     if tech_notes:
         ws.set_row(row, 14)
         ws.merge_range(_range(row, 0, row, NCOLS - 1), 'Technical Notes :', f_terms_hdr)
