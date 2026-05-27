@@ -255,6 +255,18 @@ def _draw_other_term_row(
     return top
 
 
+def _draw_signature_block(c: canvas.Canvas, start_top: float) -> float:
+    _draw(c, 33, start_top, "For Goodrich Gaskets", size=10)
+    _draw(c, 33, start_top + 12, "Authorized Signatory and Company Seal", size=10)
+    accepted_top = start_top + 122
+    _draw(c, 33, accepted_top, "Accepted By -", size=10)
+    _draw(c, 33, accepted_top + 12, "Client Name :", size=10)
+    _draw(c, 33, accepted_top + 24, "Signature :", size=10)
+    _draw(c, 33, accepted_top + 36, "Name and Designation :", size=10)
+    _draw(c, 33, accepted_top + 48, "Date :", size=10)
+    return accepted_top + 60
+
+
 def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show_pan: bool = True):
     c.setStrokeColorRGB(*BLACK)
 
@@ -672,16 +684,12 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     )
     top = _draw_paragraph_block(c, "Technical Notes :", quote_data.get("technical_notes", ""), top)
 
-    # ── Signature and acceptance block, matching the reference T&C page ───────
+    # ── Signature and acceptance block, kept together as one unit ────────────
     signature_top = max(top + 18, 472)
-    accepted_top = max(signature_top + 122, 595)
-    _draw(c, 33, signature_top, "For Goodrich Gaskets", size=10)
-    _draw(c, 33, signature_top + 12, "Authorized Signatory and Company Seal", size=10)
-    _draw(c, 33, accepted_top, "Accepted By -", size=10)
-    _draw(c, 33, accepted_top + 12, "Client Name :", size=10)
-    _draw(c, 33, accepted_top + 24, "Signature :", size=10)
-    _draw(c, 33, accepted_top + 36, "Name and Designation :", size=10)
-    _draw(c, 33, accepted_top + 48, "Date :", size=10)
+    if signature_top + 182 > 785:
+        return True, 472
+    _draw_signature_block(c, signature_top)
+    return False, None
 
 
 def build_quotation_pdf(
@@ -718,8 +726,15 @@ def build_quotation_pdf(
     page_no += 1
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
-    _draw_terms_page(c, items, quote_data)
+    needs_signature_page, signature_top = _draw_terms_page(c, items, quote_data)
     _draw_page_outer_border(c)
     _draw_page_number(c, page_no)
+    if needs_signature_page:
+        c.showPage()
+        page_no += 1
+        _draw_header(c, quote_data, logo_path, show_pan=False)
+        _draw_signature_block(c, signature_top or 472)
+        _draw_page_outer_border(c)
+        _draw_page_number(c, page_no)
     c.save()
     return buf.getvalue()
