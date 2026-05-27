@@ -36,55 +36,8 @@ def _is_quote_approved(quote: QuoteRead) -> bool:
     return isinstance(approval, dict) and approval.get("status") == "approved"
 
 
-def _number(value: object, default: float = 0) -> float:
-    try:
-        parsed = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed == parsed else default
-
-
-def _number_list(value: object) -> list[float]:
-    if not isinstance(value, list):
-        return []
-    return [_number(item) for item in value]
-
-
 def _commercial_approval_reasons(quote: QuoteRead) -> list[str]:
-    quote_data = quote.quote_data or {}
-    items = quote.items or []
-    unit_prices = _number_list(quote_data.get("unit_prices"))
-    cost_prices = _number_list(quote_data.get("cost_prices"))
-    discount_pct = _number(quote_data.get("discount_pct"))
-    discount_approval_pct = _number(quote_data.get("discount_approval_pct"), 10)
-    minimum_margin_pct = _number(quote_data.get("minimum_margin_pct"), 15)
-    currency = str(quote_data.get("currency") or "INR").upper()
-    fx_rate = _number(quote_data.get("fx_rate"), 1) or 1
-    divisor = fx_rate if currency != "INR" else 1
-
-    subtotal = 0.0
-    cost_total = 0.0
-    margins: list[float] = []
-    for index, item in enumerate(items):
-        quantity = 0.0 if item.get("status") == "regret" else _number(item.get("quantity"))
-        selling_price = (unit_prices[index] if index < len(unit_prices) else 0.0) / divisor
-        cost_price = cost_prices[index] if index < len(cost_prices) else 0.0
-        subtotal += quantity * selling_price
-        cost_total += quantity * cost_price
-        if selling_price > 0:
-            margins.append(((selling_price - cost_price) / selling_price) * 100)
-
-    taxable = subtotal - (subtotal * max(discount_pct, 0) / 100)
-    gross_margin_pct = ((taxable - cost_total) / taxable) * 100 if taxable > 0 else None
-    lowest_line_margin_pct = min(margins) if margins else None
-    reasons: list[str] = []
-    if discount_pct > discount_approval_pct:
-        reasons.append(f"Discount {discount_pct:.1f}% exceeds {discount_approval_pct:g}% threshold")
-    if lowest_line_margin_pct is not None and lowest_line_margin_pct < minimum_margin_pct:
-        reasons.append(f"Lowest line margin {lowest_line_margin_pct:.1f}% is below {minimum_margin_pct:g}% threshold")
-    if gross_margin_pct is not None and gross_margin_pct < minimum_margin_pct:
-        reasons.append(f"Gross margin {gross_margin_pct:.1f}% is below {minimum_margin_pct:g}% threshold")
-    return reasons
+    return []
 
 
 def _require_export_allowed(quote: QuoteRead, user: CurrentUser) -> None:

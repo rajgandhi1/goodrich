@@ -40,8 +40,6 @@ export function buildQuotePricingSummary({
   riskCount,
   fxRate = 1,
   isForeignCurrency = false,
-  discountApprovalPct = 10,
-  minimumMarginPct = 15,
 }: {
   items: GasketItem[];
   unitPrices: number[];
@@ -52,8 +50,6 @@ export function buildQuotePricingSummary({
   riskCount: number;
   fxRate?: number;
   isForeignCurrency?: boolean;
-  discountApprovalPct?: number;
-  minimumMarginPct?: number;
 }): QuotePricingSummary {
   const divisor = isForeignCurrency ? fxRate || 1 : 1;
   const lines = items.map((item, index) => {
@@ -68,7 +64,7 @@ export function buildQuotePricingSummary({
       quantity,
       costPrice,
       sellingPrice,
-      targetMarginPct: targetMargins[index] ?? minimumMarginPct,
+      targetMarginPct: targetMargins[index] ?? 0,
       lineTotal,
       costTotal,
       marginPct,
@@ -90,15 +86,6 @@ export function buildQuotePricingSummary({
   const lowestLineMarginPct = pricedMargins.length ? Math.min(...pricedMargins) : null;
   const approvalReasons: string[] = [];
 
-  if (discountPct > discountApprovalPct) {
-    approvalReasons.push(`Discount ${discountPct.toFixed(1)}% exceeds ${discountApprovalPct}% threshold`);
-  }
-  if (lowestLineMarginPct !== null && lowestLineMarginPct < minimumMarginPct) {
-    approvalReasons.push(`Lowest line margin ${lowestLineMarginPct.toFixed(1)}% is below ${minimumMarginPct}% threshold`);
-  }
-  if (grossMarginPct !== null && grossMarginPct < minimumMarginPct) {
-    approvalReasons.push(`Gross margin ${grossMarginPct.toFixed(1)}% is below ${minimumMarginPct}% threshold`);
-  }
   void riskCount;
 
   return {

@@ -148,8 +148,7 @@ const quoteDefaults: Record<string, unknown> = {
   unit_prices: [],
   cost_prices: [],
   target_margins_pct: [],
-  discount_approval_pct: 10,
-  minimum_margin_pct: 15,
+  discount_approval_pct: 0,
   discount_pct: 0,
   gst_type: "IGST",
   gst_pct: 18,
@@ -2621,8 +2620,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   function updateQd(key: string, value: unknown) {
     if (!canEditQuote && !(currentUser.role === "sales" && SALES_DETAIL_QUOTE_DATA_FIELDS.has(key))) return;
     const next = { ...qd, [key]: value };
-    if (key === "currency") {
+  if (key === "currency") {
       next.fx_rate = defaultFx[getString(value)] ?? 1;
+    }
+    if (key === "discount_pct") {
+      next.discount_approval_pct = Number(value) || 0;
     }
     setQuote((current) => (current ? { ...current, quote_data: next, quote_no: effectiveQuoteNo } : current));
     setHasUnsavedLocalEdits(true);
@@ -2646,13 +2648,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   const unitPrices = React.useMemo(() => Array.isArray(qd.unit_prices) ? qd.unit_prices.map((value) => toNumber(value)) : [], [qd.unit_prices]);
   const costPrices = React.useMemo(() => Array.isArray(qd.cost_prices) ? qd.cost_prices.map((value) => toNumber(value)) : [], [qd.cost_prices]);
-  const targetMargins = React.useMemo(() => Array.isArray(qd.target_margins_pct) ? qd.target_margins_pct.map((value) => toNumber(value, 15)) : [], [qd.target_margins_pct]);
+  const targetMargins = React.useMemo(() => Array.isArray(qd.target_margins_pct) ? qd.target_margins_pct.map((value) => toNumber(value, 0)) : [], [qd.target_margins_pct]);
   const currency = getString(qd.currency) || "INR";
   const fxRate = toNumber(qd.fx_rate, defaultFx[currency] ?? 1);
   const discountPct = toNumber(qd.discount_pct);
   const gstPct = currency === "INR" ? toNumber(qd.gst_pct, 18) : 0;
-  const discountApprovalPct = toNumber(qd.discount_approval_pct, 10);
-  const minimumMarginPct = toNumber(qd.minimum_margin_pct, 15);
   const qualityReport = React.useMemo(() => evaluateQuoteQuality(quote, items, qd), [items, qd, quote]);
   const pricingSummary = React.useMemo(
     () => buildQuotePricingSummary({
@@ -2665,10 +2665,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       riskCount: qualityReport.risks.filter((risk) => risk.severity === "high").length,
       fxRate,
       isForeignCurrency: currency !== "INR",
-      discountApprovalPct,
-      minimumMarginPct,
     }),
-    [costPrices, currency, discountApprovalPct, discountPct, fxRate, gstPct, items, minimumMarginPct, qualityReport.risks, targetMargins, unitPrices],
+    [costPrices, currency, discountPct, fxRate, gstPct, items, qualityReport.risks, targetMargins, unitPrices],
   );
   const subtotal = pricingSummary.subtotal;
   const discount = pricingSummary.discount;
@@ -5522,19 +5520,17 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </TabsContent>
 
                 <TabsContent value="pricing" className="space-y-3">
-                  <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+                  <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
                     <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Subtotal</div><div className="text-lg font-semibold">{subtotal.toFixed(2)}</div></div>
-                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Discount</div><div className="text-lg font-semibold">{discount.toFixed(2)}</div></div>
+                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Approved discount</div><div className="text-lg font-semibold">{discount.toFixed(2)}</div></div>
                     <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">GST</div><div className="text-lg font-semibold">{gst.toFixed(2)}</div></div>
                     <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Grand total</div><div className="text-lg font-semibold">{grandTotal.toFixed(2)}</div></div>
                     <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Cost total</div><div className="text-lg font-semibold">{pricingSummary.costTotal.toFixed(2)}</div></div>
-                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Gross margin</div><div className="text-lg font-semibold">{pricingSummary.grossMarginPct === null ? "-" : `${pricingSummary.grossMarginPct.toFixed(1)}%`}</div></div>
-                    <div className="rounded-md border bg-background p-3"><div className="text-xs text-muted-foreground">Lowest margin</div><div className="text-lg font-semibold">{pricingSummary.lowestLineMarginPct === null ? "-" : `${pricingSummary.lowestLineMarginPct.toFixed(1)}%`}</div></div>
                   </div>
 
                   <div className="rounded-md border bg-background p-3">
                     <div className="mb-3 flex items-center gap-2 text-sm font-medium"><SlidersHorizontal className="h-4 w-4" />Commercial controls</div>
-                    <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-7">
+                    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
                       <div className="space-y-1.5">
                         <Label>Currency</Label>
                         <Select value={currency} onValueChange={(value) => updateQd("currency", value)} disabled={!canEditQuotation}>
@@ -5543,9 +5539,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                         </Select>
                       </div>
                       <Field label="FX rate" value={getString(qd.fx_rate)} onChange={(value) => updateQd("fx_rate", Number(value))} type="number" disabled={!canEditQuotation} />
-                      <Field label="Discount %" value={getString(qd.discount_pct)} onChange={(value) => updateQd("discount_pct", Number(value))} type="number" disabled={!canEditQuotation} />
-                      <Field label="Approval discount %" value={getString(qd.discount_approval_pct)} onChange={(value) => updateQd("discount_approval_pct", Number(value))} type="number" disabled={!canEditQuotation} />
-                      <Field label="Minimum margin %" value={getString(qd.minimum_margin_pct)} onChange={(value) => updateQd("minimum_margin_pct", Number(value))} type="number" disabled={!canEditQuotation} />
+                      <Field label="Approved discount %" value={getString(qd.discount_pct)} onChange={(value) => updateQd("discount_pct", Number(value))} type="number" disabled={!canEditQuotation} />
                       <div className="space-y-1.5">
                         <Label>GST type</Label>
                         <Select value={getString(qd.gst_type || "IGST")} onValueChange={(value) => updateQd("gst_type", value)} disabled={currency !== "INR" || !canEditQuotation}>
@@ -5632,7 +5626,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                                 }} />
                               </TableCell>
                               <TableCell>
-                                <Input className="w-28" type="number" value={getString(targetMargins[index] ?? minimumMarginPct)} disabled={!canEditQuotation} onChange={(event) => {
+                                <Input className="w-28" type="number" value={getString(targetMargins[index] ?? 0)} disabled={!canEditQuotation} onChange={(event) => {
                                   const next = [...targetMargins];
                                   next[index] = Number(event.target.value);
                                   updateQd("target_margins_pct", next);
@@ -5646,7 +5640,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                                 }} />
                               </TableCell>
                               <TableCell>{converted.toFixed(2)}</TableCell>
-                              <TableCell className={pricingLine?.marginPct !== null && pricingLine?.marginPct !== undefined && pricingLine.marginPct < minimumMarginPct ? "text-red-600" : ""}>
+                              <TableCell className={pricingLine?.marginPct !== null && pricingLine?.marginPct !== undefined && pricingLine.marginPct < 0 ? "text-red-600" : ""}>
                                 {pricingLine?.marginPct === null || pricingLine?.marginPct === undefined ? "-" : pricingLine.marginPct.toFixed(1)}
                               </TableCell>
                               <TableCell>{(pricingLine?.discountImpact ?? 0).toFixed(2)}</TableCell>
