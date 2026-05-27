@@ -5,7 +5,8 @@ import { AlertTriangle, CalendarClock, ClipboardList, FileText, History, Refresh
 import { toast } from "sonner";
 
 import { DashboardMetrics, Quote, getDashboardMetrics, listQuotes } from "@/lib/api";
-import { canEditQuotes, getAppUsers, getCurrentAppUser, resolveAppUserName, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { ACCESS_SETTINGS_CHANGED_EVENT, canRole, getAccessSettings } from "@/lib/auth/access-control";
+import { getAppUsers, getCurrentAppUser, resolveAppUserName, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import { formatCurrencyValue, quoteAgeDays, quoteDueState, quoteEstimatedValue, quoteNextAction } from "@/components/quotes/queue-utils";
 import { stageLabel } from "@/components/quotes/stage-utils";
 import { EmptyState } from "@/components/app-shell/empty-state";
@@ -38,6 +39,7 @@ export function DashboardClient() {
   const [quotes, setQuotes] = React.useState<Quote[]>([]);
   const [currentUser, setCurrentUser] = React.useState(() => getCurrentAppUser());
   const [appUsers, setAppUsers] = React.useState(() => getAppUsers());
+  const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
 
   async function refresh() {
     try {
@@ -57,11 +59,14 @@ export function DashboardClient() {
     const refreshUser = () => {
       setCurrentUser(getCurrentAppUser());
       setAppUsers(getAppUsers());
+      setAccessSettings(getAccessSettings());
     };
     window.addEventListener(USERS_CHANGED_EVENT, refreshUser);
+    window.addEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refreshUser);
     window.addEventListener("storage", refreshUser);
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, refreshUser);
+      window.removeEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refreshUser);
       window.removeEventListener("storage", refreshUser);
     };
   }, []);
@@ -156,7 +161,7 @@ export function DashboardClient() {
             icon={ClipboardList}
             title="No active quotations"
             body="Create a quote workspace when the first enquiry is ready for intake."
-            action={canEditQuotes(currentUser.role) ? { label: "New enquiry", href: "/quotes?new=1" } : undefined}
+            action={canRole(currentUser.role, "create_enquiry", accessSettings) ? { label: "New enquiry", href: "/quotes?new=1" } : undefined}
           />
         )}
 

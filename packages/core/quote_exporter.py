@@ -43,6 +43,35 @@ DEFAULT_TECHNICAL_NOTES = (
     "2. Testing Charges for gasket will be extra at actuals for tests other than compression & sealability test and chemical analysis."
 )
 
+
+def _buyer_address_text(quote_data: dict) -> str:
+    structured_fields = [
+        "buyer_name",
+        "buyer_address_line1",
+        "buyer_address_line2",
+        "buyer_city",
+        "buyer_state",
+        "buyer_pin_code",
+        "buyer_country",
+    ]
+    if any(str(quote_data.get(field) or "").strip() for field in structured_fields):
+        city_state_pin = ", ".join(
+            value for value in [
+                str(quote_data.get("buyer_city") or "").strip(),
+                str(quote_data.get("buyer_state") or "").strip(),
+                str(quote_data.get("buyer_pin_code") or "").strip(),
+            ] if value
+        )
+        rows = [
+            ("Name", str(quote_data.get("buyer_name") or "").strip()),
+            ("Address", str(quote_data.get("buyer_address_line1") or "").strip()),
+            ("", str(quote_data.get("buyer_address_line2") or "").strip()),
+            ("City/State/PIN", city_state_pin),
+            ("Country", str(quote_data.get("buyer_country") or "").strip()),
+        ]
+        return "\n".join(f"{label} : {value}" if label else value for label, value in rows if value)
+    return str(quote_data.get('buyer_name_address', '') or '')
+
 # ---------------------------------------------------------------------------
 # Colours
 # ---------------------------------------------------------------------------
@@ -102,7 +131,7 @@ def build_quotation_excel(
         gst_type, gst_pct, discount_pct,
         payment_terms, bank_charges, delivery, inspection, insurance,
         ld_clause, cancellation, min_order_value, hsn_code,
-        technical_deviation_remarks, commercial_tnc,
+        technical_deviation_remarks,
         technical_notes,
         unit_prices (list of floats, parallel to items)
     """
@@ -223,7 +252,7 @@ def build_quotation_excel(
     row += 1
 
     # Buyer address block (3 rows tall for address)
-    buyer_addr = quote_data.get('buyer_name_address', '')
+    buyer_addr = _buyer_address_text(quote_data)
     addr_rows = 4
     for r in range(addr_rows):
         ws.set_row(row + r, 14)
@@ -389,18 +418,17 @@ def build_quotation_excel(
                         border_color=_BORDER, num_format='#,##0.00'))
     row += 1
 
-    # ── General Terms ────────────────────────────────────────────────────────
-    ws.set_row(row, 14)
-    ws.merge_range(_range(row, 0, row, NCOLS - 1), 'GENERAL TERMS OF QUOTATION:', f_terms_hdr)
-    row += 1
-    gt_h = max(110, 11 * (GENERAL_TERMS.count('\n') + 4))
-    ws.set_row(row, min(gt_h, 260))
-    ws.merge_range(_range(row, 0, row, NCOLS - 1), GENERAL_TERMS,
-                   _fmt(font_size=7.5, align='left', text_wrap=True, border=1,
-                        border_color=_BORDER, valign='top'))
-    row += 1
+    # ── Technical Deviation and Other Terms & Conditions ─────────────────────
+    technical_deviation = quote_data.get('technical_deviation_remarks', '')
+    if technical_deviation:
+        ws.set_row(row, 14)
+        ws.merge_range(_range(row, 0, row, NCOLS - 1), 'Technical Deviation / Remarks:', f_terms_hdr)
+        row += 1
+        note_h = max(30, min(120, 12 * (technical_deviation.count('\n') + 2)))
+        ws.set_row(row, note_h)
+        ws.merge_range(_range(row, 0, row, NCOLS - 1), technical_deviation, f_notes)
+        row += 1
 
-    # ── Other Terms & Conditions ─────────────────────────────────────────────
     ws.set_row(row, 14)
     ws.merge_range(_range(row, 0, row, NCOLS - 1),
                    'Other Terms & Conditions :', f_terms_hdr)
@@ -440,19 +468,6 @@ def build_quotation_excel(
         ws.merge_range(_range(row, 2, row, NCOLS - 1), val, f_terms_val)
         row += 1
 
-    for title, value in [
-        ('Technical Deviation / Remarks:', quote_data.get('technical_deviation_remarks', '')),
-        ('Commercial T&C:', quote_data.get('commercial_tnc', '')),
-    ]:
-        if value:
-            ws.set_row(row, 14)
-            ws.merge_range(_range(row, 0, row, NCOLS - 1), title, f_terms_hdr)
-            row += 1
-            note_h = max(30, min(120, 12 * (value.count('\n') + 2)))
-            ws.set_row(row, note_h)
-            ws.merge_range(_range(row, 0, row, NCOLS - 1), value, f_notes)
-            row += 1
-
     # ── Technical Notes ──────────────────────────────────────────────────────
     tech_notes = quote_data.get('technical_notes') or DEFAULT_TECHNICAL_NOTES
     if tech_notes:
@@ -463,6 +478,17 @@ def build_quotation_excel(
         ws.set_row(row, note_h)
         ws.merge_range(_range(row, 0, row, NCOLS - 1), tech_notes, f_notes)
         row += 1
+
+    # ── General Terms ────────────────────────────────────────────────────────
+    ws.set_row(row, 14)
+    ws.merge_range(_range(row, 0, row, NCOLS - 1), 'GENERAL TERMS OF QUOTATION:', f_terms_hdr)
+    row += 1
+    gt_h = max(110, 11 * (GENERAL_TERMS.count('\n') + 4))
+    ws.set_row(row, min(gt_h, 260))
+    ws.merge_range(_range(row, 0, row, NCOLS - 1), GENERAL_TERMS,
+                   _fmt(font_size=7.5, align='left', text_wrap=True, border=1,
+                        border_color=_BORDER, valign='top'))
+    row += 1
 
     # ── Authorized Signatory ─────────────────────────────────────────────────
     ws.set_row(row, 14)

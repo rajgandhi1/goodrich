@@ -34,6 +34,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.schemas.access_settings import AccessSettings
 from app.config import get_settings
 from app.schemas.common import StageHistoryEntry
 from app.schemas.jobs import JobRead
@@ -128,6 +129,15 @@ app_users_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+app_settings_table = Table(
+    "app_settings",
+    metadata,
+    Column("org_id", uuid_type, primary_key=True),
+    Column("key", Text, primary_key=True),
+    Column("value", json_type, nullable=False, default=dict),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 
 DEFAULT_APP_USERS = [
     {
@@ -138,6 +148,11 @@ DEFAULT_APP_USERS = [
         "active": True,
     },
 ]
+
+DEFAULT_ACCESS_SETTINGS = AccessSettings(
+    with_whom_options=["Ashwin sir", "GTQ", "Estimation", "Arun Sir"],
+    role_permissions={},
+)
 
 ENQUIRY_NO_PATTERN = re.compile(r"^enq-(\d+)$", re.IGNORECASE)
 
@@ -173,10 +188,7 @@ def _prepare_created_metadata(data: dict[str, Any], user_id: str) -> None:
 
 def _sync_quote_no(data: dict[str, Any], quote_no: str) -> None:
     data["quote_no"] = quote_no
-    quote_data = dict(data.get("quote_data") or {})
-    if not str(quote_data.get("quote_no") or "").strip():
-        quote_data["quote_no"] = quote_no
-    data["quote_data"] = quote_data
+    data["quote_data"] = dict(data.get("quote_data") or {})
 
 
 def _tenant_uuid(value: str) -> uuid.UUID:
@@ -235,6 +247,7 @@ class LocalJsonRepository:
             "exports": {},
             "doc_sessions": {},
             "app_users": {},
+            "app_settings": {},
         }
         self._load()
 
@@ -244,7 +257,7 @@ class LocalJsonRepository:
         try:
             self._state.update(json.loads(self._path.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
-            self._state = {"quotes": {}, "jobs": {}, "exports": {}, "doc_sessions": {}, "app_users": {}}
+            self._state = {"quotes": {}, "jobs": {}, "exports": {}, "doc_sessions": {}, "app_users": {}, "app_settings": {}}
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,6 +292,14 @@ class LocalJsonRepository:
             key = f"{org_id}:{seed['id']}"
             if key not in users:
                 users[key] = {"org_id": org_id, "created_at": now, "updated_at": now, **seed}
+            else:
+                users[key].update({
+                    "name": users[key].get("name") or seed["name"],
+                    "email": users[key].get("email") or seed["email"],
+                    "role": "admin",
+                    "active": True,
+                    "updated_at": now,
+                })
 
     def _ensure_quote_numbers(self, org_id: str) -> None:
         rows = [
@@ -293,10 +314,8 @@ class LocalJsonRepository:
                 continue
             next_quote_no = _next_enquiry_no(existing)
             existing.append(next_quote_no)
-            quote_data = dict(quote.get("quote_data") or {})
-            quote_data["quote_no"] = quote_data.get("quote_no") or next_quote_no
             quote["quote_no"] = next_quote_no
-            quote["quote_data"] = quote_data
+            quote["quote_data"] = dict(quote.get("quote_data") or {})
             changed = True
         if changed:
             self._save()
@@ -379,6 +398,22 @@ class LocalJsonRepository:
             del self._state["app_users"][key]
             self._save()
             return True
+
+    def get_access_settings(self, org_id: str) -> AccessSettings:
+        with self._lock:
+            settings = self._state.setdefault("app_settings", {}).get(f"{org_id}:access")
+            if not settings:
+                settings = DEFAULT_ACCESS_SETTINGS.model_dump(mode="json")
+                self._state["app_settings"][f"{org_id}:access"] = settings
+                self._save()
+            return AccessSettings(**deepcopy(settings))
+
+    def update_access_settings(self, org_id: str, settings: AccessSettings) -> AccessSettings:
+        with self._lock:
+            data = settings.model_dump(mode="json")
+            self._state.setdefault("app_settings", {})[f"{org_id}:access"] = data
+            self._save()
+            return AccessSettings(**deepcopy(data))
 
     def list_quotes(self, org_id: str) -> list[QuoteRead]:
         with self._lock:
@@ -662,7 +697,7 @@ class PostgresRepository:
         with self._engine.begin() as conn:
             for seed in DEFAULT_APP_USERS:
                 row = conn.execute(
-                    select(app_users_table.c.user_id).where(
+                    select(app_users_table).where(
                         app_users_table.c.org_id == org_uuid,
                         app_users_table.c.user_id == seed["id"],
                     )
@@ -677,6 +712,19 @@ class PostgresRepository:
                             role=seed["role"],
                             active=seed["active"],
                             created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                else:
+                    data = row._mapping
+                    conn.execute(
+                        update(app_users_table)
+                        .where(app_users_table.c.org_id == org_uuid, app_users_table.c.user_id == seed["id"])
+                        .values(
+                            name=data["name"] or seed["name"],
+                            email=data["email"] or seed["email"],
+                            role="admin",
+                            active=True,
                             updated_at=now,
                         )
                     )
@@ -699,12 +747,10 @@ class PostgresRepository:
                     continue
                 next_quote_no = _next_enquiry_no(existing)
                 existing.append(next_quote_no)
-                quote_data = dict(row.quote_data or {})
-                quote_data["quote_no"] = quote_data.get("quote_no") or next_quote_no
                 conn.execute(
                     update(quotes_table)
                     .where(quotes_table.c.org_id == org_uuid, quotes_table.c.id == row.id)
-                    .values(quote_no=next_quote_no, quote_data=quote_data, updated_at=_now())
+                    .values(quote_no=next_quote_no, quote_data=dict(row.quote_data or {}), updated_at=_now())
                 )
 
     def create_quote(self, org_id: str, user_id: str, payload: QuoteCreate) -> QuoteRead:
@@ -804,6 +850,53 @@ class PostgresRepository:
         with self._engine.begin() as conn:
             result = conn.execute(stmt)
         return result.rowcount > 0
+
+    def get_access_settings(self, org_id: str) -> AccessSettings:
+        org_uuid = _tenant_uuid(org_id)
+        stmt = select(app_settings_table.c.value).where(
+            app_settings_table.c.org_id == org_uuid,
+            app_settings_table.c.key == "access",
+        )
+        with self._engine.begin() as conn:
+            value = conn.execute(stmt).scalar_one_or_none()
+            if value is None:
+                value = DEFAULT_ACCESS_SETTINGS.model_dump(mode="json")
+                conn.execute(
+                    insert(app_settings_table).values(
+                        org_id=org_uuid,
+                        key="access",
+                        value=value,
+                        updated_at=_now(),
+                    )
+                )
+        return AccessSettings(**dict(value or {}))
+
+    def update_access_settings(self, org_id: str, settings: AccessSettings) -> AccessSettings:
+        org_uuid = _tenant_uuid(org_id)
+        value = settings.model_dump(mode="json")
+        with self._engine.begin() as conn:
+            existing = conn.execute(
+                select(app_settings_table.c.key).where(
+                    app_settings_table.c.org_id == org_uuid,
+                    app_settings_table.c.key == "access",
+                )
+            ).first()
+            if existing:
+                conn.execute(
+                    update(app_settings_table)
+                    .where(app_settings_table.c.org_id == org_uuid, app_settings_table.c.key == "access")
+                    .values(value=value, updated_at=_now())
+                )
+            else:
+                conn.execute(
+                    insert(app_settings_table).values(
+                        org_id=org_uuid,
+                        key="access",
+                        value=value,
+                        updated_at=_now(),
+                    )
+                )
+        return AccessSettings(**value)
 
     def list_quotes(self, org_id: str) -> list[QuoteRead]:
         org_uuid = _tenant_uuid(org_id)

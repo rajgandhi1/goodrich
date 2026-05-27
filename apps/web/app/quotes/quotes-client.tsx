@@ -54,6 +54,7 @@ import {
   createQuote,
   deleteQuote,
   exportQuote,
+  getAccessSettingsRemote,
   getQuote,
   listQuotes,
   listOutlookThreadMessages,
@@ -64,7 +65,8 @@ import {
   toNumber,
 } from "@/lib/api";
 import { addBackgroundJob } from "@/lib/background-jobs";
-import { canApproveQuotes, canEditQuotes, getAppUsers, getCurrentAppUser, resolveAppUserName, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { ACCESS_SETTINGS_CHANGED_EVENT, canRole, getAccessSettings, normalizeAccessSettings, saveAccessSettings } from "@/lib/auth/access-control";
+import { getAppUsers, getCurrentAppUser, resolveAppUserName, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import {
   buildMaterialBreakdown,
   DEFAULT_MATERIAL_PLANNING_INPUTS,
@@ -136,6 +138,13 @@ const quoteDefaults: Record<string, unknown> = {
   include_customer_sl_no: false,
   include_customer_item_code: false,
   buyer_name_address: "",
+  buyer_name: "",
+  buyer_address_line1: "",
+  buyer_address_line2: "",
+  buyer_city: "",
+  buyer_state: "",
+  buyer_pin_code: "",
+  buyer_country: "",
   customer_enq_no: "",
   attention: "",
   designation: "",
@@ -174,16 +183,62 @@ const quoteDefaults: Record<string, unknown> = {
   technical_notes: DEFAULT_TECHNICAL_NOTES,
 };
 
+const BUYER_ADDRESS_FIELDS = [
+  "buyer_name",
+  "buyer_address_line1",
+  "buyer_address_line2",
+  "buyer_city",
+  "buyer_state",
+  "buyer_pin_code",
+  "buyer_country",
+];
+
+function buyerNameAddressLines(data: Record<string, unknown>): string[] {
+  const hasStructuredBuyer = BUYER_ADDRESS_FIELDS.some((key) => getString(data[key]).trim());
+  if (!hasStructuredBuyer) {
+    return getString(data.buyer_name_address)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+  const cityStatePin = [
+    getString(data.buyer_city),
+    getString(data.buyer_state),
+    getString(data.buyer_pin_code),
+  ].filter(Boolean).join(", ");
+  return [
+    getString(data.buyer_name),
+    getString(data.buyer_address_line1),
+    getString(data.buyer_address_line2),
+    cityStatePin,
+    getString(data.buyer_country),
+  ].filter(Boolean);
+}
+
+function buyerNameAddressText(data: Record<string, unknown>): string {
+  return buyerNameAddressLines(data).join("\n");
+}
+
 function quoteDataWithDefaults(data?: Record<string, unknown> | null): Record<string, unknown> {
   const next = { ...quoteDefaults, ...(data ?? {}) };
   if (typeof next.technical_notes !== "string" || !next.technical_notes.trim()) {
     next.technical_notes = DEFAULT_TECHNICAL_NOTES;
   }
+  if (!BUYER_ADDRESS_FIELDS.some((key) => getString(next[key]).trim())) {
+    const [name = "", addressLine1 = "", addressLine2 = "", cityStatePin = "", country = ""] = buyerNameAddressLines(next);
+    next.buyer_name = name;
+    next.buyer_address_line1 = addressLine1;
+    next.buyer_address_line2 = addressLine2;
+    next.buyer_city = cityStatePin;
+    next.buyer_country = country;
+  }
+  next.buyer_name_address = buyerNameAddressText(next);
   return next;
 }
 
 const SALES_DETAIL_QUOTE_DATA_FIELDS = new Set([
   "buyer_name_address",
+  ...BUYER_ADDRESS_FIELDS,
   "customer_enq_no",
   "attention",
   "designation",
@@ -532,7 +587,6 @@ const BULK_DEFAULTS = {
 };
 const BLANK_SELECT_VALUE = "__blank__";
 const CUSTOM_SALES_REP_VALUE = "__custom_sales_rep__";
-const WITH_WHOM_OPTIONS = ["Ashwin sir", "GTQ", "Estimation", "Arun Sir"];
 const QUOTATION_NUMBER_PREFIX: Record<string, string> = {
   export: "EXP",
   domestic: "DOM",
@@ -1175,6 +1229,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   });
   const [currentUser, setCurrentUser] = React.useState(() => getCurrentAppUser());
   const [appUsers, setAppUsers] = React.useState(() => getAppUsers());
+  const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
   const [approvalComment, setApprovalComment] = React.useState("");
   const [outlookDraft, setOutlookDraft] = React.useState<OutlookThreadLink>(blankOutlookThread);
   const [outlookQuickInput, setOutlookQuickInput] = React.useState("");
@@ -1196,13 +1251,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const isPoSection = section === "po";
   const isQuotationSection = isFinalSection || isPoSection;
   const sectionBasePath = isPoSection ? "/purchase-orders" : isFinalSection ? "/quotes/final" : isMaterialSection ? "/material-planning" : "/quotes";
-  const canEditQuote = canEditQuotes(currentUser.role);
-  const canAddDetails = canEditQuote || currentUser.role === "sales";
-  const canEditLineItems = canEditQuote;
-  const canEditWorkflow = canEditQuote;
-  const canEditQuotation = canEditQuote;
+  const canCreateEnquiry = canRole(currentUser.role, "create_enquiry", accessSettings);
+  const canAddDetails = canRole(currentUser.role, "edit_sales_details", accessSettings);
+  const canEditLineItems = canRole(currentUser.role, "edit_line_items", accessSettings);
+  const canEditWorkflow = canRole(currentUser.role, "edit_workflow", accessSettings);
+  const canEditQuotation = canRole(currentUser.role, "edit_quotation", accessSettings);
+  const canEditQuote = canCreateEnquiry || canEditLineItems || canEditWorkflow || canEditQuotation;
   const canRunMaterialPhase1 = canEditWorkflow;
-  const canEditMaterialPhase2 = currentUser.role === "material_planner";
+  const canEditMaterialPhase2 = canRole(currentUser.role, "edit_material_phase2", accessSettings);
   const canSaveProgress = Boolean(quote && (canEditQuote || canAddDetails || canEditMaterialPhase2));
   const loadedQuoteId = React.useRef<string | null>(null);
   const draftGridRef = React.useRef<HTMLDivElement | null>(null);
@@ -1252,7 +1308,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     : createdByNameFromMeta || "Not recorded";
   const currentEnquiryStage = quote ? enquiryStageFromQuote(quote) : "draft";
   const enquiryMarketType = getString(quote?.stage_meta?.market_type);
-  const effectiveQuoteNo = getString(qd.quote_no || quote?.quote_no);
+  const effectiveQuoteNo = getString(quote?.quote_no);
   const isLargeDraft = items.length > LARGE_DRAFT_THRESHOLD;
   const activeTableColumns = React.useMemo(
     () => (tableMode === "spreadsheet" ? streamlitColumns() : columnsForPreset(columnPreset, isLargeDraft)),
@@ -1652,11 +1708,21 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     const refresh = () => {
       setAppUsers(getAppUsers());
       setCurrentUser(getCurrentAppUser());
+      setAccessSettings(getAccessSettings());
     };
+    getAccessSettingsRemote()
+      .then((settings) => {
+        const normalized = normalizeAccessSettings(settings);
+        saveAccessSettings(normalized);
+        setAccessSettings(normalized);
+      })
+      .catch(() => setAccessSettings(getAccessSettings()));
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
+    window.addEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, refresh);
+      window.removeEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);
@@ -1699,8 +1765,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }, [canSaveProgress, saving, quote, items, qd, materialBreakdown, materialPlan, isMaterialSection]);
 
   async function startQuote() {
-    if (!canEditQuote) {
-      toast.error("Sales users can view enquiries and add notes, but cannot create enquiry workspaces.");
+    if (!canCreateEnquiry) {
+      toast.error("You do not have permission to create enquiry workspaces.");
       router.replace("/quotes");
       return;
     }
@@ -2248,8 +2314,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function exportCurrent(type: "pdf" | "xlsx", mode: "preview" | "download" = "download") {
-    if (!canEditQuotation) {
-      toast.error("Sales users can view quotation details, but cannot export quotation documents.");
+    if (!canExportQuotes) {
+      toast.error("You do not have permission to export quotation documents.");
       return;
     }
     if (!quote) return;
@@ -2547,8 +2613,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function startNew() {
-    if (!canEditQuote) {
-      toast.error("Sales users can view enquiries and add notes, but cannot create enquiry workspaces.");
+    if (!canCreateEnquiry) {
+      toast.error("You do not have permission to create enquiry workspaces.");
       return;
     }
     invalidateMaterialPlan();
@@ -2575,8 +2641,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   async function createRevision() {
-    if (!canEditQuote) {
-      toast.error("Sales users cannot create enquiry revisions.");
+    if (!canCreateEnquiry) {
+      toast.error("You do not have permission to create enquiry revisions.");
       return;
     }
     if (!quote) return;
@@ -2632,8 +2698,11 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   }
 
   function updateQd(key: string, value: unknown) {
-    if (!canEditQuote && !(currentUser.role === "sales" && SALES_DETAIL_QUOTE_DATA_FIELDS.has(key))) return;
+    if (!canEditQuotation && !(canAddDetails && SALES_DETAIL_QUOTE_DATA_FIELDS.has(key))) return;
     const next = { ...qd, [key]: value };
+    if (BUYER_ADDRESS_FIELDS.includes(key)) {
+      next.buyer_name_address = buyerNameAddressText(next);
+    }
     if (key === "currency") {
       next.fx_rate = defaultFx[getString(value)] ?? 1;
     }
@@ -2694,8 +2763,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const actionCount = checkCount + missingCount;
   const readiness = items.length ? Math.round((readyCount / items.length) * 100) : 0;
   const approval = approvalState(quote);
-  const canApprove = canApproveQuotes(currentUser.role);
-  const canExportFinal = approval.status === "approved" || !pricingSummary.approvalRequired;
+  const canApprove = canRole(currentUser.role, "approve_quotes", accessSettings);
+  const canExportQuotes = canRole(currentUser.role, "export_quotes", accessSettings);
+  const approvalAllowsExport = approval.status === "approved" || !pricingSummary.approvalRequired;
+  const canExportFinal = currentUser.role === "admin" || (canExportQuotes && approvalAllowsExport);
   const materialPlanStatus = getString(quote?.stage_meta?.material_plan_status || (quote?.stage_meta?.material_plan_finished_at ? "finished" : materialPlan ? "draft" : ""));
   const materialPhase2Finished = materialPlanStatus === "finished";
   const outlookThread = outlookThreadFromMeta(quote?.stage_meta);
@@ -3695,8 +3766,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   Connect
                 </Button>
                 <Button variant="secondary" onClick={() => saveOutlookThread()} disabled={!canAddDetails || (!outlookDraft.conversation_id && !outlookDraft.message_id && !outlookDraft.web_link)}>
-                  <Save className="h-4 w-4" />
-                  Save link
+                  <Mail className="h-4 w-4" />
+                  Link thread
                 </Button>
               </div>
             </div>
@@ -3825,6 +3896,28 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         </div>
 
         {!isQuotationSection && (
+          <div className="mt-3 rounded-md border bg-background p-3">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px] md:items-center">
+              <div>
+                <div className="text-sm font-medium">Quote type</div>
+                <div className="text-xs text-muted-foreground">Required before processing the enquiry or creating the final quotation.</div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Export or domestic *</Label>
+                <Select value={getString(quote.stage_meta?.market_type) || BLANK_SELECT_VALUE} onValueChange={(value) => setQuote({ ...quote, stage_meta: { ...(quote.stage_meta ?? {}), market_type: value === BLANK_SELECT_VALUE ? "" : value } })} disabled={!canAddDetails}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={BLANK_SELECT_VALUE}>Select</SelectItem>
+                    <SelectItem value="export">Export</SelectItem>
+                    <SelectItem value="domestic">Domestic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isQuotationSection && (
           <div className="mt-3 grid gap-2 border-t pt-3 lg:grid-cols-2 2xl:grid-cols-4">
             <details className="rounded-md border bg-background p-2.5" open={!quote.customer || !quote.quote_no}>
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium">
@@ -3835,16 +3928,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 <Field label="Customer" value={quote.customer} onChange={(value) => setQuote({ ...quote, customer: value })} disabled={!canAddDetails} />
                 <Field label="Email subject" value={quote.custom_label} onChange={(value) => setQuote({ ...quote, custom_label: value })} disabled={!canAddDetails} />
                 <Field label="Enq reference" value={quote.quote_no} onChange={(value) => setQuote({ ...quote, quote_no: value })} disabled={!canAddDetails} />
-              </div>
-              <div className="mt-3">
-                <Button
-                  variant="secondary"
-                  onClick={() => canEditQuote ? savePatch({ customer: quote.customer, custom_label: quote.custom_label, quote_no: quote.quote_no } as Partial<Quote>, "Enquiry details saved") : saveSalesDetails("Enquiry details saved")}
-                  disabled={!canAddDetails}
-                >
-                  <Save className="h-4 w-4" />
-                  Save
-                </Button>
               </div>
             </details>
 
@@ -3869,17 +3952,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Export or domestic *</Label>
-                  <Select value={getString(quote.stage_meta?.market_type) || BLANK_SELECT_VALUE} onValueChange={(value) => setQuote({ ...quote, stage_meta: { ...(quote.stage_meta ?? {}), market_type: value === BLANK_SELECT_VALUE ? "" : value } })} disabled={!canAddDetails}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={BLANK_SELECT_VALUE}>Select</SelectItem>
-                      <SelectItem value="export">Export</SelectItem>
-                      <SelectItem value="domestic">Domestic</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
               <div className="mt-3 space-y-3">
                 <Field
@@ -3889,10 +3961,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   textarea
                   disabled={!canAddDetails}
                 />
-                <Button variant="secondary" onClick={() => saveSalesDetails("Sales notes saved")} disabled={!canAddDetails}>
-                  <Save className="h-4 w-4" />
-                  Save notes
-                </Button>
               </div>
             </details>
 
@@ -3984,7 +4052,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value={BLANK_SELECT_VALUE}>Unassigned</SelectItem>
-                    {WITH_WHOM_OPTIONS.map((name) => (
+                    {accessSettings.with_whom_options.map((name) => (
                       <SelectItem key={name} value={name}>{name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -4257,10 +4325,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <Button variant="secondary" size="sm" onClick={addBlankRow} title="Add row">
                         <Plus className="h-4 w-4" />
                         Row
-                      </Button>
-                      <Button variant="secondary" size="sm" onClick={persistInlineEdits} title="Save enquiry items">
-                        <Save className="h-4 w-4" />
-                        Save
                       </Button>
                     </>
                   )}
@@ -4783,10 +4847,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                           <Plus className="h-4 w-4" />
                           Summary row
                         </Button>
-                        <Button variant="secondary" size="sm" onClick={saveExtractionSummaryRows}>
-                          <Save className="h-4 w-4" />
-                          Save summary
-                        </Button>
                       </div>
                     )}
                   </div>
@@ -4879,20 +4939,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     }}
                     placeholder="Quote-level clarification context"
                   />
-                  <Button
-                    className="mt-2"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => savePatch({ stage_meta: appendActivity(quote.stage_meta ?? {}, {
-                      kind: "clarification",
-                      title: "Clarification note saved",
-                      detail: getString(quote.stage_meta?.clarification_note) || "Quote clarification note updated",
-                      user: currentUser.name || currentUser.id,
-                    }) } as Partial<Quote>, "Clarification note saved")}
-                  >
-                    <Save className="h-4 w-4" />
-                    Save note
-                  </Button>
                   <textarea className="mt-2 min-h-32 w-full rounded-md border bg-background px-3 py-2 text-sm" value={rfiText} onChange={(event) => setRfiText(event.target.value)} />
                   {rfiText && (
                     <a
@@ -4948,12 +4994,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                {((materialBreakdown && !materialPlan) || (materialPlan && canEditMaterialPhase2 && !materialPhase2Finished)) && (
-                  <Button variant="secondary" size="sm" onClick={() => saveMaterialPlan()}>
-                    <Save className="h-4 w-4" />
-                    Save
-                  </Button>
-                )}
                 {(materialBreakdown || materialPlan) && canEditMaterialPhase2 && !materialPhase2Finished && (
                   <Button variant="secondary" size="sm" onClick={clearMaterialPlan}>
                     <X className="h-4 w-4" />
@@ -5339,13 +5379,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   <RotateCcw className="h-4 w-4" />
                   Back to enquiry
                 </Button>
-                {canEditQuotation && (
-                  <Button variant="secondary" size="sm" onClick={() => savePatch({ items, quote_data: qd, quote_no: effectiveQuoteNo } as Partial<Quote>, "Quotation saved")}>
-                    <Save className="h-4 w-4" />
-                    Save
-                  </Button>
-                )}
-                <Button variant="secondary" size="sm" onClick={() => exportCurrent("pdf", "preview")} disabled={!canEditQuotation}>
+                <Button variant="secondary" size="sm" onClick={() => exportCurrent("pdf", "preview")} disabled={!canExportQuotes}>
                   {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
                   Preview
                 </Button>
@@ -5379,7 +5413,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     </div>
                     <Badge variant={quote.customer && quote.project_ref ? "secondary" : "outline"}>{quote.customer && quote.project_ref ? "Context ready" : "Needs context"}</Badge>
                   </div>
-                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_minmax(240px,0.75fr)_auto] lg:items-end">
+                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_minmax(240px,0.75fr)] lg:items-end">
                     <Field label="Customer" value={quote.customer} onChange={(value) => setQuote({ ...quote, customer: value })} disabled={!canAddDetails} />
                     <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => setQuote({ ...quote, project_ref: value })} disabled={!canAddDetails} />
                     <div className="space-y-1.5">
@@ -5393,14 +5427,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                         </SelectContent>
                       </Select>
                     </div>
-                    <Button
-                      variant="secondary"
-                      onClick={() => canEditQuotation ? savePatch({ customer: quote.customer, project_ref: quote.project_ref, quote_data: qd, quote_no: effectiveQuoteNo } as Partial<Quote>, "Quotation header saved") : saveSalesDetails("Quotation details saved")}
-                      disabled={!canAddDetails}
-                    >
-                      <Save className="h-4 w-4" />
-                      Save header
-                    </Button>
                   </div>
                   <div className="mt-3 grid gap-3 border-t pt-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="space-y-1.5">
@@ -5471,10 +5497,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       textarea
                       disabled={!canAddDetails}
                     />
-                    <Button variant="secondary" onClick={() => saveSalesDetails("Sales notes saved")} disabled={!canAddDetails}>
-                      <Save className="h-4 w-4" />
-                      Save notes
-                    </Button>
                   </div>
                 </div>
               </div>
@@ -5518,8 +5540,16 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
                   <div className="rounded-md border bg-background p-3">
                     <div className="mb-3 flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Buyer details</div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <Field label="Buyer name/address" value={getString(qd.buyer_name_address)} onChange={(value) => updateQd("buyer_name_address", value)} textarea disabled={!canAddDetails} />
+                    <div className="grid gap-3 lg:grid-cols-[1.1fr_1fr]">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Field label="Buyer name" value={getString(qd.buyer_name)} onChange={(value) => updateQd("buyer_name", value)} disabled={!canAddDetails} />
+                        <Field label="PIN code" value={getString(qd.buyer_pin_code)} onChange={(value) => updateQd("buyer_pin_code", value)} disabled={!canAddDetails} />
+                        <Field label="Address line 1" value={getString(qd.buyer_address_line1)} onChange={(value) => updateQd("buyer_address_line1", value)} disabled={!canAddDetails} />
+                        <Field label="Address line 2" value={getString(qd.buyer_address_line2)} onChange={(value) => updateQd("buyer_address_line2", value)} disabled={!canAddDetails} />
+                        <Field label="City" value={getString(qd.buyer_city)} onChange={(value) => updateQd("buyer_city", value)} disabled={!canAddDetails} />
+                        <Field label="State" value={getString(qd.buyer_state)} onChange={(value) => updateQd("buyer_state", value)} disabled={!canAddDetails} />
+                        <Field label="Country" value={getString(qd.buyer_country)} onChange={(value) => updateQd("buyer_country", value)} disabled={!canAddDetails} />
+                      </div>
                       <div className="grid gap-3 md:grid-cols-2">
                         <Field label="Customer enquiry no" value={getString(qd.customer_enq_no)} onChange={(value) => updateQd("customer_enq_no", value)} disabled={!canAddDetails} />
                         <Field label="Sender's name" value={getString(qd.attention)} onChange={(value) => updateQd("attention", value)} disabled={!canAddDetails} />
@@ -5705,13 +5735,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                         textarea
                         disabled={!canEditQuotation}
                       />
-                      <Field
-                        label="Commercial T&C"
-                        value={getString(qd.commercial_tnc)}
-                        onChange={(value) => updateQd("commercial_tnc", value)}
-                        textarea
-                        disabled={!canEditQuotation}
-                      />
                     </div>
                   </div>
                 </TabsContent>
@@ -5791,7 +5814,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
       )}
 
       {canSaveProgress && (
-        <div className="fixed bottom-4 right-20 z-50 sm:right-24">
+        <div className="fixed bottom-4 right-28 z-50 sm:right-32">
           <Button
             className="h-11 shadow-lg"
             onClick={() => saveCurrentProgress()}

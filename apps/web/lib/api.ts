@@ -2,6 +2,7 @@
 
 import { getCurrentAppUser } from "@/lib/auth/users";
 import type { AppUser } from "@/lib/auth/users";
+import type { AccessSettings } from "@/lib/auth/access-control";
 
 export type QuoteStage = "initial" | "review" | "quote_prep" | "repricing" | "sent" | "po";
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -459,6 +460,20 @@ export async function chatCompletion(messages: Array<{ role: string; content: st
 
 export async function listAppUsers(): Promise<AppUser[]> {
   return parse<AppUser[]>(await apiFetch(`${API_BASE}/api/v1/users`, { headers: headers() }));
+}
+
+export async function getAccessSettingsRemote(): Promise<AccessSettings> {
+  return parse<AccessSettings>(await apiFetch(`${API_BASE}/api/v1/access-settings`, { headers: headers() }));
+}
+
+export async function putAccessSettingsRemote(payload: AccessSettings): Promise<AccessSettings> {
+  return parse<AccessSettings>(
+    await apiFetch(`${API_BASE}/api/v1/access-settings`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(payload),
+    }),
+  );
 }
 
 export async function createAppUser(payload: Omit<AppUser, "id"> & { id?: string }): Promise<AppUser> {

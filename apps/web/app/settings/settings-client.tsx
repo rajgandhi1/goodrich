@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Bell, Plus, ShieldCheck, Trash2, UserCog } from "lucide-react";
+import { Bell, Plus, ShieldCheck, SlidersHorizontal, Trash2, UserCog, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { createAppUser, deleteAppUser, listAppUsers, patchAppUser } from "@/lib/api";
+import { createAppUser, deleteAppUser, getAccessSettingsRemote, listAppUsers, patchAppUser, putAccessSettingsRemote } from "@/lib/api";
+import { ACCESS_SETTINGS_CHANGED_EVENT, AccessSettings, AppCapability, actionCapabilities, canRole, capabilityLabels, getAccessSettings, normalizeAccessSettings, pageCapabilities, saveAccessSettings } from "@/lib/auth/access-control";
 import { AppRole, AppUser, canManageUsers, getAppUsers, getCurrentAppUser, roleLabels, saveAppUsers, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 
 const blankUser: AppUser = {
@@ -26,6 +27,8 @@ export function SettingsClient() {
   const [users, setUsers] = React.useState<AppUser[]>(() => getAppUsers());
   const [currentUser, setCurrentUserState] = React.useState(() => getCurrentAppUser());
   const [draftUser, setDraftUser] = React.useState<AppUser>(blankUser);
+  const [accessSettings, setAccessSettings] = React.useState<AccessSettings>(() => getAccessSettings());
+  const [draftWithWhom, setDraftWithWhom] = React.useState("");
   const canManage = canManageUsers(currentUser.role);
 
   React.useEffect(() => {
@@ -38,14 +41,24 @@ export function SettingsClient() {
       .catch(() => {
         setUsers(getAppUsers());
       });
+    getAccessSettingsRemote()
+      .then((settings) => {
+        const normalized = normalizeAccessSettings(settings);
+        saveAccessSettings(normalized);
+        setAccessSettings(normalized);
+      })
+      .catch(() => setAccessSettings(getAccessSettings()));
     const refresh = () => {
       setUsers(getAppUsers());
       setCurrentUserState(getCurrentAppUser());
+      setAccessSettings(getAccessSettings());
     };
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
+    window.addEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, refresh);
+      window.removeEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);
@@ -62,6 +75,51 @@ export function SettingsClient() {
     patchAppUser(userId, patch)
       .then((updated) => persistUsers(next.map((user) => (user.id === userId ? updated : user))))
       .catch((error) => toast.error(error instanceof Error ? error.message : "Could not update user"));
+  }
+
+  function persistAccess(next: AccessSettings, message = "Access settings saved") {
+    const normalized = normalizeAccessSettings(next);
+    saveAccessSettings(normalized);
+    setAccessSettings(normalized);
+    putAccessSettingsRemote(normalized)
+      .then((saved) => {
+        const serverSettings = normalizeAccessSettings(saved);
+        saveAccessSettings(serverSettings);
+        setAccessSettings(serverSettings);
+        toast.success(message);
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Could not save access settings"));
+  }
+
+  function addWithWhomOption() {
+    const option = draftWithWhom.trim();
+    if (!option) return;
+    if (accessSettings.with_whom_options.some((value) => value.toLowerCase() === option.toLowerCase())) {
+      toast.error("Option already exists");
+      return;
+    }
+    persistAccess({ ...accessSettings, with_whom_options: [...accessSettings.with_whom_options, option] }, "With whom option added");
+    setDraftWithWhom("");
+  }
+
+  function removeWithWhomOption(option: string) {
+    persistAccess({
+      ...accessSettings,
+      with_whom_options: accessSettings.with_whom_options.filter((value) => value !== option),
+    }, "With whom option removed");
+  }
+
+  function updateRoleCapability(role: AppRole, capability: AppCapability, enabled: boolean) {
+    persistAccess({
+      ...accessSettings,
+      role_permissions: {
+        ...accessSettings.role_permissions,
+        [role]: {
+          ...accessSettings.role_permissions[role],
+          [capability]: enabled,
+        },
+      },
+    });
   }
 
   async function addUser() {
@@ -139,6 +197,79 @@ export function SettingsClient() {
               Email alerts
             </Label>
             <Switch id="email-alerts" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader className="border-b px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <SlidersHorizontal className="h-4 w-4" />
+            Admin access controls
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 p-3">
+          {!canManage && (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              Only admin users can change access controls.
+            </div>
+          )}
+
+          <div className="rounded-md border p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">With whom options</div>
+              <Badge variant="outline">{accessSettings.with_whom_options.length} options</Badge>
+            </div>
+            {canManage && (
+              <div className="mb-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+                <Input value={draftWithWhom} onChange={(event) => setDraftWithWhom(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addWithWhomOption(); }} />
+                <Button size="sm" onClick={addWithWhomOption}>
+                  <Plus className="h-4 w-4" />
+                  Add option
+                </Button>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {accessSettings.with_whom_options.map((option) => (
+                <Badge key={option} variant="secondary" className="gap-1.5 rounded-md py-1">
+                  {option}
+                  {canManage && (
+                    <button type="button" className="rounded-sm hover:bg-background/60" onClick={() => removeWithWhomOption(option)} aria-label={`Remove ${option}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          <div className="overflow-auto rounded-md border">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead className="bg-muted/50 text-left">
+                <tr>
+                  <th className="sticky left-0 bg-muted/50 px-3 py-2 font-medium">Role</th>
+                  {[...pageCapabilities, ...actionCapabilities].map((capability) => (
+                    <th key={capability} className="px-2 py-2 text-center text-xs font-medium">{capabilityLabels[capability]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(roleLabels).map(([role, label]) => (
+                  <tr key={role} className="border-t">
+                    <td className="sticky left-0 bg-background px-3 py-2 font-medium">{label}</td>
+                    {[...pageCapabilities, ...actionCapabilities].map((capability) => (
+                      <td key={`${role}-${capability}`} className="px-2 py-2 text-center">
+                        <Switch
+                          checked={canRole(role as AppRole, capability, accessSettings)}
+                          disabled={!canManage || role === "admin"}
+                          onCheckedChange={(checked) => updateRoleCapability(role as AppRole, capability, checked)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

@@ -185,7 +185,8 @@ def export_pdf(
     quote = _quote_or_404(user.org_id, quote_id)
     _require_export_allowed(quote, user)
     content = build_pdf(quote.items, quote.quote_data)
-    filename = f"{(quote.quote_no or 'quotation').replace('/', '-')}.pdf"
+    visible_quote_no = str(quote.quote_data.get("quote_no") or "").strip()
+    filename = f"{(visible_quote_no or quote.quote_no or 'quotation').replace('/', '-')}.pdf"
     token = repo.save_export(user.org_id, content, filename, "application/pdf", quote_id=quote_id, export_type="pdf")
     return SignedUrlResponse(
         signed_url=str(request.url_for("download_export", token=token)),
@@ -203,7 +204,8 @@ def export_xlsx(
     quote = _quote_or_404(user.org_id, quote_id)
     _require_export_allowed(quote, user)
     content = build_xlsx(quote.items, quote.quote_data)
-    filename = f"{(quote.quote_no or 'quotation').replace('/', '-')}.xlsx"
+    visible_quote_no = str(quote.quote_data.get("quote_no") or "").strip()
+    filename = f"{(visible_quote_no or quote.quote_no or 'quotation').replace('/', '-')}.xlsx"
     token = repo.save_export(
         user.org_id,
         content,

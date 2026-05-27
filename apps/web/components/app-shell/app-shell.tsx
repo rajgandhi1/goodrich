@@ -9,7 +9,9 @@ import { UserMenu } from "@/components/app-shell/user-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { AppRole, canEditQuotes, getCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { AppRole, getCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { getAccessSettingsRemote } from "@/lib/api";
+import { ACCESS_SETTINGS_CHANGED_EVENT, AppCapability, canRole, getAccessSettings, normalizeAccessSettings, saveAccessSettings } from "@/lib/auth/access-control";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -18,6 +20,7 @@ type NavItem = {
   description?: string;
   icon: React.ComponentType<{ className?: string }>;
   roles?: AppRole[];
+  capability?: AppCapability;
   step?: string;
 };
 
@@ -26,44 +29,46 @@ type NavSection = {
   items: NavItem[];
 };
 
-const everyone: AppRole[] = ["admin", "management", "approver", "sales", "estimation", "technical", "planning", "material_planner", "purchase", "viewer"];
-
 const navSections: NavSection[] = [
   {
     title: "Overview",
     items: [
-      { href: "/dashboard", label: "Today’s work", description: "Open tasks, delayed work, and team load", icon: LayoutDashboard, roles: ["admin", "management", "approver", "sales", "estimation", "technical", "planning", "material_planner", "purchase"] },
+      { href: "/dashboard", label: "Today’s work", description: "Open tasks, delayed work, and team load", icon: LayoutDashboard, capability: "view_dashboard" },
     ],
   },
   {
     title: "Main workflow",
     items: [
-      { href: "/quotes", label: "Enquiry", description: "Capture, clean, review, and assign sales rep", icon: FileText, roles: ["admin", "management", "sales", "estimation", "technical"], step: "1" },
-      { href: "/material-planning", label: "Material planning", description: "Breakdown sizes and plan stock/purchase", icon: Layers3, roles: ["admin", "management", "planning", "material_planner", "purchase"], step: "2" },
-      { href: "/quotes/final", label: "Quotation", description: "Pricing, terms, approval, and PDF", icon: FileCheck2, roles: ["admin", "management", "approver", "sales"], step: "3" },
-      { href: "/purchase-orders", label: "Customer PO", description: "Accepted quotations and order handover", icon: CheckCircle2, roles: ["admin", "management", "approver", "sales", "planning", "material_planner", "purchase"], step: "4" },
+      { href: "/quotes", label: "Enquiry", description: "Capture, clean, review, and assign sales rep", icon: FileText, capability: "view_enquiry", step: "1" },
+      { href: "/material-planning", label: "Material planning", description: "Breakdown sizes and plan stock/purchase", icon: Layers3, capability: "view_material_planning", step: "2" },
+      { href: "/quotes/final", label: "Quotation", description: "Pricing, terms, approval, and PDF", icon: FileCheck2, capability: "view_quotation", step: "3" },
+      { href: "/purchase-orders", label: "Customer PO", description: "Accepted quotations and order handover", icon: CheckCircle2, capability: "view_purchase_orders", step: "4" },
     ],
   },
   {
     title: "Support tools",
     items: [
-      { href: "/doc-assistant", label: "Read documents", description: "Ask questions from customer files", icon: FileQuestion, roles: ["admin", "management", "sales", "estimation", "technical"] },
-      { href: "/history", label: "Activity history", description: "Exports, stage changes, and notes", icon: FileSearch, roles: everyone },
+      { href: "/doc-assistant", label: "Read documents", description: "Ask questions from customer files", icon: FileQuestion, capability: "view_doc_assistant" },
+      { href: "/history", label: "Activity history", description: "Exports, stage changes, and notes", icon: FileSearch, capability: "view_history" },
     ],
   },
   {
     title: "Admin",
     items: [
-      { href: "/settings", label: "Users & settings", description: "Roles, preferences, and access", icon: Settings, roles: ["admin"] },
+      { href: "/settings", label: "Users & settings", description: "Roles, preferences, and access", icon: Settings, capability: "view_settings" },
     ],
   },
 ];
 
 function SidebarNav({ activePath }: { activePath: string }) {
   const [role, setRole] = React.useState<AppRole>("admin");
+  const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
   const [recent, setRecent] = React.useState<Array<{ id: string; label: string; href: string }>>([]);
   React.useEffect(() => {
-    const refresh = () => setRole(getCurrentAppUser().role);
+    const refresh = () => {
+      setRole(getCurrentAppUser().role);
+      setAccessSettings(getAccessSettings());
+    };
     const refreshRecent = () => {
       try {
         setRecent(JSON.parse(window.localStorage.getItem("gq_recent_quotes") || "[]"));
@@ -73,15 +78,24 @@ function SidebarNav({ activePath }: { activePath: string }) {
     };
     refresh();
     refreshRecent();
+    getAccessSettingsRemote()
+      .then((settings) => {
+        const normalized = normalizeAccessSettings(settings);
+        saveAccessSettings(normalized);
+        setAccessSettings(normalized);
+      })
+      .catch(() => setAccessSettings(getAccessSettings()));
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
+    window.addEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, refresh);
+      window.removeEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);
   const visibleSections = navSections
-    .map((section) => ({ ...section, items: section.items.filter((item) => role === "admin" || !item.roles || item.roles.includes(role)) }))
+    .map((section) => ({ ...section, items: section.items.filter((item) => !item.capability || canRole(role, item.capability, accessSettings)) }))
     .filter((section) => section.items.length);
   return (
     <nav className="space-y-5">
@@ -144,13 +158,26 @@ export function AppShell({
   breadcrumb: string;
 }) {
   const [role, setRole] = React.useState<AppRole>("admin");
+  const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
   React.useEffect(() => {
-    const refresh = () => setRole(getCurrentAppUser().role);
+    const refresh = () => {
+      setRole(getCurrentAppUser().role);
+      setAccessSettings(getAccessSettings());
+    };
     refresh();
+    getAccessSettingsRemote()
+      .then((settings) => {
+        const normalized = normalizeAccessSettings(settings);
+        saveAccessSettings(normalized);
+        setAccessSettings(normalized);
+      })
+      .catch(() => setAccessSettings(getAccessSettings()));
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
+    window.addEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
       window.removeEventListener(USERS_CHANGED_EVENT, refresh);
+      window.removeEventListener(ACCESS_SETTINGS_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);
@@ -195,7 +222,7 @@ export function AppShell({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {canEditQuotes(role) && (
+            {canRole(role, "create_enquiry", accessSettings) && (
               <Button variant="secondary" size="sm" className="hidden md:inline-flex" asChild>
                 <Link href="/quotes?new=1"><Plus className="h-4 w-4" />New enquiry</Link>
               </Button>

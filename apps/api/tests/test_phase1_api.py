@@ -15,7 +15,8 @@ from app.main import app
 
 def test_quote_workflow_exports_and_tenant_isolation():
     client = TestClient(app)
-    headers = {"X-Org-Id": "org-a", "X-User-Id": "user-a"}
+    org_id = f"org-workflow-{uuid.uuid4().hex}"
+    headers = {"X-Org-Id": org_id, "X-User-Id": "user-a"}
     item = {
         "line_no": 1,
         "quantity": 2,
@@ -108,7 +109,7 @@ def test_quote_workflow_exports_and_tenant_isolation():
 
     cross_org = client.get(
         f"/api/v1/quotes/{quote_id}",
-        headers={"X-Org-Id": "org-b", "X-User-Id": "user-b"},
+        headers={"X-Org-Id": f"{org_id}-other", "X-User-Id": "user-b"},
     )
     assert cross_org.status_code == 404
 
@@ -158,6 +159,34 @@ def test_user_roles_are_persisted_and_not_trusted_from_header():
     )
     assert promoted.status_code == 200
     assert promoted.json()["role"] == "approver"
+
+
+def test_access_settings_are_admin_managed_and_persisted():
+    client = TestClient(app)
+    org_id = f"org-access-{uuid.uuid4().hex}"
+    user_headers = {"X-Org-Id": org_id, "X-User-Id": "not-admin", "X-User-Role": "admin"}
+    denied = client.put(
+        "/api/v1/access-settings",
+        headers=user_headers,
+        json={"with_whom_options": ["Sales"], "role_permissions": {"sales": {"view_dashboard": True}}},
+    )
+    assert denied.status_code == 403
+
+    admin_headers = {"X-Org-Id": org_id, "X-User-Id": "shashnam@flosil.com"}
+    saved = client.put(
+        "/api/v1/access-settings",
+        headers=admin_headers,
+        json={
+            "with_whom_options": ["Sales", "Technical"],
+            "role_permissions": {"sales": {"view_dashboard": True, "edit_quotation": False}},
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["with_whom_options"] == ["Sales", "Technical"]
+
+    restored = client.get("/api/v1/access-settings", headers={"X-Org-Id": org_id, "X-User-Id": "sales-user"})
+    assert restored.status_code == 200
+    assert restored.json()["role_permissions"]["sales"]["view_dashboard"] is True
 
 
 def test_doc_assistant_upload_session_extracts_txt():

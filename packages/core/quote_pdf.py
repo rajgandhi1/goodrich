@@ -331,8 +331,6 @@ def _draw_header(c: canvas.Canvas, quote_data: dict, logo_path: str | None, show
     _draw(c, lx + 52,_y(103.0, 9), quote_data.get("rev_no", "0"),    size=9)
     _draw(c, lx,     _y(116.0, 9), "Rev. Date:", size=9, bold=True)
     _draw(c, lx + 58,_y(116.0, 9), quote_data.get("rev_date", ""),   size=9)
-    _draw(c, lx,     _y(128.0, 8), "*Please refer to the email", size=8)
-    _draw(c, lx,     _y(138.0, 8), "subject", size=8)
 
     # ── PAN / CIN / GSTIN (glyph-top matched to reference y=155.4) ───────────
     if show_pan:
@@ -354,6 +352,35 @@ DEFAULT_TECHNICAL_NOTES = (
 )
 
 
+def _buyer_address_lines(quote_data: dict) -> list[str]:
+    structured_fields = [
+        "buyer_name",
+        "buyer_address_line1",
+        "buyer_address_line2",
+        "buyer_city",
+        "buyer_state",
+        "buyer_pin_code",
+        "buyer_country",
+    ]
+    if any(_clean(quote_data.get(field)) for field in structured_fields):
+        city_state_pin = ", ".join(
+            value for value in [
+                _clean(quote_data.get("buyer_city")),
+                _clean(quote_data.get("buyer_state")),
+                _clean(quote_data.get("buyer_pin_code")),
+            ] if value
+        )
+        rows = [
+            ("Name", _clean(quote_data.get("buyer_name"))),
+            ("Address", _clean(quote_data.get("buyer_address_line1"))),
+            ("", _clean(quote_data.get("buyer_address_line2"))),
+            ("City/State/PIN", city_state_pin),
+            ("Country", _clean(quote_data.get("buyer_country"))),
+        ]
+        return [f"{label} : {value}" if label else value for label, value in rows if value]
+    return [line.strip() for line in str(quote_data.get("buyer_name_address", "")).splitlines() if line.strip()]
+
+
 def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
     c.setStrokeColorRGB(*BLACK)
 
@@ -367,7 +394,7 @@ def _draw_buyer_block(c: canvas.Canvas, quote_data: dict):
     # ── Content (all y-coords are reference glyph-tops, converted via _y()) ─────
     _draw(c, 25,  _y(171.2, 9), "Name & Address of the Buyer :", size=9, bold=True)
 
-    buyer_lines = str(quote_data.get("buyer_name_address", "")).splitlines()
+    buyer_lines = _buyer_address_lines(quote_data)
     for ref_top, line in zip([185.7, 202.7, 219.7, 236.7, 253.7], buyer_lines):
         _draw(c, 26, _y(ref_top, 9), line, size=9)
 
@@ -400,6 +427,7 @@ _ITEM_COL_W = [ITEM_COLS[i+1] - ITEM_COLS[i] for i in range(len(ITEM_COLS)-1)]
 _TBL_TOP = 358   # "top" coord of table top edge
 _TBL_BTM = 785   # "top" coord of table bottom edge
 _PAGE_TURN_Y = 793
+_TOTALS_GAP = 8
 
 _PS_HDR  = ParagraphStyle('hdr',  fontName='Times-Bold',    fontSize=9,
                            leading=11, alignment=TA_CENTER)
@@ -407,6 +435,10 @@ _PS_DESC = ParagraphStyle('desc', fontName='Times-Roman', fontSize=8.4,
                           leading=10, alignment=TA_LEFT)
 _PS_GGPL = ParagraphStyle('ggpl', fontName='Times-Roman', fontSize=7.2,
                           leading=8.5, alignment=TA_LEFT, textColor=colors.HexColor('#555555'))
+_PS_SUMMARY = ParagraphStyle('summary', fontName='Times-Roman', fontSize=8.8,
+                             leading=10.5, alignment=TA_LEFT)
+_PS_SUMMARY_BOLD = ParagraphStyle('summary-bold', fontName='Times-Bold', fontSize=8.8,
+                                  leading=10.5, alignment=TA_LEFT)
 
 _ITEM_TSTYLE = TableStyle([
     # Fonts
@@ -527,7 +559,13 @@ def _make_legacy_items_table(items_slice: list[dict], prices_slice: list[float],
     return t
 
 
-def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_serial: int = 1, currency: str = "INR", quote_data: dict | None = None) -> Table:
+def _make_items_table(
+    items_slice: list[dict],
+    prices_slice: list[float],
+    start_serial: int = 1,
+    currency: str = "INR",
+    quote_data: dict | None = None,
+) -> Table:
     quote_data = quote_data or {}
     include_customer_sl = _bool(quote_data.get("include_customer_sl_no"))
     columns = _item_columns(quote_data)
@@ -559,18 +597,82 @@ def _make_items_table(items_slice: list[dict], prices_slice: list[float], start_
     unit_col = keys.index("unit")
     total_col = keys.index("total")
     t = Table(rows, colWidths=[width for _, _, width in columns], repeatRows=1)
-    t.setStyle(_item_table_style(desc_col, qty_col, uom_col, unit_col, total_col))
+    style = _item_table_style(desc_col, qty_col, uom_col, unit_col, total_col)
+    t.setStyle(style)
     return t
 
 
+def _make_totals_table(items: list[dict], quote_data: dict) -> Table:
+    currency = quote_data.get("currency", "INR")
+    total_qty, subtotal, discount_amt, taxable, gst_amt, grand_total = _totals(items, quote_data)
+    discount_pct = _num(quote_data.get("discount_pct"))
+    rows = [
+        [
+            Paragraph("Total Quantity", _PS_SUMMARY_BOLD),
+            Paragraph(f"Total Price ({currency})", _PS_SUMMARY_BOLD),
+        ],
+        [_fmt_qty(total_qty), _fmt_amount(subtotal)],
+    ]
+
+    if discount_amt:
+        rows.append(["", Paragraph(f"Discount ({discount_pct:g}%): -{_fmt_amount(discount_amt)}", _PS_SUMMARY)])
+        rows.append(["", Paragraph(f"Taxable Value ({currency}): {_fmt_amount(taxable)}", _PS_SUMMARY_BOLD)])
+
+    tax_header_index = len(rows)
+    rows.append(["", Paragraph("Tax Breakup", _PS_SUMMARY_BOLD)])
+    if currency == "INR":
+        tax_rows = [(name, pct, amount) for name, pct, amount in _gst_rows(quote_data, gst_amt) if pct or amount]
+        if not tax_rows:
+            tax_rows = [("GST", 0, 0)]
+        for name, pct, amount in tax_rows:
+            rows.append(["", Paragraph(f"{name} @ {pct:g}%: {_fmt_amount(amount)}", _PS_SUMMARY)])
+    else:
+        rows.append(["", Paragraph("Taxes & Duties: At actuals", _PS_SUMMARY)])
+
+    final_index = len(rows)
+    rows.append([
+        "",
+        Paragraph(f"Total Combined Price ({currency}): {_fmt_amount(grand_total)}", _PS_SUMMARY_BOLD),
+    ])
+
+    table = Table(rows, colWidths=[92.3, 137.4])
+    style = TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1.0, colors.black),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('FONTNAME', (0, 0), (-1, -1), 'Times-Roman'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8.8),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('SPAN', (1, tax_header_index), (1, tax_header_index)),
+        ('BACKGROUND', (1, tax_header_index), (1, tax_header_index), colors.HexColor("#F2F2F2")),
+        ('FONTNAME', (0, final_index), (-1, final_index), 'Times-Bold'),
+        ('BACKGROUND', (1, final_index), (1, final_index), colors.HexColor("#E8E8E8")),
+        ('LINEABOVE', (0, final_index), (-1, final_index), 1.0, colors.black),
+    ])
+    table.setStyle(style)
+    return table
+
+
 def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, start: int):
-    _draw_buyer_block(c, quote_data)
+    first_items_page = start == 0
+    if first_items_page:
+        _draw_buyer_block(c, quote_data)
 
     unit_prices = quote_data.get("unit_prices", [])
     currency    = quote_data.get("currency", "INR")
     TABLE_X = ITEM_COLS[0]
     TABLE_W = ITEM_COLS[-1] - ITEM_COLS[0]
-    AVAIL_H = _TBL_BTM - _TBL_TOP
+    TOTALS_X = ITEM_COLS[4]
+    TOTALS_W = ITEM_COLS[-1] - TOTALS_X
+    table_top = _TBL_TOP if first_items_page else _PAN_SEP
+    AVAIL_H = _TBL_BTM - table_top
+    totals_table = _make_totals_table(items, quote_data)
+    _, totals_h = totals_table.wrapOn(c, TOTALS_W, AVAIL_H)
 
     def _prices_for(count: int) -> list[float]:
         return [
@@ -580,6 +682,7 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
 
     n_fit = 0
     for count in range(1, len(items) - start + 1):
+        candidate_is_final = start + count >= len(items)
         candidate = _make_items_table(
             items[start : start + count],
             _prices_for(count),
@@ -588,27 +691,39 @@ def _draw_items_page(c: canvas.Canvas, items: list[dict], quote_data: dict, star
             quote_data=quote_data,
         )
         _, candidate_h = candidate.wrapOn(c, TABLE_W, AVAIL_H)
-        if candidate_h > AVAIL_H:
+        required_h = candidate_h + (_TOTALS_GAP + totals_h if candidate_is_final else 0)
+        if required_h > AVAIL_H:
             break
         n_fit = count
     n_fit = max(1, n_fit)
 
     items_slice  = items[start : start + n_fit]
     prices_slice = _prices_for(n_fit)
+    is_final_items_page = start + n_fit >= len(items)
 
     # ── Build & draw the table ───────────────────────────────────────────────
-    t = _make_items_table(items_slice, prices_slice, start_serial=start + 1, currency=currency, quote_data=quote_data)
+    t = _make_items_table(
+        items_slice,
+        prices_slice,
+        start_serial=start + 1,
+        currency=currency,
+        quote_data=quote_data,
+    )
     _, tbl_h = t.wrapOn(c, TABLE_W, AVAIL_H)
 
-    tbl_pdf_y = _top(_TBL_TOP) - tbl_h             # lower-left in PDF coords
+    tbl_pdf_y = _top(table_top) - tbl_h             # lower-left in PDF coords
     t.drawOn(c, TABLE_X, tbl_pdf_y)
+
+    if is_final_items_page:
+        totals_pdf_y = tbl_pdf_y - _TOTALS_GAP - totals_h
+        totals_table.drawOn(c, TOTALS_X, totals_pdf_y)
 
     # ── Extend column dividers into the blank rows below the table ───────────
     next_start = start + n_fit
 
     # ── Bottom border of the whole table area ────────────────────────────────
     if next_start < len(items):
-        _draw(c, 298, _PAGE_TURN_Y, "PAGE TURN OVER", size=9, bold=True, align="center")
+        _draw(c, 31, 794, "PAGE TURN OVER", size=7, bold=True)
     return next_start
 
 
@@ -649,8 +764,16 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
     PL, PR   = 20, 575.2        # page left / right
     HDR_BTM  = 148              # header box bottom
 
-    # ── Other Terms & Conditions ─────────────────────────────────────────────
-    _draw(c, 33, 162.8, "Other Terms & Conditions:", size=10, bold=True)
+    # ── Quote remarks, followed by Other Terms & Conditions ─────────────────
+    top = 162.8
+    top = _draw_paragraph_block(
+        c,
+        "Technical Deviation / Remarks:",
+        quote_data.get("technical_deviation_remarks", ""),
+        top,
+    )
+    top += 4
+    _draw(c, 33, top, "Other Terms & Conditions:", size=10, bold=True)
 
     terms = [
         ("Price Basis", quote_data.get("price_basis", "As per Quotation")),
@@ -670,24 +793,12 @@ def _draw_terms_page(c: canvas.Canvas, items: list[dict], quote_data: dict):
         ("Minimum Order Value", quote_data.get("min_order_value", "INR 25,000. No order can be processed below the same and if processed, INR 5,000 shall be paid extra towards document charges.")),
     ]
 
-    top = 176.9
+    top += 14.1
     for index, (label, value) in enumerate(terms, start=1):
         top = _draw_other_term_row(c, top, index, label, value)
 
-    # ── Quote remarks and Technical Notes ─────────────────────────────────────
+    # ── Technical Notes ─────────────────────────────────────────────────────
     top += 12
-    top = _draw_paragraph_block(
-        c,
-        "Technical Deviation / Remarks:",
-        quote_data.get("technical_deviation_remarks", ""),
-        top,
-    )
-    top = _draw_paragraph_block(
-        c,
-        "Commercial T&C:",
-        quote_data.get("commercial_tnc", ""),
-        top,
-    )
     top = _draw_paragraph_block(
         c,
         "Technical Notes :",
@@ -730,13 +841,6 @@ def build_quotation_pdf(
             break
 
     _draw_header(c, quote_data, logo_path, show_pan=False)
-    _draw_general_terms_page(c)
-    _draw_page_outer_border(c)
-    _draw_page_number(c, page_no)
-    c.showPage()
-    page_no += 1
-
-    _draw_header(c, quote_data, logo_path, show_pan=False)
     needs_signature_page, signature_top = _draw_terms_page(c, items, quote_data)
     _draw_page_outer_border(c)
     _draw_page_number(c, page_no)
@@ -747,5 +851,15 @@ def build_quotation_pdf(
         _draw_signature_block(c, signature_top or 472)
         _draw_page_outer_border(c)
         _draw_page_number(c, page_no)
+        c.showPage()
+        page_no += 1
+    else:
+        c.showPage()
+        page_no += 1
+
+    _draw_header(c, quote_data, logo_path, show_pan=False)
+    _draw_general_terms_page(c)
+    _draw_page_outer_border(c)
+    _draw_page_number(c, page_no)
     c.save()
     return buf.getvalue()
