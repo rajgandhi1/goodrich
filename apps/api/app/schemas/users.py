@@ -31,6 +31,7 @@ class AppUserBase(BaseModel):
 
 class AppUserCreate(AppUserBase):
     user_id: str | None = None
+    password: str | None = None
 
 
 class AppUserPatch(BaseModel):
@@ -38,6 +39,7 @@ class AppUserPatch(BaseModel):
     designation: str | None = None
     contact: str | None = None
     email: str | None = None
+    password: str | None = None
     role: UserRole | None = None
     active: bool | None = None
 
@@ -47,3 +49,8 @@ class AppUserRead(AppUserBase):
     org_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class AppUserLogin(BaseModel):
+    username: str
+    password: str

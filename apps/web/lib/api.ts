@@ -1,6 +1,5 @@
 "use client";
 
-import { getCurrentAppUser } from "@/lib/auth/users";
 import type { AppUser } from "@/lib/auth/users";
 import type { AccessSettings } from "@/lib/auth/access-control";
 
@@ -164,7 +163,6 @@ export type DashboardMetrics = {
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 const API_TARGET = API_BASE || "the same-origin /api/v1 proxy";
 const ORG_ID = process.env.NEXT_PUBLIC_ORG_ID ?? "local-org";
-const USER_ID = process.env.NEXT_PUBLIC_USER_ID ?? "local-user";
 
 export const ITEM_FIELDS = [
   "line_no",
@@ -242,13 +240,9 @@ export const BULK_EDIT_FIELDS = [
 ] as const;
 
 function headers(extra?: HeadersInit): HeadersInit {
-  const user = getCurrentAppUser();
   return {
     "Content-Type": "application/json",
     "X-Org-Id": ORG_ID,
-    "X-User-Id": user.id || USER_ID,
-    "X-User-Role": user.role,
-    "X-User-Name": user.name,
     ...extra,
   };
 }
@@ -269,7 +263,7 @@ async function parse<T>(response: Response): Promise<T> {
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return await fetch(input, { credentials: "include", ...init });
   } catch (error) {
     const suffix = error instanceof Error && error.message ? ` (${error.message})` : "";
     throw new Error(`Could not reach the API through ${API_TARGET}. Start the FastAPI server or set NEXT_PUBLIC_API_BASE_URL.${suffix}`);
@@ -357,7 +351,7 @@ export async function createExtraction(params: {
     return parse(
       await apiFetch(`${API_BASE}/api/v1/extractions`, {
         method: "POST",
-        headers: { "X-Org-Id": ORG_ID, "X-User-Id": getCurrentAppUser().id || USER_ID, "X-User-Role": getCurrentAppUser().role },
+        headers: { "X-Org-Id": ORG_ID },
         body: form,
       }),
     );
@@ -462,6 +456,30 @@ export async function listAppUsers(): Promise<AppUser[]> {
   return parse<AppUser[]>(await apiFetch(`${API_BASE}/api/v1/users`, { headers: headers() }));
 }
 
+export async function getCurrentAppUserRemote(): Promise<AppUser> {
+  return parse<AppUser>(await apiFetch(`${API_BASE}/api/v1/auth/me`, { headers: { "Content-Type": "application/json" } }));
+}
+
+export async function loginAppUser(username: string, password: string): Promise<AppUser> {
+  return parse<AppUser>(
+    await apiFetch(`${API_BASE}/api/v1/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Org-Id": ORG_ID,
+      },
+      body: JSON.stringify({ username, password }),
+    }),
+  );
+}
+
+export async function logoutAppUser(): Promise<void> {
+  await apiFetch(`${API_BASE}/api/v1/auth/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export async function getAccessSettingsRemote(): Promise<AccessSettings> {
   return parse<AccessSettings>(await apiFetch(`${API_BASE}/api/v1/access-settings`, { headers: headers() }));
 }
@@ -487,6 +505,7 @@ export async function createAppUser(payload: Omit<AppUser, "id"> & { id?: string
         designation: payload.designation,
         contact: payload.contact,
         email: payload.email,
+        password: payload.password,
         role: payload.role,
         active: payload.active,
       }),
@@ -519,7 +538,7 @@ export async function uploadDocAssistantSession(files: FileList): Promise<{ id: 
   return parse(
     await apiFetch(`${API_BASE}/api/v1/doc-assistant/sessions/upload`, {
       method: "POST",
-      headers: { "X-Org-Id": ORG_ID, "X-User-Id": getCurrentAppUser().id || USER_ID, "X-User-Role": getCurrentAppUser().role },
+      headers: { "X-Org-Id": ORG_ID },
       body: form,
     }),
   );

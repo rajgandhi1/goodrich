@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import mimetypes
+import os
 import re
+import secrets
 import threading
 import uuid
 from copy import deepcopy
@@ -26,6 +30,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     insert,
+    or_,
     select,
     text,
     update,
@@ -125,6 +130,7 @@ app_users_table = Table(
     Column("designation", Text, nullable=False, default=""),
     Column("contact", Text, nullable=False, default=""),
     Column("email", Text, nullable=False, default=""),
+    Column("password_hash", Text, nullable=False, default=""),
     Column("role", Text, nullable=False, default="sales"),
     Column("active", Boolean, nullable=False, default=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
@@ -148,15 +154,92 @@ DEFAULT_APP_USERS = [
         "designation": "Admin",
         "contact": "",
         "email": "shashnam@flosil.com",
+        "password_hash": "",
         "role": "admin",
         "active": True,
     },
 ]
 
+ALL_CAPABILITIES = [
+    "view_dashboard",
+    "view_enquiry",
+    "view_material_planning",
+    "view_quotation",
+    "view_purchase_orders",
+    "view_doc_assistant",
+    "view_history",
+    "view_settings",
+    "create_enquiry",
+    "edit_sales_details",
+    "edit_workflow",
+    "edit_line_items",
+    "edit_quotation",
+    "edit_material_phase2",
+    "approve_quotes",
+    "export_quotes",
+    "manage_users",
+]
+
+
+def _permissions(enabled: list[str]) -> dict[str, bool]:
+    allowed = set(enabled)
+    return {capability: capability in allowed for capability in ALL_CAPABILITIES}
+
+
 DEFAULT_ACCESS_SETTINGS = AccessSettings(
     with_whom_options=["Ashwin sir", "GTQ", "Estimation", "Arun Sir"],
-    role_permissions={},
+    role_permissions={
+        "admin": _permissions(ALL_CAPABILITIES),
+        "management": _permissions([
+            "view_dashboard", "view_enquiry", "view_material_planning", "view_quotation", "view_purchase_orders", "view_doc_assistant", "view_history",
+            "create_enquiry", "edit_sales_details", "edit_workflow", "edit_line_items", "edit_quotation", "approve_quotes", "export_quotes",
+        ]),
+        "approver": _permissions([
+            "view_dashboard", "view_quotation", "view_purchase_orders", "view_history",
+            "edit_workflow", "edit_line_items", "edit_quotation", "approve_quotes", "export_quotes",
+        ]),
+        "sales": _permissions([
+            "view_dashboard", "view_enquiry", "view_quotation", "view_purchase_orders", "view_doc_assistant", "view_history",
+            "edit_sales_details",
+        ]),
+        "estimation": _permissions([
+            "view_dashboard", "view_enquiry", "view_doc_assistant", "view_history",
+            "create_enquiry", "edit_workflow", "edit_line_items", "edit_quotation", "export_quotes",
+        ]),
+        "technical": _permissions([
+            "view_dashboard", "view_enquiry", "view_doc_assistant", "view_history",
+            "create_enquiry", "edit_workflow", "edit_line_items", "edit_quotation", "export_quotes",
+        ]),
+        "planning": _permissions([
+            "view_dashboard", "view_material_planning", "view_purchase_orders", "view_history",
+            "create_enquiry", "edit_workflow", "edit_line_items", "edit_quotation", "export_quotes",
+        ]),
+        "material_planner": _permissions([
+            "view_dashboard", "view_material_planning", "view_purchase_orders", "view_history",
+            "create_enquiry", "edit_workflow", "edit_line_items", "edit_quotation", "edit_material_phase2", "export_quotes",
+        ]),
+        "purchase": _permissions([
+            "view_dashboard", "view_material_planning", "view_purchase_orders", "view_history",
+            "create_enquiry", "edit_workflow", "edit_line_items", "edit_quotation", "export_quotes",
+        ]),
+        "viewer": _permissions(["view_history"]),
+    },
 )
+
+
+def _access_settings_with_defaults(value: dict[str, Any] | AccessSettings | None) -> AccessSettings:
+    raw = value.model_dump() if isinstance(value, AccessSettings) else dict(value or {})
+    options = raw.get("with_whom_options") or DEFAULT_ACCESS_SETTINGS.with_whom_options
+    raw_permissions = raw.get("role_permissions") or {}
+    role_permissions: dict[str, dict[str, bool]] = {}
+    for role, defaults in DEFAULT_ACCESS_SETTINGS.role_permissions.items():
+        supplied = raw_permissions.get(role) or {}
+        role_permissions[role] = {
+            capability: bool(supplied[capability]) if capability in supplied else default_value
+            for capability, default_value in defaults.items()
+        }
+    role_permissions["admin"] = _permissions(ALL_CAPABILITIES)
+    return AccessSettings(with_whom_options=list(options), role_permissions=role_permissions)
 
 ENQUIRY_NO_PATTERN = re.compile(r"^enq-(\d+)$", re.IGNORECASE)
 
@@ -239,6 +322,28 @@ def _content_type(filename: str, content_type: str | None) -> str:
     return content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
+def _password_hash(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), 200_000).hex()
+    return f"pbkdf2_sha256$200000${salt}${digest}"
+
+
+def _verify_password(password: str, stored: str | None) -> bool:
+    value = str(stored or "")
+    if not value:
+        return False
+    if value.startswith("plain:"):
+        return hmac.compare_digest(value.removeprefix("plain:"), password)
+    if value.startswith("pbkdf2_sha256$"):
+        try:
+            _, rounds, salt, expected = value.split("$", 3)
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), int(rounds)).hex()
+            return hmac.compare_digest(digest, expected)
+        except (ValueError, TypeError):
+            return False
+    return hmac.compare_digest(value, password)
+
+
 class LocalJsonRepository:
     """Persistent local fallback used when Postgres is unavailable."""
 
@@ -302,6 +407,7 @@ class LocalJsonRepository:
                     "designation": users[key].get("designation") or seed["designation"],
                     "contact": users[key].get("contact") or seed["contact"],
                     "email": users[key].get("email") or seed["email"],
+                    "password_hash": users[key].get("password_hash") or seed["password_hash"],
                     "role": "admin",
                     "active": True,
                     "updated_at": now,
@@ -372,8 +478,9 @@ class LocalJsonRepository:
     def create_app_user(self, org_id: str, payload: AppUserCreate) -> AppUserRead:
         now = _now().isoformat()
         user_id = (payload.user_id or payload.email).strip().lower()
-        data = {"id": user_id, "org_id": org_id, "created_at": now, "updated_at": now, **payload.model_dump(exclude={"user_id"})}
+        data = {"id": user_id, "org_id": org_id, "created_at": now, "updated_at": now, **payload.model_dump(exclude={"user_id", "password"})}
         data["email"] = str(data["email"]).lower()
+        data["password_hash"] = _password_hash(payload.password) if payload.password else ""
         with self._lock:
             self._ensure_app_users(org_id)
             self._state["app_users"][f"{org_id}:{user_id}"] = data
@@ -390,9 +497,31 @@ class LocalJsonRepository:
             changes = payload.model_dump(exclude_unset=True)
             if "email" in changes and changes["email"] is not None:
                 changes["email"] = str(changes["email"]).lower()
+            if "password" in changes:
+                password = str(changes.pop("password") or "")
+                if password:
+                    changes["password_hash"] = _password_hash(password)
             user.update(changes)
             user["updated_at"] = _now().isoformat()
             self._save()
+            return self._app_user_from_data(deepcopy(user))
+
+    def authenticate_app_user(self, org_id: str, username: str, password: str) -> AppUserRead | None:
+        clean = username.strip().lower()
+        with self._lock:
+            self._ensure_app_users(org_id)
+            user = next(
+                (
+                    row
+                    for row in self._state["app_users"].values()
+                    if row.get("org_id") == org_id
+                    and row.get("active", True)
+                    and (str(row.get("id") or "").lower() == clean or str(row.get("email") or "").lower() == clean)
+                ),
+                None,
+            )
+            if not user or not _verify_password(password, user.get("password_hash") or user.get("password")):
+                return None
             return self._app_user_from_data(deepcopy(user))
 
     def delete_app_user(self, org_id: str, user_id: str) -> bool:
@@ -412,14 +541,14 @@ class LocalJsonRepository:
                 settings = DEFAULT_ACCESS_SETTINGS.model_dump(mode="json")
                 self._state["app_settings"][f"{org_id}:access"] = settings
                 self._save()
-            return AccessSettings(**deepcopy(settings))
+            return _access_settings_with_defaults(deepcopy(settings))
 
     def update_access_settings(self, org_id: str, settings: AccessSettings) -> AccessSettings:
         with self._lock:
-            data = settings.model_dump(mode="json")
+            data = _access_settings_with_defaults(settings).model_dump(mode="json")
             self._state.setdefault("app_settings", {})[f"{org_id}:access"] = data
             self._save()
-            return AccessSettings(**deepcopy(data))
+            return _access_settings_with_defaults(deepcopy(data))
 
     def list_quotes(self, org_id: str) -> list[QuoteRead]:
         with self._lock:
@@ -641,6 +770,23 @@ class PostgresRepository:
                 conn.execute(text("create index if not exists generated_exports_org_created_idx on generated_exports (org_id, created_at desc)"))
                 conn.execute(text("alter table app_users add column if not exists designation text not null default ''"))
                 conn.execute(text("alter table app_users add column if not exists contact text not null default ''"))
+                conn.execute(text("alter table app_users add column if not exists password_hash text not null default ''"))
+                conn.execute(text(
+                    """
+                    do $$
+                    begin
+                        if exists (
+                            select 1
+                            from information_schema.columns
+                            where table_name = 'app_users' and column_name = 'password'
+                        ) then
+                            update app_users
+                            set password_hash = 'plain:' || password
+                            where password_hash = '' and password is not null and password <> '';
+                        end if;
+                    end $$;
+                    """
+                ))
                 conn.execute(text("create index if not exists app_users_org_email_idx on app_users (org_id, email)"))
 
     def _quote_from_row(self, row: Any) -> QuoteRead:
@@ -721,6 +867,7 @@ class PostgresRepository:
                             designation=seed["designation"],
                             contact=seed["contact"],
                             email=seed["email"],
+                            password_hash=seed["password_hash"],
                             role=seed["role"],
                             active=seed["active"],
                             created_at=now,
@@ -737,6 +884,7 @@ class PostgresRepository:
                             designation=data["designation"] or seed["designation"],
                             contact=data["contact"] or seed["contact"],
                             email=data["email"] or seed["email"],
+                            password_hash=data["password_hash"] or seed["password_hash"],
                             role="admin",
                             active=True,
                             updated_at=now,
@@ -824,6 +972,7 @@ class PostgresRepository:
                 designation=payload.designation,
                 contact=payload.contact,
                 email=str(payload.email).lower(),
+                password_hash=_password_hash(payload.password) if payload.password else "",
                 role=payload.role,
                 active=payload.active,
                 created_at=now,
@@ -840,6 +989,10 @@ class PostgresRepository:
         changes = payload.model_dump(exclude_unset=True)
         if "email" in changes and changes["email"] is not None:
             changes["email"] = str(changes["email"]).lower()
+        if "password" in changes:
+            password = str(changes.pop("password") or "")
+            if password:
+                changes["password_hash"] = _password_hash(password)
         if not changes:
             stmt = select(app_users_table).where(
                 app_users_table.c.org_id == _tenant_uuid(org_id),
@@ -856,6 +1009,23 @@ class PostgresRepository:
         with self._engine.begin() as conn:
             row = conn.execute(stmt).first()
         return self._app_user_from_row(row) if row else None
+
+    def authenticate_app_user(self, org_id: str, username: str, password: str) -> AppUserRead | None:
+        self._ensure_app_users(org_id)
+        clean = username.strip().lower()
+        stmt = select(app_users_table).where(
+            app_users_table.c.org_id == _tenant_uuid(org_id),
+            app_users_table.c.active.is_(True),
+            or_(app_users_table.c.user_id == clean, app_users_table.c.email == clean),
+        )
+        with self._engine.begin() as conn:
+            row = conn.execute(stmt).first()
+        if not row:
+            return None
+        data = row._mapping
+        if not _verify_password(password, data["password_hash"]):
+            return None
+        return self._app_user_from_row(row)
 
     def delete_app_user(self, org_id: str, user_id: str) -> bool:
         self._ensure_app_users(org_id)
@@ -885,11 +1055,11 @@ class PostgresRepository:
                         updated_at=_now(),
                     )
                 )
-        return AccessSettings(**dict(value or {}))
+        return _access_settings_with_defaults(dict(value or {}))
 
     def update_access_settings(self, org_id: str, settings: AccessSettings) -> AccessSettings:
         org_uuid = _tenant_uuid(org_id)
-        value = settings.model_dump(mode="json")
+        value = _access_settings_with_defaults(settings).model_dump(mode="json")
         with self._engine.begin() as conn:
             existing = conn.execute(
                 select(app_settings_table.c.key).where(
@@ -912,7 +1082,7 @@ class PostgresRepository:
                         updated_at=_now(),
                     )
                 )
-        return AccessSettings(**value)
+        return _access_settings_with_defaults(value)
 
     def list_quotes(self, org_id: str) -> list[QuoteRead]:
         org_uuid = _tenant_uuid(org_id)
@@ -1197,7 +1367,7 @@ def _make_repo() -> PostgresRepository | LocalJsonRepository:
             conn.execute(text("select 1"))
         return PostgresRepository(engine)
     except (ModuleNotFoundError, ImportError, SQLAlchemyError, OSError) as exc:
-        if settings.environment.lower() in {"prod", "production"}:
+        if settings.environment.lower() in {"prod", "production"} or os.environ.get("DATABASE_URL"):
             raise RuntimeError("Postgres repository is required in production. Check DATABASE_URL and database access.") from exc
         return LocalJsonRepository(fallback_path)
 

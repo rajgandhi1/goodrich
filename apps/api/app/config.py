@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     microsoft_client_id: str | None = Field(default=None, alias="MICROSOFT_CLIENT_ID")
     microsoft_client_secret: str | None = Field(default=None, alias="MICROSOFT_CLIENT_SECRET")
     outlook_default_mailbox: str | None = Field(default=None, alias="OUTLOOK_DEFAULT_MAILBOX")
+    auth_secret: str = Field(default="dev-only-change-me", alias="AUTH_SECRET")
+    auth_cookie_name: str = Field(default="ggpl_session", alias="AUTH_COOKIE_NAME")
 
     model_config = SettingsConfigDict(
         env_file=".env",

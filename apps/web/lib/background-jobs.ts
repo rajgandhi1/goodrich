@@ -2,8 +2,6 @@
 
 export const BACKGROUND_JOBS_EVENT = "ggpl-background-jobs-changed";
 
-const STORAGE_KEY = "ggpl.backgroundExtractionJobs";
-
 export type BackgroundExtractionJob = {
   id: string;
   quoteId: string | null;
@@ -12,19 +10,15 @@ export type BackgroundExtractionJob = {
   startedAt: string;
 };
 
+let inMemoryJobs: BackgroundExtractionJob[] = [];
+
 function readJobs(): BackgroundExtractionJob[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return inMemoryJobs;
 }
 
 function writeJobs(jobs: BackgroundExtractionJob[]) {
+  inMemoryJobs = jobs;
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
   window.dispatchEvent(new Event(BACKGROUND_JOBS_EVENT));
 }
 

@@ -1,7 +1,6 @@
 import type { AppRole } from "@/lib/auth/users";
 
 export const ACCESS_SETTINGS_CHANGED_EVENT = "gq-access-settings-changed";
-const ACCESS_SETTINGS_KEY = "gq_access_settings";
 
 export type AppCapability =
   | "view_dashboard"
@@ -121,10 +120,6 @@ export const defaultAccessSettings: AccessSettings = {
   },
 };
 
-function hasStorage() {
-  return typeof window !== "undefined" && Boolean(window.localStorage);
-}
-
 function notifyChanged() {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(ACCESS_SETTINGS_CHANGED_EVENT));
@@ -167,25 +162,11 @@ export function normalizeAccessSettings(settings?: Partial<AccessSettings> | nul
 }
 
 export function getAccessSettings(): AccessSettings {
-  if (!hasStorage()) return defaultAccessSettings;
-  const raw = window.localStorage.getItem(ACCESS_SETTINGS_KEY);
-  if (!raw) {
-    window.localStorage.setItem(ACCESS_SETTINGS_KEY, JSON.stringify(defaultAccessSettings));
-    return defaultAccessSettings;
-  }
-  try {
-    const normalized = normalizeAccessSettings(JSON.parse(raw) as Partial<AccessSettings>);
-    window.localStorage.setItem(ACCESS_SETTINGS_KEY, JSON.stringify(normalized));
-    return normalized;
-  } catch {
-    window.localStorage.setItem(ACCESS_SETTINGS_KEY, JSON.stringify(defaultAccessSettings));
-    return defaultAccessSettings;
-  }
+  return defaultAccessSettings;
 }
 
 export function saveAccessSettings(settings: Partial<AccessSettings>) {
-  if (!hasStorage()) return;
-  window.localStorage.setItem(ACCESS_SETTINGS_KEY, JSON.stringify(normalizeAccessSettings(settings)));
+  normalizeAccessSettings(settings);
   notifyChanged();
 }
 

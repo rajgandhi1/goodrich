@@ -9,8 +9,8 @@ import { UserMenu } from "@/components/app-shell/user-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { AppRole, getCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
-import { getAccessSettingsRemote } from "@/lib/api";
+import { AppRole, getCurrentAppUser, setCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { getAccessSettingsRemote, getCurrentAppUserRemote } from "@/lib/api";
 import { ACCESS_SETTINGS_CHANGED_EVENT, AppCapability, canRole, getAccessSettings, normalizeAccessSettings, saveAccessSettings } from "@/lib/auth/access-control";
 import { cn } from "@/lib/utils";
 
@@ -61,23 +61,20 @@ const navSections: NavSection[] = [
 ];
 
 function SidebarNav({ activePath, collapsed = false }: { activePath: string; collapsed?: boolean }) {
-  const [role, setRole] = React.useState<AppRole>("admin");
+  const [role, setRole] = React.useState<AppRole>(() => getCurrentAppUser().role);
   const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
-  const [recent, setRecent] = React.useState<Array<{ id: string; label: string; href: string }>>([]);
   React.useEffect(() => {
     const refresh = () => {
       setRole(getCurrentAppUser().role);
       setAccessSettings(getAccessSettings());
     };
-    const refreshRecent = () => {
-      try {
-        setRecent(JSON.parse(window.localStorage.getItem("gq_recent_quotes") || "[]"));
-      } catch {
-        setRecent([]);
-      }
-    };
     refresh();
-    refreshRecent();
+    getCurrentAppUserRemote()
+      .then((user) => {
+        setCurrentAppUser(user);
+        setRole(user.role);
+      })
+      .catch(() => undefined);
     getAccessSettingsRemote()
       .then((settings) => {
         const normalized = normalizeAccessSettings(settings);
@@ -132,20 +129,6 @@ function SidebarNav({ activePath, collapsed = false }: { activePath: string; col
           })}
         </div>
       ))}
-      {recent.length > 0 && !collapsed && (
-        <div className="space-y-1 border-t pt-4">
-          <div className="px-3 text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">Recent</div>
-          {recent.slice(0, 4).map((item) => (
-            <Link
-              key={item.id}
-              href={item.href}
-              className="block truncate rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-      )}
     </nav>
   );
 }
@@ -161,7 +144,7 @@ export function AppShell({
   title: string;
   breadcrumb: string;
 }) {
-  const [role, setRole] = React.useState<AppRole>("admin");
+  const [role, setRole] = React.useState<AppRole>(() => getCurrentAppUser().role);
   const [accessSettings, setAccessSettings] = React.useState(() => getAccessSettings());
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   React.useEffect(() => {
@@ -170,11 +153,12 @@ export function AppShell({
       setAccessSettings(getAccessSettings());
     };
     refresh();
-    try {
-      setSidebarCollapsed(window.localStorage.getItem("gq_sidebar_collapsed") === "1");
-    } catch {
-      setSidebarCollapsed(false);
-    }
+    getCurrentAppUserRemote()
+      .then((user) => {
+        setCurrentAppUser(user);
+        setRole(user.role);
+      })
+      .catch(() => undefined);
     getAccessSettingsRemote()
       .then((settings) => {
         const normalized = normalizeAccessSettings(settings);
@@ -191,13 +175,6 @@ export function AppShell({
       window.removeEventListener("storage", refresh);
     };
   }, []);
-  React.useEffect(() => {
-    try {
-      window.localStorage.setItem("gq_sidebar_collapsed", sidebarCollapsed ? "1" : "0");
-    } catch {
-      // Ignore storage failures in private mode or constrained contexts.
-    }
-  }, [sidebarCollapsed]);
   return (
     <div className="min-h-screen bg-background">
       <aside className={cn("fixed inset-y-0 left-0 hidden flex-col border-r bg-card lg:flex", sidebarCollapsed ? "w-16" : "w-72")}>

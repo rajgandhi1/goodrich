@@ -55,7 +55,9 @@ import {
   deleteQuote,
   exportQuote,
   getAccessSettingsRemote,
+  getCurrentAppUserRemote,
   getQuote,
+  listAppUsers,
   listQuotes,
   listOutlookThreadMessages,
   patchQuote,
@@ -66,7 +68,7 @@ import {
 } from "@/lib/api";
 import { addBackgroundJob } from "@/lib/background-jobs";
 import { ACCESS_SETTINGS_CHANGED_EVENT, canRole, getAccessSettings, normalizeAccessSettings, saveAccessSettings } from "@/lib/auth/access-control";
-import { getAppUsers, getCurrentAppUser, resolveAppUserName, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { getAppUsers, getCurrentAppUser, resolveAppUserName, roleLabels, setCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import {
   buildMaterialBreakdown,
   DEFAULT_MATERIAL_PLANNING_INPUTS,
@@ -619,8 +621,6 @@ const STATUS_LABELS: Record<(typeof STATUS_OPTIONS)[number], string> = {
   regret: "Regret",
 };
 const MATERIAL_PHASE2_UOMS = ["SHEETS", "KG", "COIL", "RINGS", "NOS"] as const;
-const FILTER_STORAGE_KEY = "gq_quote_saved_filters";
-const RECENT_QUOTES_KEY = "gq_recent_quotes";
 const DEFAULT_TABLE_MODE = "spreadsheet" as const;
 
 type MaterialPhase2Row = MaterialPlan["rows"][number];
@@ -1079,10 +1079,6 @@ function confidenceClass(value: unknown) {
   return "bg-red-100/80 text-red-950 dark:bg-red-950/40 dark:text-red-100";
 }
 
-function storageAvailable() {
-  return typeof window !== "undefined" && Boolean(window.localStorage);
-}
-
 type SavedQuoteFilters = {
   queueFilter?: string;
   statusFilter?: string;
@@ -1090,39 +1086,18 @@ type SavedQuoteFilters = {
   tableMode?: "guided" | "spreadsheet";
 };
 
-function savedFiltersFor(section: QuoteSection) {
-  if (!storageAvailable()) return null;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(FILTER_STORAGE_KEY) || "{}") as Record<string, SavedQuoteFilters>;
-    return parsed[`${section}:${getCurrentAppUser().role}`] ?? parsed[section] ?? null;
-  } catch {
-    return null;
-  }
+function savedFiltersFor(section: QuoteSection): SavedQuoteFilters | null {
+  void section;
+  return null;
 }
 
 function persistSavedFilters(section: QuoteSection, filters: { queueFilter: string; statusFilter: string; columnPreset: string; tableMode: "guided" | "spreadsheet" }) {
-  if (!storageAvailable()) return;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(FILTER_STORAGE_KEY) || "{}") as Record<string, unknown>;
-    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ ...parsed, [`${section}:${getCurrentAppUser().role}`]: filters }));
-  } catch {
-    window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({ [`${section}:${getCurrentAppUser().role}`]: filters }));
-  }
+  void section;
+  void filters;
 }
 
 function rememberRecentQuote(row: Quote) {
-  if (!storageAvailable()) return;
-  try {
-    const recent = JSON.parse(window.localStorage.getItem(RECENT_QUOTES_KEY) || "[]") as Array<{ id: string; label: string; href: string; at: string }>;
-    const href = row.stage === "po" ? `/purchase-orders?quote=${row.id}` : FINAL_STAGES.has(row.stage) ? `/quotes/final?quote=${row.id}` : `/quotes?quote=${row.id}`;
-    const next = [
-      { id: row.id, label: row.customer || row.quote_no || row.id, href, at: new Date().toISOString() },
-      ...recent.filter((item) => item.id !== row.id),
-    ].slice(0, 8);
-    window.localStorage.setItem(RECENT_QUOTES_KEY, JSON.stringify(next));
-  } catch {
-    window.localStorage.removeItem(RECENT_QUOTES_KEY);
-  }
+  void row;
 }
 
 function Field({
@@ -1706,10 +1681,17 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
 
   React.useEffect(() => {
     const refresh = () => {
-      setAppUsers(getAppUsers());
+      listAppUsers().then(setAppUsers).catch(() => setAppUsers([]));
       setCurrentUser(getCurrentAppUser());
       setAccessSettings(getAccessSettings());
     };
+    getCurrentAppUserRemote()
+      .then((user) => {
+        setCurrentAppUser(user);
+        setCurrentUser(user);
+      })
+      .catch(() => undefined);
+    listAppUsers().then(setAppUsers).catch(() => setAppUsers([]));
     getAccessSettingsRemote()
       .then((settings) => {
         const normalized = normalizeAccessSettings(settings);

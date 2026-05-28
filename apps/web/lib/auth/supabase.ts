@@ -25,4 +25,4 @@ export function getSupabaseBrowserClient() {
   return browserClient;
 }
 
-export const LOCAL_AUTH_COOKIE = "gq_auth";
+export const LOCAL_AUTH_COOKIE = "ggpl_session";

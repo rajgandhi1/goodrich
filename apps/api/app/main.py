@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .observability import configure_observability
-from .routers import access_settings, chat, converter, dashboard, docs, extraction, health, outlook, quotes, users
+from .routers import access_settings, auth, chat, converter, dashboard, docs, extraction, health, outlook, quotes, users
 
 
 settings = get_settings()
+if settings.environment.lower() in {"prod", "production"} and settings.auth_secret == "dev-only-change-me":
+    raise RuntimeError("AUTH_SECRET must be set in production")
 configure_observability(settings)
 
 app = FastAPI(
@@ -29,6 +31,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(extraction.router)
 app.include_router(quotes.router)
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(access_settings.router)
 app.include_router(dashboard.router)

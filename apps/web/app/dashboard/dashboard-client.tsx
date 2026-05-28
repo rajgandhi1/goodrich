@@ -4,9 +4,9 @@ import * as React from "react";
 import { AlertTriangle, CalendarClock, ClipboardList, FileText, History, RefreshCw, Users } from "lucide-react";
 import { toast } from "sonner";
 
-import { DashboardMetrics, Quote, getDashboardMetrics, listQuotes } from "@/lib/api";
+import { DashboardMetrics, Quote, getCurrentAppUserRemote, getDashboardMetrics, listAppUsers, listQuotes } from "@/lib/api";
 import { ACCESS_SETTINGS_CHANGED_EVENT, canRole, getAccessSettings } from "@/lib/auth/access-control";
-import { getAppUsers, getCurrentAppUser, resolveAppUserName, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { getAppUsers, getCurrentAppUser, resolveAppUserName, setCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 import { formatCurrencyValue, quoteAgeDays, quoteDueState, quoteEstimatedValue, quoteNextAction } from "@/components/quotes/queue-utils";
 import { stageLabel } from "@/components/quotes/stage-utils";
 import { EmptyState } from "@/components/app-shell/empty-state";
@@ -43,9 +43,12 @@ export function DashboardClient() {
 
   async function refresh() {
     try {
-      const [metricData, quoteData] = await Promise.all([getDashboardMetrics(), listQuotes()]);
+      const [current, metricData, quoteData, userData] = await Promise.all([getCurrentAppUserRemote(), getDashboardMetrics(), listQuotes(), listAppUsers()]);
+      setCurrentAppUser(current);
+      setCurrentUser(current);
       setMetrics(metricData);
       setQuotes(quoteData);
+      setAppUsers(userData);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Dashboard load failed");
     }
@@ -58,7 +61,7 @@ export function DashboardClient() {
   React.useEffect(() => {
     const refreshUser = () => {
       setCurrentUser(getCurrentAppUser());
-      setAppUsers(getAppUsers());
+      listAppUsers().then(setAppUsers).catch(() => setAppUsers([]));
       setAccessSettings(getAccessSettings());
     };
     window.addEventListener(USERS_CHANGED_EVENT, refreshUser);

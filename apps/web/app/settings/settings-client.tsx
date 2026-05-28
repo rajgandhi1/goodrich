@@ -12,9 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { createAppUser, deleteAppUser, getAccessSettingsRemote, listAppUsers, patchAppUser, putAccessSettingsRemote } from "@/lib/api";
+import { createAppUser, deleteAppUser, getAccessSettingsRemote, getCurrentAppUserRemote, listAppUsers, loginAppUser, patchAppUser, putAccessSettingsRemote } from "@/lib/api";
 import { ACCESS_SETTINGS_CHANGED_EVENT, AccessSettings, AppCapability, actionCapabilities, canRole, capabilityLabels, getAccessSettings, normalizeAccessSettings, pageCapabilities, saveAccessSettings } from "@/lib/auth/access-control";
-import { AppRole, AppUser, canManageUsers, findAppUserByUsername, getAppUsers, getCurrentAppUser, roleLabels, saveAppUsers, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { AppRole, AppUser, canManageUsers, getCurrentAppUser, roleLabels, setCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 
 const blankUser: AppUser = {
   id: "",
@@ -28,25 +28,31 @@ const blankUser: AppUser = {
 };
 
 export function SettingsClient() {
-  const [users, setUsers] = React.useState<AppUser[]>(() => getAppUsers());
+  const [users, setUsers] = React.useState<AppUser[]>([]);
   const [currentUser, setCurrentUserState] = React.useState(() => getCurrentAppUser());
   const [draftUser, setDraftUser] = React.useState<AppUser>(blankUser);
   const [adminPassword, setAdminPassword] = React.useState("");
   const [addedUserId, setAddedUserId] = React.useState("");
+  const [addUserOpen, setAddUserOpen] = React.useState(false);
   const [editingUser, setEditingUser] = React.useState<AppUser | null>(null);
   const [accessSettings, setAccessSettings] = React.useState<AccessSettings>(() => getAccessSettings());
   const [draftWithWhom, setDraftWithWhom] = React.useState("");
   const canManage = canManageUsers(currentUser.role);
 
   React.useEffect(() => {
+    getCurrentAppUserRemote()
+      .then((user) => {
+        setCurrentAppUser(user);
+        setCurrentUserState(user);
+      })
+      .catch(() => setCurrentUserState(getCurrentAppUser()));
     listAppUsers()
       .then((rows) => {
-        saveAppUsers(rows);
         setUsers(rows);
         setCurrentUserState(getCurrentAppUser());
       })
       .catch(() => {
-        setUsers(getAppUsers());
+        setUsers([]);
       });
     getAccessSettingsRemote()
       .then((settings) => {
@@ -56,7 +62,7 @@ export function SettingsClient() {
       })
       .catch(() => setAccessSettings(getAccessSettings()));
     const refresh = () => {
-      setUsers(getAppUsers());
+      listAppUsers().then(setUsers).catch(() => setUsers([]));
       setCurrentUserState(getCurrentAppUser());
       setAccessSettings(getAccessSettings());
     };
@@ -71,8 +77,7 @@ export function SettingsClient() {
   }, []);
 
   function persistUsers(next: AppUser[]) {
-    saveAppUsers(next);
-    setUsers(getAppUsers());
+    setUsers(next);
     setCurrentUserState(getCurrentAppUser());
   }
 
@@ -133,13 +138,8 @@ export function SettingsClient() {
     const username = draftUser.id.trim().toLowerCase();
     const verifiedPassword = adminPassword.trim();
     const password = String(draftUser.password || "").trim();
-    const storedAdminPassword = String(findAppUserByUsername(currentUser.id)?.password || currentUser.password || "").trim();
     if (!verifiedPassword) {
       toast.error("Enter your admin password before adding a user");
-      return;
-    }
-    if (storedAdminPassword && verifiedPassword !== storedAdminPassword) {
-      toast.error("Admin password is incorrect");
       return;
     }
     if (!username) {
@@ -159,12 +159,14 @@ export function SettingsClient() {
       return;
     }
     try {
+      await loginAppUser(currentUser.id, verifiedPassword);
       const email = draftUser.email.trim().toLowerCase();
       const created = await createAppUser({ ...draftUser, id: username, email, name: draftUser.name.trim() || username, active: true });
-      persistUsers([...users, { ...created, password }]);
+      persistUsers([...users, created]);
       setDraftUser(blankUser);
       setAdminPassword("");
       setAddedUserId(created.id);
+      setAddUserOpen(false);
       toast.success(`${created.name || created.id} added to the user list`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add user");
@@ -329,92 +331,22 @@ export function SettingsClient() {
           )}
 
           {canManage && (
-            <details className="rounded-md border p-3">
-              <summary className="cursor-pointer text-sm font-medium">
-                <span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" />Add employee user</span>
-              </summary>
-              <div className="mt-3 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                    <KeyRound className="h-4 w-4" />
-                    Step 1: Admin verification
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="admin-password">Admin password</Label>
-                    <Input
-                      id="admin-password"
-                      type="password"
-                      autoComplete="current-password"
-                      value={adminPassword}
-                      onChange={(event) => setAdminPassword(event.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-md border p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                    <UserCog className="h-4 w-4" />
-                    Step 2: Employee credentials
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    <div className="space-y-1.5">
-                      <Label>User ID / Username</Label>
-                      <Input placeholder="usr-004" value={draftUser.id} onChange={(event) => setDraftUser((user) => ({ ...user, id: event.target.value }))} />
-                      <div className="text-xs text-muted-foreground">Locked to the account after saving.</div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Employee name</Label>
-                      <Input value={draftUser.name} onChange={(event) => setDraftUser((user) => ({ ...user, name: event.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Designation</Label>
-                      <Input value={draftUser.designation || ""} onChange={(event) => setDraftUser((user) => ({ ...user, designation: event.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Contact no</Label>
-                      <Input value={draftUser.contact || ""} onChange={(event) => setDraftUser((user) => ({ ...user, contact: event.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Email ID</Label>
-                      <Input type="email" value={draftUser.email} onChange={(event) => setDraftUser((user) => ({ ...user, email: event.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Set temporary password</Label>
-                      <Input type="password" autoComplete="new-password" value={draftUser.password || ""} onChange={(event) => setDraftUser((user) => ({ ...user, password: event.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Role</Label>
-                      <Select value={draftUser.role} onValueChange={(value) => setDraftUser((user) => ({ ...user, role: value as AppRole }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(roleLabels).map(([role, label]) => <SelectItem key={role} value={role}>{label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-xs text-muted-foreground">
-                      Keep the username permanent so historical activity stays linked even if employee details change later.
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => { setDraftUser(blankUser); setAdminPassword(""); }}>
-                        Cancel
-                      </Button>
-                      <Button size="sm" onClick={addUser}>
-                        <Plus className="h-4 w-4" />
-                        Save & Add User
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+              <div>
+                <div className="text-sm font-medium">Employee users</div>
+                <div className="text-xs text-muted-foreground">Add a permanent username with editable employee details.</div>
               </div>
+              <Button size="sm" onClick={() => setAddUserOpen(true)}>
+                <Plus className="h-4 w-4" />
+                Add employee user
+              </Button>
               {addedUserId && (
-                <div className="mt-3 flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-200">
+                <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-200">
                   <CheckCircle2 className="h-4 w-4" />
                   User {addedUserId} has been added to the list.
                 </div>
               )}
-            </details>
+            </div>
           )}
 
           <div className="overflow-auto rounded-md border">
@@ -472,6 +404,88 @@ export function SettingsClient() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Add employee user</DialogTitle>
+            <DialogDescription>Create a permanent User ID and set the employee credentials for first login.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <KeyRound className="h-4 w-4" />
+                Step 1: Admin verification
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="admin-password">Admin password</Label>
+                <Input
+                  id="admin-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-md border p-3">
+              <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                <UserCog className="h-4 w-4" />
+                Step 2: Employee credentials
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>User ID / Username</Label>
+                  <Input placeholder="usr-004" value={draftUser.id} onChange={(event) => setDraftUser((user) => ({ ...user, id: event.target.value }))} />
+                  <div className="text-xs text-muted-foreground">Locked to the account after saving.</div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Employee name</Label>
+                  <Input value={draftUser.name} onChange={(event) => setDraftUser((user) => ({ ...user, name: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Designation</Label>
+                  <Input value={draftUser.designation || ""} onChange={(event) => setDraftUser((user) => ({ ...user, designation: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Contact no</Label>
+                  <Input value={draftUser.contact || ""} onChange={(event) => setDraftUser((user) => ({ ...user, contact: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Email ID</Label>
+                  <Input type="email" value={draftUser.email} onChange={(event) => setDraftUser((user) => ({ ...user, email: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Set temporary password</Label>
+                  <Input type="password" autoComplete="new-password" value={draftUser.password || ""} onChange={(event) => setDraftUser((user) => ({ ...user, password: event.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Role</Label>
+                  <Select value={draftUser.role} onValueChange={(value) => setDraftUser((user) => ({ ...user, role: value as AppRole }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(roleLabels).map(([role, label]) => <SelectItem key={role} value={role}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-4 text-xs text-muted-foreground">
+                Keep the username permanent so historical activity stays linked even if employee details change later.
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDraftUser(blankUser); setAdminPassword(""); setAddUserOpen(false); }}>
+              Cancel
+            </Button>
+            <Button onClick={addUser}>
+              <Plus className="h-4 w-4" />
+              Save & Add User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(editingUser)} onOpenChange={(open) => { if (!open) setEditingUser(null); }}>
         <DialogContent className="max-w-2xl">

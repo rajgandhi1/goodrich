@@ -1,11 +1,9 @@
-"use client";
-
-import { LOCAL_AUTH_COOKIE } from "@/lib/auth/supabase";
+import { clearCurrentAppUser } from "@/lib/auth/users";
 
 export function setLocalSession() {
-  document.cookie = `${LOCAL_AUTH_COOKIE}=local; path=/; max-age=604800; samesite=lax`;
+  // The API sets the real httpOnly session cookie during login.
 }
 
 export function clearLocalSession() {
-  document.cookie = `${LOCAL_AUTH_COOKIE}=; path=/; max-age=0; samesite=lax`;
+  clearCurrentAppUser();
 }

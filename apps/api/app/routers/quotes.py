@@ -6,7 +6,7 @@ from core.formatter import format_description
 from core.rules import apply_rules
 
 from app.db import repo
-from app.deps import CurrentUser, can_approve, get_current_user
+from app.deps import CurrentUser, can_approve, can_role, get_current_user, require_capability
 from app.schemas.common import APIMessage, SignedUrlResponse, StageHistoryEntry
 from app.schemas.quotes import (
     BulkItemsRequest,
@@ -37,15 +37,41 @@ def _is_quote_approved(quote: QuoteRead) -> bool:
 
 
 def _commercial_approval_reasons(quote: QuoteRead) -> list[str]:
-    return []
+    data = quote.quote_data or {}
+    unit_prices = data.get("unit_prices") if isinstance(data.get("unit_prices"), list) else []
+    cost_prices = data.get("cost_prices") if isinstance(data.get("cost_prices"), list) else []
+    minimum_margin = data.get("minimum_margin_pct")
+    try:
+        minimum_margin_pct = float(minimum_margin)
+    except (TypeError, ValueError):
+        minimum_margin_pct = 0
+    reasons: list[str] = []
+    if minimum_margin_pct > 0:
+        for index, cost in enumerate(cost_prices):
+            try:
+                cost_value = float(cost or 0)
+                unit_value = float(unit_prices[index] or 0) if index < len(unit_prices) else 0
+            except (TypeError, ValueError):
+                continue
+            if cost_value > 0 and unit_value > 0:
+                margin_pct = ((unit_value - cost_value) / unit_value) * 100
+                if margin_pct < minimum_margin_pct:
+                    reasons.append(f"Line {index + 1} margin {margin_pct:.1f}% is below {minimum_margin_pct:.1f}%")
+    return reasons
 
 
 def _require_export_allowed(quote: QuoteRead, user: CurrentUser) -> None:
+    require_capability(user, "export_quotes")
     if can_approve(user) or _is_quote_approved(quote):
         return
     if not _commercial_approval_reasons(quote):
         return
     raise HTTPException(status_code=403, detail="Quotation must be approved before export")
+
+
+def _require_any_capability(user: CurrentUser, capabilities: set[str]) -> None:
+    if not any(can_role(user, capability) for capability in capabilities):
+        raise HTTPException(status_code=403, detail="You do not have permission for this action")
 
 
 @router.get("/quotes", response_model=list[QuoteRead])
@@ -58,6 +84,7 @@ def list_quotes(summary: bool = False, user: CurrentUser = Depends(get_current_u
 
 @router.post("/quotes", response_model=QuoteRead, status_code=201)
 def create_quote(payload: QuoteCreate, user: CurrentUser = Depends(get_current_user)) -> QuoteRead:
+    require_capability(user, "create_enquiry")
     return repo.create_quote(user.org_id, user.user_id, payload)
 
 
@@ -72,6 +99,7 @@ def patch_quote(
     payload: QuotePatch,
     user: CurrentUser = Depends(get_current_user),
 ) -> QuoteRead:
+    _require_any_capability(user, {"edit_sales_details", "edit_workflow", "edit_line_items", "edit_quotation", "edit_material_phase2"})
     quote = repo.update_quote(user.org_id, quote_id, payload)
     if not quote:
         raise HTTPException(status_code=404, detail="Quote not found")
@@ -80,6 +108,7 @@ def patch_quote(
 
 @router.delete("/quotes/{quote_id}", response_model=APIMessage)
 def delete_quote(quote_id: str, user: CurrentUser = Depends(get_current_user)) -> APIMessage:
+    _require_any_capability(user, {"edit_workflow", "edit_quotation"})
     if not repo.delete_quote(user.org_id, quote_id):
         raise HTTPException(status_code=404, detail="Quote not found")
     return APIMessage(message="deleted")
@@ -91,6 +120,7 @@ def bulk_items(
     payload: BulkItemsRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> QuoteRead:
+    require_capability(user, "edit_line_items")
     quote = _quote_or_404(user.org_id, quote_id)
     items = [dict(item) for item in quote.items]
     for index in sorted(set(payload.delete_indices), reverse=True):
@@ -114,6 +144,7 @@ def bulk_recompute(
     payload: BulkRecomputeRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_capability(user, "edit_line_items")
     quote = _quote_or_404(user.org_id, quote_id)
     items = [dict(item) for item in quote.items]
     if payload.rows is not None:
@@ -143,6 +174,7 @@ def reprocess_text(
     payload: ReprocessTextRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> list[dict]:
+    require_capability(user, "edit_line_items")
     _quote_or_404(user.org_id, quote_id)
     if not payload.descriptions:
         return []
@@ -165,6 +197,7 @@ def reprocess_text(
 
 @router.post("/quotes/{quote_id}/rfi-draft", response_model=RfiDraftResponse)
 def rfi_draft(quote_id: str, user: CurrentUser = Depends(get_current_user)) -> RfiDraftResponse:
+    _require_any_capability(user, {"view_enquiry", "view_quotation"})
     quote = _quote_or_404(user.org_id, quote_id)
     groups: dict[str, list[int]] = {}
     for idx, item in enumerate(quote.items, start=1):
@@ -241,6 +274,7 @@ def advance_stage(
     payload: StageAdvanceRequest,
     user: CurrentUser = Depends(get_current_user),
 ) -> QuoteRead:
+    require_capability(user, "edit_workflow")
     current = _quote_or_404(user.org_id, quote_id)
     if payload.stage == "sent" and not (can_approve(user) or _is_quote_approved(current)):
         raise HTTPException(status_code=403, detail="Quotation must be approved before it can be marked sent")

@@ -14,9 +14,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { getCurrentAppUserRemote, logoutAppUser } from "@/lib/api";
 import { clearLocalSession } from "@/lib/auth/local-session";
 import { getSupabaseBrowserClient } from "@/lib/auth/supabase";
-import { getCurrentAppUser, roleLabels, USERS_CHANGED_EVENT } from "@/lib/auth/users";
+import { getCurrentAppUser, roleLabels, setCurrentAppUser, USERS_CHANGED_EVENT } from "@/lib/auth/users";
 
 export function UserMenu() {
   const router = useRouter();
@@ -24,6 +25,12 @@ export function UserMenu() {
 
   React.useEffect(() => {
     const refresh = () => setUser(getCurrentAppUser());
+    getCurrentAppUserRemote()
+      .then((remoteUser) => {
+        setCurrentAppUser(remoteUser);
+        setUser(remoteUser);
+      })
+      .catch(() => setUser(getCurrentAppUser()));
     window.addEventListener(USERS_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
@@ -37,6 +44,7 @@ export function UserMenu() {
     if (supabase) {
       await supabase.auth.signOut();
     }
+    await logoutAppUser().catch(() => undefined);
     clearLocalSession();
     toast.success("Signed out");
     router.push("/login");

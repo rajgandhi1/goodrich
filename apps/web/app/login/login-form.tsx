@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { loginAppUser } from "@/lib/api";
 import { setLocalSession } from "@/lib/auth/local-session";
-import { authenticateAppUser, roleLabels } from "@/lib/auth/users";
+import { roleLabels, setCurrentAppUser } from "@/lib/auth/users";
 
 export function LoginForm() {
   const router = useRouter();
@@ -24,15 +25,14 @@ export function LoginForm() {
     event.preventDefault();
     setLoading(true);
     try {
-      const user = authenticateAppUser(username, password);
-      if (!user) {
-        toast.error("Invalid username or password");
-        return;
-      }
+      const user = await loginAppUser(username, password);
+      setCurrentAppUser(user);
       setLocalSession();
       toast.success(`Signed in as ${user.id} (${roleLabels[user.role]})`);
       router.push(redirectTo);
       router.refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Invalid username or password");
     } finally {
       setLoading(false);
     }

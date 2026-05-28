@@ -1,4 +1,5 @@
 import io
+import io
 import sys
 import uuid
 from pathlib import Path
@@ -16,7 +17,7 @@ from app.main import app
 def test_quote_workflow_exports_and_tenant_isolation():
     client = TestClient(app)
     org_id = f"org-workflow-{uuid.uuid4().hex}"
-    headers = {"X-Org-Id": org_id, "X-User-Id": "user-a"}
+    headers = {"X-Org-Id": org_id, "X-User-Id": "shashnam@flosil.com"}
     item = {
         "line_no": 1,
         "quantity": 2,
@@ -73,7 +74,17 @@ def test_quote_workflow_exports_and_tenant_isolation():
         },
     )
     assert locked.status_code == 201
-    locked_pdf = client.post(f"/api/v1/quotes/{locked.json()['id']}/exports/pdf", headers=headers)
+    estimator_id = f"estimator-{uuid.uuid4().hex}@example.com"
+    estimator_created = client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={"name": "Estimator", "email": estimator_id, "role": "estimation", "active": True},
+    )
+    assert estimator_created.status_code == 201
+    locked_pdf = client.post(
+        f"/api/v1/quotes/{locked.json()['id']}/exports/pdf",
+        headers={"X-Org-Id": org_id, "X-User-Id": estimator_id},
+    )
     assert locked_pdf.status_code == 403
 
     approved = client.patch(
@@ -152,6 +163,7 @@ def test_user_roles_are_persisted_and_not_trusted_from_header():
             "designation": "Sales Engineer",
             "contact": "+1 555-0188",
             "email": user_email,
+            "password": "123456",
             "role": "sales",
             "active": True,
         },
@@ -160,16 +172,41 @@ def test_user_roles_are_persisted_and_not_trusted_from_header():
     assert created.json()["role"] == "sales"
     assert created.json()["designation"] == "Sales Engineer"
     assert created.json()["contact"] == "+1 555-0188"
+    assert "password" not in created.json()
+
+    denied_login = client.post(
+        "/api/v1/auth/login",
+        headers={"X-Org-Id": org_id},
+        json={"username": user_email, "password": "wrong"},
+    )
+    assert denied_login.status_code == 401
+
+    login = client.post(
+        "/api/v1/auth/login",
+        headers={"X-Org-Id": org_id},
+        json={"username": user_email, "password": "123456"},
+    )
+    assert login.status_code == 200
+    assert login.json()["id"] == user_email
+    assert login.json()["role"] == "sales"
+    client.post("/api/v1/auth/logout")
 
     promoted = client.patch(
         f"/api/v1/users/{user_email}",
         headers=admin_headers,
-        json={"role": "approver", "designation": "Approver", "contact": "+1 555-0199"},
+        json={"role": "approver", "designation": "Approver", "contact": "+1 555-0199", "password": "abcdef"},
     )
     assert promoted.status_code == 200
     assert promoted.json()["role"] == "approver"
     assert promoted.json()["designation"] == "Approver"
     assert promoted.json()["contact"] == "+1 555-0199"
+
+    changed_login = client.post(
+        "/api/v1/auth/login",
+        headers={"X-Org-Id": org_id},
+        json={"username": user_email, "password": "abcdef"},
+    )
+    assert changed_login.status_code == 200
 
 
 def test_access_settings_are_admin_managed_and_persisted():
@@ -224,14 +261,14 @@ def test_extraction_rejects_pdf_input():
     client = TestClient(app)
     created = client.post(
         "/api/v1/quotes",
-        headers={"X-Org-Id": "org-pdf-off", "X-User-Id": "user-pdf-off"},
+        headers={"X-Org-Id": "org-pdf-off", "X-User-Id": "shashnam@flosil.com"},
         json={"customer": "ACME", "project_ref": "P1", "items": [], "quote_data": {}},
     )
     assert created.status_code == 201
 
     response = client.post(
         "/api/v1/extractions",
-        headers={"X-Org-Id": "org-pdf-off", "X-User-Id": "user-pdf-off"},
+        headers={"X-Org-Id": "org-pdf-off", "X-User-Id": "shashnam@flosil.com"},
         json={
             "source_type": "pdf",
             "quote_id": created.json()["id"],
