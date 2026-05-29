@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.formatter import format_description
-from core.parser import parse_excel_file
+from core.parser import _enrich_from_description, parse_excel_file
 from core.rules import apply_rules
 from services import extraction
 
@@ -45,6 +45,54 @@ def test_customer_excel_fixtures_produce_deterministic_rows_before_llm_review():
         assert len(non_missing) > 0, filename
         assert all(item.get("ggpl_description") for item in non_missing), filename
 
+
+def _processed_description(description: str) -> dict:
+    item = _enrich_from_description(
+        {
+            "line_no": 1,
+            "description": description,
+            "raw_description": description,
+            "quantity": 1,
+            "uom": "NOS",
+        }
+    )
+    item = apply_rules(item)
+    item["ggpl_description"] = format_description(item)
+    return item
+
+
+def test_spiral_wound_parser_normalizes_common_export_and_ocr_noise():
+    garbled = _processed_description(
+        "150mm, Gasket sprlal wound 4.5mm thk CL 300 wlndng SS316 "
+        "graphltle fld Inner rfng SS316 centrlng rfng CS ASME B16.20"
+    )
+    assert garbled["status"] == "ready"
+    assert garbled["size"] == '6"'
+    assert garbled["sw_winding_material"] == "SS316"
+    assert garbled["sw_filler"] == "GRAPHITE"
+    assert garbled["sw_inner_ring"] == "SS316"
+    assert garbled["sw_outer_ring"] == "CS"
+
+    parenthesized_metric_size = _processed_description(
+        "Gasket spiral wound 4.5mm thk CL 300 winding SS316 graphite filled "
+        "inner ring SS316 centering ring CS ASME B16.20 (80mm)"
+    )
+    assert parenthesized_metric_size["status"] == "ready"
+    assert parenthesized_metric_size["size"] == '3"'
+
+    shared_ring_material = _processed_description(
+        'GASKET 18" X 600 # MOC: SS 317L SPWD shall be 4.5 thk with '
+        "grafoil filler and 3.2 thk SS inner & outer ring, dimension as per ASME B 16.20"
+    )
+    assert shared_ring_material["status"] == "ready"
+    assert shared_ring_material["sw_inner_ring"] == "SS"
+    assert shared_ring_material["sw_outer_ring"] == "SS"
+
+    stainless_ocr = _processed_description(
+        "50mm, Gasket spiral wound 4.5mm thk CL 300 SG316 graphite filled inner ring SS316"
+    )
+    assert stainless_ocr["sw_winding_material"] == "SS316"
+    assert stainless_ocr["status"] == "missing"
 
 def test_excel_process_document_reviews_only_ambiguous_rows(monkeypatch):
     reviewed_counts: dict[str, int] = {}

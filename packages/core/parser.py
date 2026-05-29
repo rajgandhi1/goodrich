@@ -482,12 +482,17 @@ def _sw_prepare_text(description: str) -> str:
     typo_replacements = {
         r'\b(?:SPRL|SPRIAL|SPRIRAL|SPIRIAL|SPLRAL|SPRLAL|SPIRRAL|SPRRAL)\s*[-\s]*(?:W(?:OU)?ND\w*|WIND\w*)\b': 'SPIRAL WOUND',
         r'\b(?:WNDLNG|WNDNG|WLDNG|WLNDNG|WINDLNG|WINDNG)\b': 'WINDING',
-        r'\b(?:RLNG|RNG)\b': 'RING',
-        r'\bCENTERLNG\b': 'CENTERING',
+        r'\b(?:RLNG|RFNG|RNG)\b': 'RING',
+        r'\b(?:CENTERLNG|CENTRLNG)\b': 'CENTERING',
+        r'\bCENTRING\b': 'CENTERING',
+        r'\bSPW(?:D)?\b': 'SPIRAL WOUND',
+        r'\bGRAPH(?:L|I)?TLE\b': 'GRAPHITE',
+        r'\bFLD\b': 'FILLED',
         r'\bSULT\b': 'SUIT',
     }
     for pattern, replacement in typo_replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    text = re.sub(r'\bS[GC]\s*(304L?|316L?|317L?)\b', r'SS\1', text, flags=re.IGNORECASE)
     text = re.sub(r'(?i)(GASKET)(?=(SKAG|CAM|KAMM|DOUBLE|COPPER|\d))', r'\1 ', text)
     text = re.sub(r'(?i)(SKAG|KAMMPROFILE|CAMPROFILE|PROFILE)(?=(WITH|FOR|OD|ID|\d))', r'\1 ', text)
     text = re.sub(r'(?i)(THK)(?=(CL|CLASS|\d))', r'\1 ', text)
@@ -551,8 +556,14 @@ def _extract_spw_components(description: str) -> dict:
     text = _sw_prepare_text(description)
     result: dict = {}
 
+    size = _extract_first_size(text)
+    if size:
+        result['size'] = size
+        result['size_type'] = 'NPS'
+
     winding = _first_match_material([
         rf'(?P<mat>{_SW_MATERIAL_RE})\s+(?:WINDINGS?|WOUND\b)',
+        rf'(?P<mat>{_SW_MATERIAL_RE})\s+SPIRAL\s+WOUND\b',
         rf'(?:WINDINGS?|WOUND|MOC\s*:?)\s+(?P<mat>{_SW_MATERIAL_RE})',
         rf'SPIRAL\s+WOUND\s+(?P<mat>{_SW_MATERIAL_RE})',
     ], text)
@@ -576,7 +587,7 @@ def _extract_spw_components(description: str) -> dict:
     ], text)
 
     same_ring = re.search(
-        rf'(?P<mat>{_SW_MATERIAL_RE})\s+INNER\s+AND\s+OUTER\s+(?:CENTER(?:ING)?\s+)?RING',
+        rf'(?P<mat>{_SW_MATERIAL_RE})\s+INNER\s+(?:AND|&)\s+OUTER\s+(?:CENTER(?:ING)?\s+)?RING',
         text,
         re.IGNORECASE,
     )
@@ -1088,6 +1099,11 @@ def _enrich_from_description(item: dict) -> dict:
             if nb_match:
                 item['size'] = f'{nb_match.group(1)}MM'
                 item['size_type'] = 'NB'
+            else:
+                trailing_nb_match = re.search(r'\((\d+(?:\.\d+)?)\s*MM\)\s*$', upper)
+                if trailing_nb_match:
+                    item['size'] = f'{trailing_nb_match.group(1)}MM'
+                    item['size_type'] = 'NB'
 
     return item
 
