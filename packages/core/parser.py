@@ -254,6 +254,8 @@ def _classify_description_col(norm: str) -> str | None:
         return None
     if norm in ('piping class', 'pipe class'):
         return None
+    if re.search(r'\bpr\b', norm) and re.search(r'\bsr\.?\s*no\.?\b', norm):
+        return None
     for col_type, keywords in _HEADER_PATTERNS.items():
         if any(kw in norm for kw in keywords):
             return col_type
@@ -270,18 +272,29 @@ def _detect_description_sections(all_rows: list[tuple]) -> list[tuple]:
     current_data: list[tuple] = []
 
     def _is_description_header(col_map: dict) -> bool:
-        return 'description' in col_map and (
+        has_description_source = (
+            'description' in col_map
+            or 'technical_description' in col_map
+            or 'dimension' in col_map
+            or 'gasket_form' in col_map
+        )
+        return has_description_source and (
             'quantity' in col_map or 'moc' in col_map or 'size_inch' in col_map
             or 'rating' in col_map or ('od_mm' in col_map and 'id_mm' in col_map)
         )
 
     for row_idx, row in enumerate(all_rows):
         col_map = {}
+        col_priority = {}
         for col_idx, cell in enumerate(row):
             norm = _norm_header_cell(cell)
             col_type = _classify_description_col(norm)
-            if col_type and col_type not in col_map:
+            if not col_type:
+                continue
+            priority = _header_priority(col_type, norm)
+            if col_type not in col_map or priority > col_priority.get(col_type, 0):
                 col_map[col_type] = col_idx
+                col_priority[col_type] = priority
 
         if _is_description_header(col_map):
             if current_col_map is not None and current_data:
@@ -296,6 +309,16 @@ def _detect_description_sections(all_rows: list[tuple]) -> list[tuple]:
         sections.append((current_header_idx, current_col_map, current_data))
 
     return sections
+
+
+def _header_priority(col_type: str, norm: str) -> int:
+    if col_type == 'quantity':
+        if any(token in norm for token in ('to be purchased', 'balance to order', 'required qty', 'qty with margin')):
+            return 30
+        if 'req qty' in norm or 'required' in norm:
+            return 20
+        return 10
+    return 10
 
 
 def _append_field(parts: list[str], label: str, value: str | None, suffix: str = '') -> None:
@@ -398,7 +421,7 @@ def _standard_from_text(value: str | None) -> str | None:
     if not value:
         return None
     raw = str(value).upper()
-    match = re.search(r'\b(?:ASME|ANSI)\s+B\s*16\.(20|21|47)\b', raw)
+    match = re.search(r'\b(?:(?:ASME|ANSI)\s*)?B\s*16\.(20|21|47)\b', raw)
     if match:
         return f'ASME B16.{match.group(1)}'
     match = re.search(r'\bAPI\s*6A\b', raw)
@@ -466,7 +489,7 @@ _SW_MATERIAL_ALIASES: list[tuple[str, str]] = [
 _SW_FILLER_ALIASES: list[tuple[str, str]] = [
     (r'EXFOLIATED\s+EXPANDED\s+GRAPHITE', 'EXFOLIATED EXPANDED GRAPHITE'),
     (r'EXPANDED\s+GRAPHITE', 'EXPANDED GRAPHITE'),
-    (r'FLEXIBLE\s+GRAPHITE|FLEX\s+GRAPHITE|GRAFOIL|GRAFIL|\bGPH\b|GRAPH(?:ITE|OIL)', 'GRAPHITE'),
+    (r'FLEXIBLE\s+GRAPHITE|FLEX\s+GRAPHITE|GRAFOIL|GRAFIL|\bGR?PH\b|GRAPH(?:ITE|OIL)', 'GRAPHITE'),
     (r'\bPTFE\b|TEFLON', 'PTFE'),
     (r'\bMICA\b', 'MICA'),
     (r'\bCERAMIC\b', 'CERAMIC'),
@@ -562,6 +585,7 @@ def _extract_spw_components(description: str) -> dict:
         result['size_type'] = 'NPS'
 
     winding = _first_match_material([
+        rf'(?:SPIRAL|WINDINGS?|WOUND)\s*[:=-]\s*(?P<mat>{_SW_MATERIAL_RE})',
         rf'(?P<mat>{_SW_MATERIAL_RE})\s+(?:WINDINGS?|WOUND\b)',
         rf'(?P<mat>{_SW_MATERIAL_RE})\s+SPIRAL\s+WOUND\b',
         rf'(?:WINDINGS?|WOUND|MOC\s*:?)\s+(?P<mat>{_SW_MATERIAL_RE})',
@@ -571,6 +595,7 @@ def _extract_spw_components(description: str) -> dict:
         result['sw_winding_material'] = winding
 
     filler = _first_match_filler([
+        rf'(?:FILLER|FILLED|FILL)\s*[:=-]\s*(?P<mat>{_SW_FILLER_RE})',
         rf'(?P<mat>{_SW_FILLER_RE})\s+(?:FILLER|FILLED|FILL\b)',
         rf'(?:FILLER|FILLED|FILL)\s+(?P<mat>{_SW_FILLER_RE})',
     ], text)
@@ -620,7 +645,7 @@ def _extract_spw_components(description: str) -> dict:
     if rating:
         result['rating'] = rating
 
-    thk_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:NOM\s+)?(?:GASKET\s+)?THK|(\d+(?:\.\d+)?)\s*MM\s+NOM\s+THK', text, re.IGNORECASE)
+    thk_match = re.search(r'(?<!/)(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:NOM\s+)?(?:GASKET\s+)?THK|(?<!/)(\d+(?:\.\d+)?)\s*MM\s+NOM\s+THK', text, re.IGNORECASE)
     if thk_match:
         result['thickness_mm'] = float(thk_match.group(1) or thk_match.group(2))
 
@@ -969,6 +994,19 @@ def _material_from_text(description: str) -> str | None:
             value = match.group(1).strip()
             value = re.sub(r'\s+LOCATION\s*:.*$', '', value, flags=re.IGNORECASE).strip()
             return value or None
+    material_aliases = [
+        (r'\bBUTYL\s+RUBBER\b', 'BUTYL RUBBER'),
+        (r'\bNBR\b|\bNITRILE\b', 'NBR'),
+        (r'\bCNAF\b', 'CNAF'),
+        (r'\bMODIFIED\s+PTFE\b', 'MODIFIED PTFE'),
+        (r'\bPTFE\b', 'PTFE'),
+        (r'\bEXPANDED\s+GRAPHITE\b', 'EXPANDED GRAPHITE'),
+        (r'\bPURE\s+GRAPHITE\b', 'PURE GRAPHITE'),
+        (r'\bGRAFOIL\b', 'GRAFOIL'),
+    ]
+    for pattern, canonical in material_aliases:
+        if re.search(pattern, description, re.IGNORECASE):
+            return canonical
     return None
 
 
@@ -986,9 +1024,16 @@ def _enrich_from_description(item: dict) -> dict:
             item['rating'] = rating
 
     if not item.get('thickness_mm'):
-        thk_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:THK|THICK)', upper)
+        thk_match = re.search(r'(?<!/)(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:THK|THICK)', upper)
         if thk_match:
             item['thickness_mm'] = float(thk_match.group(1))
+        else:
+            thk_match = re.search(
+                r'\b(\d+(?:\.\d+)?)\s*MM\b(?=\s*,?\s*(?:ASME|ANSI|B\s*16|EN\s*1514|$))',
+                upper,
+            )
+            if thk_match:
+                item['thickness_mm'] = float(thk_match.group(1))
 
     if not item.get('standard'):
         standard = _standard_from_text(desc)
@@ -1110,10 +1155,19 @@ def _enrich_from_description(item: dict) -> dict:
 
 def _description_from_section_row(row: tuple, col_map: dict) -> str | None:
     desc = _cell_str(row, col_map.get('description'))
-    if not desc or not _looks_like_gasket(desc):
+    technical_desc = _cell_str(row, col_map.get('technical_description'))
+    gasket_form = _cell_str(row, col_map.get('gasket_form'))
+    dimension = _cell_str(row, col_map.get('dimension'))
+
+    parts = []
+    for value in (desc, gasket_form, dimension, technical_desc):
+        if value and value not in parts:
+            parts.append(value)
+
+    combined = ' '.join(parts)
+    if not combined or not _looks_like_gasket(combined):
         return None
 
-    parts = [desc]
     size = _cell_str(row, col_map.get('size_inch'))
     rating = _cell_str(row, col_map.get('rating'))
     thk = _cell_str(row, col_map.get('thickness'))
@@ -1136,13 +1190,13 @@ def _description_from_section_row(row: tuple, col_map: dict) -> str | None:
         _append_field(parts, 'THK', thk, 'MM')
 
     moc_val = _cell_str(row, col_map.get('moc'))
-    desc_type = _infer_gasket_type(desc)
+    desc_type = _infer_gasket_type(combined)
     moc_is_technical = bool(moc_val and _looks_like_gasket(moc_val))
     # For rich SPW description rows, generic MATERIAL columns such as
     # LTCS/INCO are pipe/spec context, not gasket MOC. Keep technical
     # MOC cells, because some sheets store the entire SPW construction
     # in MOC and only a short label in DESCRIPTION.
-    if moc_val and moc_val.upper() != desc.upper() and (desc_type != 'SPIRAL_WOUND' or moc_is_technical):
+    if moc_val and moc_val.upper() != combined.upper() and (desc_type != 'SPIRAL_WOUND' or moc_is_technical):
         parts.append(f'MOC: {moc_val}')
 
     _append_field(parts, 'INNER RING WIDTH', _cell_str(row, col_map.get('inner_ring_width')), 'MM')
@@ -1166,7 +1220,9 @@ def _parse_description_sections(ws) -> list[dict]:
         if line_col is None:
             line_col = _infer_line_no_col(data_rows, col_map.get('description'))
 
+        filldown_values: dict[str, str] = {}
         for row in data_rows:
+            row = _with_filldown_values(row, col_map, filldown_values)
             desc = _description_from_section_row(row, col_map)
             if not desc:
                 continue
@@ -1189,6 +1245,7 @@ def _parse_description_sections(ws) -> list[dict]:
             moc = _cell_str(row, col_map.get('moc'))
             od = _cell_str(row, col_map.get('od_mm'))
             id_ = _cell_str(row, col_map.get('id_mm'))
+            dimension = _cell_str(row, col_map.get('dimension'))
             if size:
                 item['size'] = _size_from_text(size)
                 item['size_type'] = 'NPS'
@@ -1202,9 +1259,36 @@ def _parse_description_sections(ws) -> list[dict]:
                 item['size_type'] = 'OD_ID'
                 item['od_mm'] = _float_from_text(od)
                 item['id_mm'] = _float_from_text(id_)
+            if dimension:
+                if not item.get('size'):
+                    dim_size = _extract_first_size(dimension)
+                    if dim_size:
+                        item['size'] = dim_size
+                        item['size_type'] = 'NPS'
+                if not item.get('rating'):
+                    item['rating'] = _rating_from_text(dimension)
+                if not item.get('thickness_mm'):
+                    thk_match = re.search(r'(?<!/)(\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:THK|THICK)', dimension, re.IGNORECASE)
+                    if thk_match:
+                        item['thickness_mm'] = float(thk_match.group(1))
             items.append(_enrich_from_description(item))
 
     return items
+
+
+def _with_filldown_values(row: tuple, col_map: dict, filldown_values: dict[str, str]) -> tuple:
+    """Fill repeated RFQ context columns that customers leave blank on following rows."""
+    mutable = list(row)
+    for col_type in ('moc', 'gasket_form'):
+        col_idx = col_map.get(col_type)
+        if col_idx is None or col_idx >= len(mutable):
+            continue
+        value = _cell_str(tuple(mutable), col_idx)
+        if value:
+            filldown_values[col_type] = value
+        elif col_type in filldown_values:
+            mutable[col_idx] = filldown_values[col_type]
+    return tuple(mutable)
 
 
 def _infer_line_no_col(data_rows: list[tuple], desc_col: int | None) -> int | None:
@@ -1383,6 +1467,10 @@ def _parse_structured_sheet(ws) -> list[dict]:
 # Keywords to identify column types — order matters: more specific first
 _HEADER_PATTERNS = {
     'description': ['description', 'dessription', 'desription', 'desc', 'notes'],
+    'technical_description': ['material and dimensional standard', 'material & dimensional standard',
+                              'material standard', 'dimensional standard', 'standards', 'standard'],
+    'dimension':    ['dimension/ring size', 'dimesion/ring size', 'ring size', 'dimension', 'dimesion'],
+    'gasket_form':  ['gasket type', 'type'],
     'quantity':    ['qty', 'quantity', 'gross total', 'balance to order', 'balance', 'required qty', 'count'],
     'uom':         ['uom', 'inv uom'],
     'line_no':     ['sl.no', 'sl no', 'sr. no', 'sr no', 'sr no.', 'sno', 'serial', 'sr. no.', 'sr no'],

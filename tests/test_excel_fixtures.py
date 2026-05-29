@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
+
+from openpyxl import Workbook
 
 from core.formatter import format_description
 from core.parser import _enrich_from_description, parse_excel_file
@@ -24,6 +27,16 @@ def _processed_fast_items(path: Path) -> list[dict]:
         item["ggpl_description"] = format_description(item)
         processed.append(item)
     return processed
+
+
+def _workbook_bytes(rows: list[list[object]]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
 
 
 def test_customer_excel_fixtures_parse_with_fast_path():
@@ -93,6 +106,51 @@ def test_spiral_wound_parser_normalizes_common_export_and_ocr_noise():
     )
     assert stainless_ocr["sw_winding_material"] == "SS316"
     assert stainless_ocr["status"] == "missing"
+
+
+def test_excel_parser_prefers_purchase_quantity_and_business_serial_column():
+    raw_items = parse_excel_file(_workbook_bytes([
+        ["PR SR.No.", "Sr. No.", "Size", "Description", "RATING", "Qty", "Qty to be purchased", "UOM"],
+        [12, 1, '2"', "Gasket - Spiral Wound,316 Stainless Steel, Food Grade PTFE Filled,Class 150,With 1/8 thk CS Centering Rng & SS Inner Rng same as winding material,Per ANSI B16.20", 150, 20, 5, "PC"],
+    ]))
+
+    assert len(raw_items) == 1
+    assert raw_items[0]["line_no"] == 1
+    assert raw_items[0]["quantity"] == 5
+    assert raw_items[0]["gasket_type"] == "SPIRAL_WOUND"
+    assert raw_items[0].get("thickness_mm") is None
+
+
+def test_excel_parser_combines_moc_type_and_dimension_columns():
+    raw_items = parse_excel_file(_workbook_bytes([
+        ["SR. NO.", "MOC", None, "TYPE", "DIMESION/RING SIZE", "QTY"],
+        [1, "Pure graphite 98% - impregnated inlet perforated plate 316SS - inside cover 316SS", None, "Flat Ring", '12" ,CL 150,2 mm THK,B16.21,Approved for ox. Serv', 4],
+        [2, None, None, None, '10" ,CL 150,2 mm THK,B16.21,Approved for ox. Serv', 18],
+    ]))
+
+    assert len(raw_items) == 2
+    assert raw_items[0]["size"] == '12"'
+    assert raw_items[0]["rating"] == "150#"
+    assert raw_items[0]["thickness_mm"] == 2
+    assert raw_items[0]["standard"] == "ASME B16.21"
+    assert raw_items[1]["moc"].startswith("Pure graphite")
+
+
+def test_excel_parser_uses_technical_standard_column_for_construction():
+    raw_items = parse_excel_file(_workbook_bytes([
+        ["SL NO", "ITEM DESCRIPTION", "PIPE CLASS", "SERVICE", "SIZE1 (inch)", "SIZE2 (inch)", "THICK", "CLASS", "CONNECTION TYPE", "FACING", "MATERIAL AND DIMENSIONAL STANDARD", "QTY WITH MARGIN", "UOM"],
+        [189, "Gasket, Flat", "A", None, 1, None, None, 150, None, "RF", "GASKET FLAT RING TYPE,RF FE ANSI B16.5, 150 LB, BUTYL RUBBER, 1.5MM,ASME B16.21", 18, "Nos."],
+        [195, "Gasket, SWG", "A", None, 6, None, None, 150, None, "RF", "GASKET SPIRAL WOUND, 1.5mm THK, RF FE ANSI B16.5, 150 LB, SPIRAL: SS316L, FILLER: GRPH, INNER RING: SS316L, OUTER RING: CS, ASME B16.20", 1, "Nos."],
+    ]))
+
+    assert len(raw_items) == 2
+    assert raw_items[0]["moc"] == "BUTYL RUBBER"
+    assert raw_items[0]["thickness_mm"] == 1.5
+    assert raw_items[0]["face_type"] == "RF"
+    assert raw_items[1]["gasket_type"] == "SPIRAL_WOUND"
+    assert raw_items[1]["sw_winding_material"] == "SS316L"
+    assert raw_items[1]["sw_filler"] == "GRAPHITE"
+    assert raw_items[1]["sw_outer_ring"] == "CS"
 
 def test_excel_process_document_reviews_only_ambiguous_rows(monkeypatch):
     reviewed_counts: dict[str, int] = {}
