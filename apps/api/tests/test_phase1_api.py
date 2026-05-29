@@ -209,6 +209,21 @@ def test_user_roles_are_persisted_and_not_trusted_from_header():
     assert changed_login.status_code == 200
 
 
+def test_seeded_admin_can_sign_in_locally():
+    client = TestClient(app)
+    org_id = f"org-admin-{uuid.uuid4().hex}"
+
+    response = client.post(
+        "/api/v1/auth/login",
+        headers={"X-Org-Id": org_id},
+        json={"username": "shashnam", "password": "shashnam"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "shashnam"
+    assert response.json()["role"] == "admin"
+
+
 def test_access_settings_are_admin_managed_and_persisted():
     client = TestClient(app)
     org_id = f"org-access-{uuid.uuid4().hex}"

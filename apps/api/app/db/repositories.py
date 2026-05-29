@@ -154,7 +154,9 @@ DEFAULT_APP_USERS = [
         "designation": "Admin",
         "contact": "",
         "email": "shashnam@flosil.com",
-        "password_hash": "",
+        # Local/dev bootstrap password for the seeded admin account.
+        # Existing local repositories are backfilled from this seed.
+        "password_hash": "plain:shashnam",
         "role": "admin",
         "active": True,
     },
