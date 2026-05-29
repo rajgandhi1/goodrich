@@ -42,13 +42,13 @@ export function BackgroundJobMonitor() {
           if (status.status === "succeeded") {
             removeBackgroundJob(job.id);
             toast.success(`${job.label} is ready`, {
-              description: `${status.parsed_count} item(s) parsed.`,
+              description: `${status.parsed_count} item(s) added to the list.`,
               action: job.quoteId ? { label: "Open", onClick: () => openQuote(job) } : undefined,
             });
           } else if (status.status === "failed") {
             removeBackgroundJob(job.id);
             toast.error(`${job.label} failed`, {
-              description: status.error ?? "Smart Parse failed.",
+              description: status.error ?? "Could not create the item list.",
               action: job.quoteId ? { label: "Open", onClick: () => openQuote(job) } : undefined,
             });
           }

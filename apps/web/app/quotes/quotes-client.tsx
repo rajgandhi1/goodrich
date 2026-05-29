@@ -1359,6 +1359,39 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const finalPageEndIndex = Math.min(items.length, finalPageStartIndex + FINAL_PAGE_SIZE);
   const finalPageItems = items.slice(finalPageStartIndex, finalPageEndIndex);
   const selectedIndices = selectedRows.size ? Array.from(selectedRows).sort((a, b) => a - b) : [];
+  const selectedOrVisibleIndices = selectedIndices.length ? selectedIndices : displayIndices;
+  const selectedOrVisibleRows = selectedOrVisibleIndices.map((index) => items[index]).filter(Boolean);
+  const hasActionRows = selectedOrVisibleRows.length > 0;
+  const hasRowsWithCustomerText = selectedOrVisibleRows.some((item) => getString(item.raw_description).trim());
+  const hasRequiredMarketType = Boolean(QUOTATION_NUMBER_PREFIX[getString(quote?.stage_meta?.market_type)]);
+  const emailCreateDisabled = startingExtraction || saving || !emailText.trim() || !hasRequiredMarketType;
+  const emailCreateTitle = !hasRequiredMarketType
+    ? "Select Export or Domestic first"
+    : !emailText.trim()
+      ? "Paste enquiry text first"
+      : "Create line items from the pasted email";
+  const excelCreateDisabled = startingExtraction || saving || !excelFile || !hasRequiredMarketType;
+  const excelCreateTitle = !hasRequiredMarketType
+    ? "Select Export or Domestic first"
+    : !excelFile
+      ? "Choose an Excel file first"
+      : "Create line items from the selected Excel file";
+  const updateRowsDisabled = saving || startingExtraction || !hasActionRows;
+  const updateRowsTitle = !hasActionRows
+    ? "No rows available to update"
+    : selectedIndices.length
+      ? "Update generated descriptions for selected rows"
+      : "Update generated descriptions for visible rows";
+  const rereadRowsDisabled = saving || startingExtraction || !hasRowsWithCustomerText;
+  const rereadRowsTitle = !hasActionRows
+    ? "No rows available to re-read"
+    : !hasRowsWithCustomerText
+      ? "Selected or visible rows need customer description text"
+      : selectedIndices.length
+        ? "Re-read selected rows from customer text"
+        : "Re-read visible rows from customer text";
+  const saveProgressDisabled = saving || !hasUnsavedLocalEdits;
+  const saveProgressTitle = hasUnsavedLocalEdits ? "Save progress (Ctrl+S)" : "No unsaved changes";
   const selectedRowIndex = selectedIndices.length === 1 ? selectedIndices[0] : null;
   const selectedItem = selectedRowIndex !== null ? items[selectedRowIndex] : null;
   const activeGridColumn = activeCell ? activeTableColumns[activeCell.colIndex] : undefined;
@@ -1738,13 +1771,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
-      if (!canSaveProgress || saving) return;
+      if (!canSaveProgress || saveProgressDisabled) return;
       event.preventDefault();
       void saveCurrentProgress();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canSaveProgress, saving, quote, items, qd, materialBreakdown, materialPlan, isMaterialSection]);
+  }, [canSaveProgress, saveProgressDisabled, quote, items, qd, materialBreakdown, materialPlan, isMaterialSection]);
 
   async function startQuote() {
     if (!canCreateEnquiry) {
@@ -2088,12 +2121,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         id: accepted.job_id,
         quoteId: quote.id,
         sourceType,
-        label: `Smart Parse ${sourceType === "excel" ? "Excel" : "email"} enquiry`,
+        label: `Reading ${sourceType === "excel" ? "Excel" : "email"} enquiry`,
         startedAt: new Date().toISOString(),
       });
       invalidateMaterialPlan();
       setIntakeCollapsed(false);
-      toast.info("Smart Parse is running in the background. You can keep working and will be notified when it finishes.");
+      toast.info("We are creating the item list in the background. You can keep working and will be notified when it finishes.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Extraction failed");
     } finally {
@@ -2189,7 +2222,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
         };
       }
     });
-    await updateItems(next, "Smart Parse refreshed selected rows");
+    await updateItems(next, "Selected rows re-read from customer text");
   }
 
   async function buildClarificationEmail() {
@@ -4152,9 +4185,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                     placeholder="Paste raw customer enquiry email text"
                   />
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Button onClick={() => runExtraction("email")} disabled={startingExtraction}>
+                    <Button onClick={() => runExtraction("email")} disabled={emailCreateDisabled} title={emailCreateTitle}>
                       {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      Process email enquiry
+                      Create items from email
                     </Button>
                     <Button variant="secondary" onClick={() => setEmailText("")} disabled={!emailText}>
                       <X className="h-4 w-4" />
@@ -4177,9 +4210,9 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       <Input className="max-w-sm" type="file" accept=".xlsx,.xls" onChange={(event) => setExcelFile(event.target.files?.[0] ?? null)} />
                     </div>
                   </div>
-                  <Button className="mt-3" onClick={() => runExtraction("excel", excelFile)} disabled={startingExtraction}>
+                  <Button className="mt-3" onClick={() => runExtraction("excel", excelFile)} disabled={excelCreateDisabled} title={excelCreateTitle}>
                     <Upload className="h-4 w-4" />
-                    Process Excel enquiry
+                    Create items from Excel
                   </Button>
                 </TabsContent>
                 <TabsContent value="manual" className="mt-3">
@@ -4211,7 +4244,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <div className="flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Starting Smart Parse background job
+                      Creating item list in the background
                     </div>
                   </div>
                 </div>
@@ -4334,13 +4367,13 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
               {canEditLineItems && (
               <div className={`flex flex-wrap items-center gap-2 ${tableMode === "spreadsheet" ? "rounded-md border bg-muted/20 p-2" : ""}`}>
                 <div className="flex flex-wrap gap-2 rounded-md border bg-background p-1">
-                <Button variant="ghost" size="sm" onClick={() => recomputeRows(selectedIndices.length ? selectedIndices : displayIndices)} title="Update generated descriptions">
+                <Button variant="ghost" size="sm" onClick={() => recomputeRows(selectedOrVisibleIndices)} disabled={updateRowsDisabled} title={updateRowsTitle}>
                   <RefreshCw className="h-4 w-4" />
                   Update
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => reprocessRows()} title="Smart Parse selected or visible rows">
+                <Button variant="ghost" size="sm" onClick={() => reprocessRows()} disabled={rereadRowsDisabled} title={rereadRowsTitle}>
                   {startingExtraction ? <Loader2 className="h-4 w-4 animate-spin" /> : <WandSparkles className="h-4 w-4" />}
-                  Parse
+                  Re-read rows
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedRows(new Set(displayIndices))} title="Select all visible rows">
                   <CheckCircle2 className="h-4 w-4" />
@@ -4639,7 +4672,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                                     event.stopPropagation();
                                     reprocessRows([index]);
                                   }}
-                                  title="Smart Parse row"
+                                  title="Re-read this row from customer text"
+                                  disabled={!getString(item.raw_description).trim()}
                                 >
                                   <RotateCcw className="h-3.5 w-3.5" />
                                 </Button>
@@ -5800,8 +5834,8 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
           <Button
             className="h-11 shadow-lg"
             onClick={() => saveCurrentProgress()}
-            disabled={saving}
-            title="Save progress (Ctrl+S)"
+            disabled={saveProgressDisabled}
+            title={saveProgressTitle}
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save

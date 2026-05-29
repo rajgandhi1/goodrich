@@ -12,6 +12,7 @@ Formats by type:
   KAMM        : SIZE: {size} X {rating} X {thk}MM THK,{moc},{standard}
   DJI         : SIZE: {od}MM OD X {id}MM ID X {thk}MM THK, DOUBLE JACKET GASKET WITH {moc} + GRAPHITE FILLED
   ISK/ISK_RTJ : SIZE: {size} X {rating}#, INSULATING GASKET, ...
+  O_RING      : SIZE : ID {id}MM X C/S {cs}MM, O-RING, {moc}, PRESSURE RATING: {pressure}
 """
 
 
@@ -31,6 +32,9 @@ def format_description(item: dict) -> str:
 
     if gtype in ('ISK', 'ISK_RTJ'):
         return _fmt_isk(item)
+
+    if gtype == 'O_RING':
+        return _fmt_oring(item)
 
     # --- SOFT_CUT and SPIRAL_WOUND ---
     moc = item.get('moc')
@@ -151,8 +155,9 @@ def _fmt_rtj(item: dict) -> str:
         parts.append(standard)
         return ' ,'.join(parts)
 
-    # BX rings (API pressure-containing closures): no groove designation in GGPL description
-    if ring_no.upper().startswith('BX-'):
+    # RX/BX rings are pressure-energized profiles; oval/octagonal groove labels
+    # apply to R-series rings and should not be printed for RX/BX ring numbers.
+    if ring_no.upper().startswith(('RX-', 'BX-')):
         parts = [f'SIZE : {ring_no}', moc]
         if hardness_str:
             parts.append(hardness_str)
@@ -368,6 +373,21 @@ def _fmt_dji(item: dict) -> str:
     return _with_special(f'{dims_od}, DOUBLE JACKET GASKET WITH {moc} + {filler} FILLED', special_raw)
 
 
+def _fmt_oring(item: dict) -> str:
+    id_mm = item.get('id_mm')
+    cs_mm = item.get('thickness_mm')
+    moc = item.get('moc')
+    if not (id_mm and cs_mm and moc):
+        return ''
+
+    parts = [f'SIZE : ID {_fmt_num(id_mm)}MM X C/S {_fmt_num(cs_mm)}MM', 'O-RING', moc]
+    pressure = item.get('pressure_rating')
+    if pressure:
+        parts.append(f'PRESSURE RATING: {pressure}')
+    _append_special_part(parts, item.get('special'))
+    return ', '.join(parts)
+
+
 def _fmt_isk(item: dict) -> str:
     size = item.get('size')
     rating = item.get('rating')
@@ -429,13 +449,21 @@ def _fmt_isk(item: dict) -> str:
     # STYLE-N and equivalent parenthesized styles (FCS, TYPE-D):
     # "SIZE: S X R, INSULATING GASKET KIT ({style}) spec, face (fire_safety)"
     if isk_style in ('STYLE-N', 'FCS', 'TYPE-D'):
-        out = f'{base}, INSULATING GASKET KIT ({isk_style})'
-        # Build detailed component string when dedicated fields are available
+        isk_type = (item.get('isk_type') or '').upper()
+        style_label = 'STYLE-FCS' if isk_style == 'FCS' else isk_style
+        if isk_style == 'FCS' and 'TYPE-F' in isk_type:
+            style_label += ' (TYPE F - RF)'
+        out = f'{base}, INSULATING GASKET KIT, {style_label}'
+        # Customer SET blocks are already the most faithful kit description.
+        # Use split component fields only when no complete SET/spec was supplied.
         components = _isk_style_n_components(item)
-        if components:
+        if special:
+            if isk_style == 'FCS':
+                out += f', (SET: {special})'
+            else:
+                out += f' {special}'
+        elif components:
             out += f' {components}'
-        elif special:
-            out += f' {special}'
         tail_parts = []
         if face_type:
             face_str = face_type

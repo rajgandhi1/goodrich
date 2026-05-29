@@ -556,6 +556,7 @@ _RTJ_HARDNESS_DEFAULTS = {
     'UNS N06600': 160,  # Inconel 600
     'UNS N08825': 160,  # Incoloy 825
     'UNS N08800': 160,  # Incoloy 800
+    'UNS G10100': 120,  # Low carbon steel
     'UNS S31600': 160,  # SS316
     'UNS S31603': 160,  # SS316L
     'UNS S30400': 160,  # SS304
@@ -587,12 +588,15 @@ _RTJ_MOC_ALIASES = {
     # Carbon/low-alloy steel
     'LOW CARBON STEEL': 'LOW CARBON STEEL', 'LCS': 'LOW CARBON STEEL',
     'CARBON STEEL': 'LOW CARBON STEEL',
+    'UNS G10100': 'LOW CARBON STEEL', 'G10100': 'LOW CARBON STEEL',
     'LTCS': 'LTCS', 'LOW TEMPERATURE CARBON STEEL': 'LTCS', 'LOW TEMP CARBON STEEL': 'LTCS',
     # SS austenitic
     'SS304': 'SS304', 'SS 304': 'SS304', '304SS': 'SS304', '304 SS': 'SS304', 'AISI 304': 'SS304',
+    'UNS S30400': 'SS304', 'S30400': 'SS304',
     'SS304L': 'SS304L', 'SS 304L': 'SS304L', '304L': 'SS304L',
     'SS310': 'SS310', 'SS 310': 'SS310', 'SS310S': 'SS310S', 'SS 310S': 'SS310S',
     'SS316': 'SS316', 'SS 316': 'SS316', '316SS': 'SS316', '316 SS': 'SS316', 'AISI 316': 'SS316',
+    'UNS S31600': 'SS316', 'S31600': 'SS316',
     'SS316L': 'SS316L', 'SS 316L': 'SS316L', '316L': 'SS316L',
     'SS316H': 'SS316H', 'SS 316H': 'SS316H', '316H': 'SS316H',
     'SS317': 'SS317', 'SS317L': 'SS317L',
@@ -640,12 +644,53 @@ _RTJ_MOC_ALIASES = {
     'ALUMINIUM': 'ALUMINIUM', 'ALUMINUM': 'ALUMINIUM',
 }
 
+_RTJ_MOC_PATTERN = (
+    r'SOFT\s+IRON|G10100|UNS\s+G10100|S30400|UNS\s+S30400|S31600|UNS\s+S31600|'
+    r'INCOLOY\s*825|INCOLY\s*825|ALLOY\s*825|INCONEL\s*625|UNS\s*S\s*3\d{4}|'
+    r'SS[-\s]*316L?|316L?SS|SS[-\s]*304L?|304L?SS|F\d{1,2}|'
+    r'LOW\s+CARBON\s+STEEL|LCS|LTCS|MONEL\s*400|HASTELLOY\s*C[-\s]*276'
+)
+
+
+def _recover_rtj_fields_from_description(item: dict) -> None:
+    raw_desc = (item.get('raw_description') or item.get('description') or '').upper()
+    if not raw_desc:
+        return
+
+    if not item.get('ring_no'):
+        ring = re.search(r'\b(?P<prefix>BX|RX|R)\s*[- ]?\s*(?P<num>\d{1,4})\b', raw_desc)
+        if ring:
+            item['ring_no'] = f'{ring.group("prefix")}-{ring.group("num")}'
+
+    if not item.get('rtj_groove_type'):
+        if re.search(r'\bOCT(?:AGONAL)?\b|TYPE\s*O\b|8[-\s]*SIDED', raw_desc):
+            item['rtj_groove_type'] = 'OCTAGONAL'
+        elif re.search(r'\bOVAL\b|ELLIPTICAL|TYPE\s*R\b', raw_desc):
+            item['rtj_groove_type'] = 'OVAL'
+        elif re.search(r'\bBX\b', raw_desc):
+            item['rtj_groove_type'] = 'BX'
+
+    if not item.get('standard'):
+        if re.search(r'\bAPI\s*6\s*A\b', raw_desc):
+            item['standard'] = 'API 6A'
+        elif re.search(r'\bAPI\s*6\s*B(?:X)?\b', raw_desc):
+            item['standard'] = 'API 6A'
+
+    if not item.get('moc'):
+        paren = re.search(rf'\((?P<mat>{_RTJ_MOC_PATTERN})\)', raw_desc)
+        explicit = re.search(rf'\b(?P<mat>{_RTJ_MOC_PATTERN})\b', raw_desc)
+        match = paren or explicit
+        if match:
+            item['moc'] = match.group('mat')
+
 
 def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
+    _recover_rtj_fields_from_description(item)
+
     # Normalize MOC — if LLM returned null, try to recover from raw_description via aliases
     raw_moc = (item.get('moc') or '').strip().upper()
     if not raw_moc:
-        raw_desc_upper = (item.get('raw_description') or '').upper()
+        raw_desc_upper = (item.get('raw_description') or item.get('description') or '').upper()
         for alias_key in sorted(_RTJ_MOC_ALIASES, key=len, reverse=True):
             if re.search(r'\b' + re.escape(alias_key) + r'\b', raw_desc_upper):
                 raw_moc = alias_key
@@ -662,7 +707,7 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
         item['rtj_groove_type'] = _groove_norm.get(
             item['rtj_groove_type'].upper(), item['rtj_groove_type'].upper()
         )
-    else:
+    elif not str(item.get('ring_no') or '').upper().startswith(('RX-', 'BX-')):
         item['rtj_groove_type'] = 'OCTAGONAL'
         applied_defaults.append('groove type defaulted to OCTAGONAL')
 
@@ -756,7 +801,127 @@ def _apply_rtj_rules(item: dict, flags: list, applied_defaults: list) -> None:
 # KAMM helpers
 # ---------------------------------------------------------------------------
 
+_KAMM_MATERIAL_RE = (
+    r'SS\s*3\d{2}L?|3\d{2}L?\s*SS|SS\s*4\d{2}|CS|CARBON\s+STEEL|'
+    r'LTCS|DUPLEX|SUPER\s+DUPLEX|INCONEL\s*\d+|INCOLOY\s*\d+|'
+    r'HASTELLOY\s*C276|MONEL\s*\d*|TITANIUM(?:\s+GR\.?\s*\d+)?|GRAPHITE|PTFE|MICA'
+)
+
+
+def _kamm_number(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    try:
+        return float(str(raw).replace(',', '.'))
+    except ValueError:
+        return None
+
+
+def _kamm_norm_material(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    value = re.sub(r'\s+', ' ', raw.strip().upper())
+    return _norm_ring(value) or _norm_filler(value) or value
+
+
+def _append_kamm_special(item: dict, value: str) -> None:
+    if not value:
+        return
+    special = (item.get('special') or '').strip()
+    if value.upper() in special.upper():
+        return
+    item['special'] = f'{special}, {value}' if special else value
+
+
+def _recover_kamm_fields_from_description(item: dict) -> None:
+    raw = item.get('raw_description') or item.get('description') or ''
+    if not raw:
+        return
+    upper = raw.upper()
+
+    if not item.get('od_mm') or not item.get('id_mm'):
+        dim_match = re.search(
+            r'\bOD\s*[:=]?\s*(?P<od>\d+(?:[.,]\d+)?)\s*(?:MM)?\b.*?'
+            r'\bID\s*[:=]?\s*(?P<id>\d+(?:[.,]\d+)?)\s*(?:MM)?\b',
+            upper,
+            re.DOTALL,
+        )
+        if dim_match:
+            item['od_mm'] = item.get('od_mm') or _kamm_number(dim_match.group('od'))
+            item['id_mm'] = item.get('id_mm') or _kamm_number(dim_match.group('id'))
+            item['size_type'] = 'OD_ID'
+
+    # Prefer total gasket thickness stated in the SIZE block over core-only
+    # thickness from "CORE MAT'L ... 3.0MM THICKNESS".
+    size_section = re.search(r'\bSIZE\s*:\s*(?P<size>.*?)(?:\bMATERIAL\s*:|$)', upper, re.DOTALL)
+    size_text = size_section.group('size') if size_section else upper
+    total_thk = None
+    th_match = re.search(r'\bTH\s*[:=]?\s*(?P<thk>\d+(?:[.,]\d+)?)\s*(?:MM)?\b', size_text)
+    if not th_match:
+        th_match = re.search(
+            r'\bOD\s*[:=]?\s*\d+(?:[.,]\d+)?\s*(?:MM)?\b.*?'
+            r'\bID\s*[:=]?\s*\d+(?:[.,]\d+)?\s*(?:MM)?\b.*?'
+            r'(?:\bB\s*[:=]?\s*\d+(?:[.,]\d+)?\s*(?:MM)?\b\s*X\s*)?'
+            r'(?P<thk>\d+(?:[.,]\d+)?)\s*(?:MM)?\b',
+            size_text,
+            re.DOTALL,
+        )
+    if th_match:
+        total_thk = _kamm_number(th_match.group('thk'))
+
+    core_thk = None
+    core_thk_match = re.search(
+        r'\b(?:CORE\s+)?(?:MAT[\'’]?L|MATERIAL)?\s*:?\s*(?:' + _KAMM_MATERIAL_RE + r')?\s*,?\s*'
+        r'(?P<core>\d+(?:[.,]\d+)?)\s*MM\s+THICKNESS\b',
+        upper,
+    )
+    if not core_thk_match:
+        core_thk_match = re.search(r'\((?P<core>\d+(?:[.,]\d+)?)\s*\+\s*2\s*X\s*\d+(?:[.,]\d+)?\)', upper)
+    if core_thk_match:
+        core_thk = _kamm_number(core_thk_match.group('core'))
+
+    cover_thk_match = re.search(r'\bWITH\s+(?P<cover>\d+(?:[.,]\d+)?)\s*MM\s+(?:GRAPHITE|PTFE|MICA)\b', upper)
+    cover_thk = _kamm_number(cover_thk_match.group('cover')) if cover_thk_match else None
+
+    if total_thk is None and core_thk is not None and cover_thk is not None:
+        total_thk = core_thk + (2 * cover_thk)
+    if total_thk is not None:
+        item['thickness_mm'] = total_thk
+    if core_thk is not None and not item.get('kamm_core_thk'):
+        item['kamm_core_thk'] = core_thk
+
+    if not item.get('kamm_surface_material') and not item.get('sw_filler'):
+        surface_match = re.search(r'\b(?P<surface>GRAPHITE|PTFE|MICA)\s+(?:ON\s+BOTH\s+SIDES|LAYER|LAYERS|FACING|COVERING)\b', upper)
+        if not surface_match:
+            surface_match = re.search(r'\bMATERIAL\s*:\s*(?P<surface>GRAPHITE|PTFE|MICA)\s*/\s*(?:' + _KAMM_MATERIAL_RE + r')\b', upper)
+        if surface_match:
+            surface = _kamm_norm_material(surface_match.group('surface'))
+            item['kamm_surface_material'] = surface
+            item['sw_filler'] = surface
+
+    if not item.get('kamm_core_material') and not item.get('sw_winding_material'):
+        core_match = re.search(r'\bCORE\s+MAT[\'’]?L\s*:\s*(?P<core>' + _KAMM_MATERIAL_RE + r')\b', upper)
+        if not core_match:
+            core_match = re.search(r'\bMATERIAL\s*:\s*(?:GRAPHITE|PTFE|MICA)\s*/\s*(?P<core>' + _KAMM_MATERIAL_RE + r')\b', upper)
+        if core_match:
+            core = _kamm_norm_material(core_match.group('core'))
+            item['kamm_core_material'] = core
+            item['sw_winding_material'] = core
+
+    rib_match = re.search(r'\bB\s*[:=]?\s*(?P<rib>\d+(?:[.,]\d+)?)\s*MM\b', upper)
+    if rib_match and not item.get('kamm_rib'):
+        item['kamm_rib'] = f'{_kamm_number(rib_match.group("rib")):g}MM'
+
+    type_match = re.search(r'\bTYPE\s*[-:]?\s*(?P<type>\d+)\b', upper)
+    if type_match:
+        _append_kamm_special(item, f'TYPE-{type_match.group("type")}')
+    if item.get('kamm_rib'):
+        _append_kamm_special(item, f'B={item["kamm_rib"]}')
+
+
 def _apply_kamm_rules(item: dict, flags: list, applied_defaults: list) -> None:
+    _recover_kamm_fields_from_description(item)
+
     winding_mat = item.get('sw_winding_material')
     filler = _norm_filler(item.get('sw_filler')) or 'GRAPHITE'
     outer_ring = _norm_ring(item.get('sw_outer_ring'))
@@ -929,7 +1094,98 @@ def _normalize_isk_special(special: str) -> str:
     return s
 
 
+def _recover_isk_fields_from_description(item: dict) -> None:
+    raw = (item.get('raw_description') or item.get('description') or '')
+    if not raw:
+        return
+    upper = raw.upper()
+
+    if not item.get('size'):
+        size_match = re.search(
+            r'\b(?P<size>\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s*(?:"|INCHES?\b|IN\b)',
+            upper,
+        )
+        if size_match:
+            item['size'] = f'{size_match.group("size")}"'
+            item['size_type'] = 'NPS'
+
+    if not item.get('rating'):
+        rating_match = re.search(r'\b(?P<rating>150|300|400|600|900|1500|2500)\s*#', upper)
+        if rating_match:
+            item['rating'] = f'{rating_match.group("rating")}#'
+        else:
+            pn_match = re.search(r'\bPN\s*-?\s*(?P<rating>\d{1,2})\b', upper)
+            if pn_match:
+                item['rating'] = f'PN {pn_match.group("rating")}'
+
+    if not item.get('isk_style'):
+        style_match = re.search(r'\bSTYLE\s*[-:]?\s*(?P<style>FCS|N|CS|VCS)\b', upper)
+        if style_match:
+            style = style_match.group('style')
+            item['isk_style'] = f'STYLE-{style}' if style in ('N', 'CS') else style
+        elif re.search(r'\bTYPE\s*[- ]?F\b', upper):
+            item['isk_style'] = 'TYPE-F'
+        elif re.search(r'\bTYPE\s*[- ]?E\b', upper):
+            item['isk_style'] = 'TYPE-E'
+
+    if re.search(r'\bTYPE\s*[- ]?F\b', upper):
+        item['isk_type'] = 'TYPE-F'
+        item['face_type'] = item.get('face_type') or 'RF'
+    elif re.search(r'\bTYPE\s*[- ]?E\b', upper):
+        item['isk_type'] = 'TYPE-E'
+        item['face_type'] = item.get('face_type') or 'FF'
+
+    if not item.get('face_type'):
+        if re.search(r'\bRF\b|\bRAISED\s+FACE\b', upper):
+            item['face_type'] = 'RF'
+        elif re.search(r'\bFF\b|\bFULL\s+FACE\b', upper):
+            item['face_type'] = 'FF'
+
+    if not item.get('special'):
+        set_match = re.search(r'\(\s*SET\s*:\s*(?P<set>.*?)\s*\)', raw, re.IGNORECASE)
+        if set_match:
+            item['special'] = set_match.group('set').strip()
+
+    if not item.get('standard'):
+        if re.search(r'\b(?:ASME|ANSI)\s+B\s*16\.5\b', upper):
+            item['standard'] = 'ASME B16.5'
+        elif re.search(r'\b(?:ASME|ANSI)\s+B\s*16\.47\b', upper):
+            item['standard'] = 'ASME B16.47'
+
+    if not item.get('isk_gasket_material'):
+        grade_match = re.search(r'\b(?:GRE\s*)?G\s*-?\s*10\s*/\s*G\s*-?\s*11\b|\b(?:GRE\s*)?G\s*-?\s*10\b|\b(?:GRE\s*)?G\s*-?\s*11\b', upper)
+        if grade_match:
+            grade = re.sub(r'\s+', '', grade_match.group(0).upper())
+            grade = grade.replace('GRE', '').replace('G-', 'G')
+            item['isk_gasket_material'] = f'GRE {grade}'
+
+    if not item.get('isk_core_material'):
+        core_match = re.search(r'\b(?:WITH\s+)?(?P<core>SS\s*3\d{2}L?|3\d{2}L?\s*SS)\s+\d+(?:\.\d+)?\s*MM\s+THK\b', upper)
+        if core_match:
+            core = re.sub(r'\s+', '', core_match.group('core').upper())
+            core = re.sub(r'^(\d{3}L?)SS$', r'SS\1', core)
+            item['isk_core_material'] = core
+
+    if not item.get('isk_primary_seal') and re.search(r'\bPTFE\s+PRIMARY\s+SEAL\b', upper):
+        item['isk_primary_seal'] = 'PTFE PRIMARY SEAL'
+    if not item.get('isk_secondary_seal') and re.search(r'\bMICA\s+SECONDARY\s+SEAL\b', upper):
+        item['isk_secondary_seal'] = 'MICA SECONDARY SEAL'
+
+    if not item.get('isk_sleeve_material') and re.search(r'\bWASHER\s*&\s*SLEEVES\b|\bWASHER\s+AND\s+SLEEVES\b', upper):
+        item['isk_sleeve_material'] = item.get('isk_gasket_material')
+        item['isk_insulating_washer'] = item.get('isk_insulating_washer') or item.get('isk_gasket_material')
+
+    if not item.get('isk_washer_material'):
+        washer_match = re.search(r'\b(?P<washer>HARDENED\s+DIELECTRIC\s+COATED\s+(?:SS\s*)?3\d{2}L?|(?:SS\s*)?3\d{2}L?)\s+METALLIC\s+WASHER\b', upper)
+        if washer_match:
+            washer = washer_match.group('washer').strip().upper()
+            washer = re.sub(r'\b(?<!SS)(3\d{2}L?)\b', r'SS\1', washer)
+            item['isk_washer_material'] = re.sub(r'\s+', ' ', washer)
+
+
 def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
+    _recover_isk_fields_from_description(item)
+
     gtype = item.get('gasket_type', 'ISK')
 
     # TYPE-E = full face (FF) by definition; TYPE-F/D = raised face (RF) always
@@ -999,10 +1255,12 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
             item['standard'] = 'ASME B16.5'
             applied_defaults.append('standard defaulted to ASME B16.5 (ISK_RTJ)')
     else:
-        # Standard ISK: always determine from size per GGPL convention
-        # (GGPL uses B16.20 for <26" and B16.47 for ≥26", regardless of what customer states)
+        # Standard ISK: keep explicit flange-fit standards; otherwise default
+        # from pressure family and size per GGPL convention.
         is_pn = str(item.get('rating') or '').upper().startswith('PN')
-        if is_pn:
+        if customer_standard:
+            item['standard'] = customer_standard
+        elif is_pn:
             item['standard'] = 'EN 1514-5'
             applied_defaults.append('standard set to EN 1514-5 (ISK on PN-rated flanges)')
         else:
@@ -1012,6 +1270,98 @@ def _apply_isk_rules(item: dict, flags: list, applied_defaults: list) -> None:
             else:
                 item['standard'] = 'ASME B16.20'
                 applied_defaults.append('standard set to ASME B16.20 (ISK)')
+
+
+_ORING_MOC_PATTERN = (
+    r'VITON|FKM|NBR|EPDM|NEOPRENE|SILICONE|VMQ|PTFE|TEFLON|'
+    r'NITRILE(?:\s+BUTADIENE\s+RUBBER)?|BUTYL(?:\s+RUBBER)?|IIR|'
+    r'NATURAL\s+RUBBER|NR|FFKM|KALREZ|AFLAS'
+)
+
+
+def _looks_like_oring(raw_desc: str) -> bool:
+    if not re.search(r'\bO[\s\-]?RING\b', raw_desc):
+        return False
+    # In spiral-wound data, "O-RING" often means outer ring. Only classify as
+    # a standalone O-ring when elastomer/material or ID/CS sizing context exists.
+    if re.search(r'\bSPIRAL\b|\bSPW\b|\bOUTER\s+RING\b', raw_desc):
+        return False
+    return bool(
+        re.search(r'\b(?:MATERIAL|MOC)\s*:', raw_desc)
+        or re.search(r'\bID\s*\d', raw_desc)
+        or re.search(r'\b(?:CS|C/S|CORD|SECTION|THK|THICKNESS)\s*\d', raw_desc)
+        or re.search(rf'\b(?:{_ORING_MOC_PATTERN})\b', raw_desc)
+    )
+
+
+def _extract_oring_number(token: str | None) -> float | None:
+    if not token:
+        return None
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def _recover_oring_fields_from_description(item: dict) -> None:
+    raw = item.get('raw_description') or item.get('description') or ''
+    if not raw:
+        return
+    upper = raw.upper()
+
+    if not item.get('moc'):
+        material_match = re.search(
+            rf'\b(?:MATERIAL|MOC)\s*:\s*(?P<mat>{_ORING_MOC_PATTERN})\b',
+            upper,
+        )
+        if not material_match:
+            material_match = re.search(rf'\b(?P<mat>{_ORING_MOC_PATTERN})\b', upper)
+        if material_match:
+            item['moc'] = material_match.group('mat')
+
+    if not item.get('id_mm') or not item.get('thickness_mm'):
+        size_patterns = [
+            r'\bID\s*(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:X|BY|/)\s*(?:C/S|CS|CORD|SECTION|THK|THICK(?:NESS)?)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\b',
+            r'\b(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*ID\s*(?:X|BY|/)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:C/S|CS|CORD|SECTION|THK|THICK(?:NESS)?)\b',
+            r'\bID\s*(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:X|BY|/)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:C/S|CS|CORD|SECTION|THK|THICK(?:NESS)?)\b',
+            r'\bID\s*(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:X|BY|/)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\b',
+            r'\b(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*ID\s*(?:X|BY|/)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\b',
+            r'\b(?P<id>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:X|BY|/)\s*(?P<cs>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:O[\s\-]?RING|VITON|FKM|NBR|EPDM)\b',
+        ]
+        for pattern in size_patterns:
+            match = re.search(pattern, upper)
+            if match:
+                item['id_mm'] = item.get('id_mm') or _extract_oring_number(match.group('id'))
+                item['thickness_mm'] = item.get('thickness_mm') or _extract_oring_number(match.group('cs'))
+                item['size_type'] = 'ID_CS'
+                break
+
+    if not item.get('pressure_rating'):
+        pressure_match = re.search(
+            r'\b(?:PRESSURE\s+RATING|WORKING\s+PRESSURE|PRESSURE)\s*:\s*(?P<pressure>\d+(?:\.\d+)?)\s*(?P<unit>BAR|PSI|KG/CM2|KPA|MPA)\b',
+            upper,
+        )
+        if pressure_match:
+            item['pressure_rating'] = (
+                f'{pressure_match.group("pressure")} {pressure_match.group("unit")}'
+            )
+
+
+def _apply_oring_rules(item: dict, flags: list, applied_defaults: list) -> None:
+    _recover_oring_fields_from_description(item)
+
+    raw_moc = (item.get('moc') or '').strip().upper()
+    if raw_moc:
+        item['moc'] = _normalize_moc(raw_moc)
+
+    item['size_type'] = item.get('size_type') or 'ID_CS'
+    item['size'] = None
+    item['rating'] = None
+    item['size_norm'] = None
+    item['rating_norm'] = None
+    item['face_type'] = None
+    item['standard'] = None
+    item['dimensions'] = None
 
 
 def _sanitize_llm_nulls(item: dict) -> dict:
@@ -1099,6 +1449,9 @@ def apply_rules(item: dict) -> dict:
         # LLM missed/misclassified — description text is unambiguous
         gasket_type = 'SPIRAL_WOUND'
         item['gasket_type'] = 'SPIRAL_WOUND'
+    elif gasket_type == 'SOFT_CUT' and _looks_like_oring(raw_desc):
+        gasket_type = 'O_RING'
+        item['gasket_type'] = 'O_RING'
     elif gasket_type == 'SOFT_CUT' and re.search(r'\bKAMMPROFILE\b|\bCAMPROFILE\b', raw_desc):
         gasket_type = 'KAMM'
         item['gasket_type'] = 'KAMM'
@@ -1107,6 +1460,12 @@ def apply_rules(item: dict) -> dict:
     ) and not re.search(r'\bSPIRAL\b|\bCNAF\b|\bPTFE\b|\bRUBBER\b|\bNEOPRENE\b|\bGRAPHITE\s+SHEET\b', raw_desc):
         gasket_type = 'RTJ'
         item['gasket_type'] = 'RTJ'
+    elif gasket_type == 'SOFT_CUT' and re.search(
+        r'\b(?:ISK|INSULAT(?:ING|ION)\s+GASKET|INSULAT(?:ING|ION)\s+KIT|FLANGE\s+ISOLAT(?:ING|ION)\s+KIT)\b',
+        raw_desc,
+    ):
+        gasket_type = 'ISK'
+        item['gasket_type'] = 'ISK'
     elif gasket_type == 'SOFT_CUT' and re.search(r'\bPLUG\s+GASKET\b|\bPLUG\s+TYPE\s+GASKET\b', raw_desc):
         gasket_type = 'PLUG_GASKET'
         item['gasket_type'] = 'PLUG_GASKET'
@@ -1118,7 +1477,7 @@ def apply_rules(item: dict) -> dict:
         item['gasket_type'] = 'SHEET_GASKET'
 
     # If "non-metallic" is mentioned in the original description, force SOFT_CUT
-    if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT', 'SHEET_GASKET'):
+    if re.search(r'NON[\s\-]?METALLIC', raw_desc) and gasket_type not in ('SOFT_CUT', 'SHEET_GASKET', 'O_RING'):
         gasket_type = 'SOFT_CUT'
         item['gasket_type'] = 'SOFT_CUT'
 
@@ -1139,6 +1498,8 @@ def apply_rules(item: dict) -> dict:
     elif gasket_type in ('ISK', 'ISK_RTJ'):
         _apply_isk_rules(item, flags, applied_defaults)
         item['dimensions'] = None
+    elif gasket_type == 'O_RING':
+        _apply_oring_rules(item, flags, applied_defaults)
     elif gasket_type not in ('SOFT_CUT', 'SHEET_GASKET', 'CORRUGATED', 'PLUG_GASKET'):
         # Unrecognised gasket type — pass through but flag for manual review
         flags.append(
@@ -1252,6 +1613,8 @@ def apply_rules(item: dict) -> dict:
         crit = ['od_mm', 'id_mm', 'thickness_mm', 'moc']
     elif gasket_type in ('ISK', 'ISK_RTJ'):
         crit = ['size', 'rating']
+    elif gasket_type == 'O_RING':
+        crit = ['id_mm', 'thickness_mm', 'moc']
     elif gasket_type == 'SPIRAL_WOUND' and item.get('size_type') == 'OD_ID':
         crit = ['od_mm', 'id_mm', 'moc']
     elif item.get('size_type') == 'OD_ID':
