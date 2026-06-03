@@ -98,7 +98,7 @@ import { issueBadgesForItem, TechnicalIssuesPanel } from "@/components/quotes/te
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1275,6 +1275,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const [exporting, setExporting] = React.useState<string | null>(null);
   const [intakeCollapsed, setIntakeCollapsed] = React.useState(false);
   const [enquirySetupOpen, setEnquirySetupOpen] = React.useState(false);
+  const [quotationSetupOpen, setQuotationSetupOpen] = React.useState(false);
   const [rowEditorOpen, setRowEditorOpen] = React.useState(false);
   const [materialBreakdown, setMaterialBreakdown] = React.useState<MaterialBreakdownRow[] | null>(null);
   const [materialInputs, setMaterialInputs] = React.useState<MaterialInputRow[]>([]);
@@ -5839,68 +5840,31 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
           </CardHeader>
           <CardContent className="space-y-3 p-3">
             <div className="space-y-3">
-              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.75fr)]">
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
                 <div className="rounded-md border bg-background p-3">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="inline-flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Quotation header and workflow</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Edit customer context and stage before working through the tabs below.</div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                        <Badge variant={quotationStageBadgeVariant(quotationStage)}>{quotationStageIndex + 1}. {quotationStageMeta.label}</Badge>
+                        <Badge variant={quote.customer && quote.project_ref ? "secondary" : "outline"}>{quote.customer && quote.project_ref ? "Context ready" : "Needs context"}</Badge>
+                        <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
+                      </div>
+                      <div className="mt-2 truncate text-sm">
+                        {quote.customer || "Customer not added"}
+                        <span className="text-muted-foreground"> / {quote.project_ref || getString(qd.quote_no) || quote.id}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">{quotationStageMeta.description}</div>
                     </div>
-                    <Badge variant={quote.customer && quote.project_ref ? "secondary" : "outline"}>{quote.customer && quote.project_ref ? "Context ready" : "Needs context"}</Badge>
-                  </div>
-                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_minmax(240px,0.75fr)] lg:items-end">
-                    <Field label="Customer" value={quote.customer} onChange={(value) => updateQuoteDraft({ customer: value })} disabled={!canAddDetails} />
-                    <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => updateQuoteDraft({ project_ref: value })} disabled={!canAddDetails} />
-                    <div className="space-y-1.5">
-                      <Label>Quotation stage</Label>
-                      <Select value={quotationStage} onValueChange={(value) => setQuotationStage(value as QuotationStageId)} disabled={!canEditWorkflow}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {QUOTATION_STAGES.map((stage, index) => (
-                            <SelectItem key={stage.id} value={stage.id}>{index + 1}. {stage.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => setQuotationSetupOpen(true)}>
+                        <SlidersHorizontal className="h-4 w-4" />
+                        Edit setup
+                      </Button>
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-3 border-t pt-3 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="space-y-1.5">
-                      <Label>Sales rep</Label>
-                      <Select
-                        value={salesRepUsers.some((user) => user.id === getString(qd.sales_rep_user_id)) ? getString(qd.sales_rep_user_id) : CUSTOM_SALES_REP_VALUE}
-                        onValueChange={selectSalesRep}
-                        disabled={!canEditQuotation}
-                      >
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {salesRepUsers.map((user) => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.name} - {roleLabels[user.role]}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value={CUSTOM_SALES_REP_VALUE}>{quotationSalesRepLabel}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Field label="Rep designation" value={getString(qd.rep_designation)} onChange={(value) => updateQd("rep_designation", value)} disabled={!canEditQuotation} />
-                    <Field label="Rep contact" value={getString(qd.rep_contact)} onChange={(value) => updateQd("rep_contact", value)} disabled={!canEditQuotation} />
-                    <Field label="Rep email" value={getString(qd.rep_email)} onChange={(value) => updateQd("rep_email", value)} disabled={!canEditQuotation} />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Badge variant={quotationStageBadgeVariant(quotationStage)}>{quotationStageIndex + 1}. {quotationStageMeta.label}</Badge>
-                    <Badge variant="outline">{quotationStageMeta.owner}</Badge>
-                    <span className="text-xs text-muted-foreground">{quotationStageMeta.description}</span>
-                  </div>
-                </div>
-
-                <div className="rounded-md border bg-background p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="inline-flex items-center gap-2 text-sm font-medium"><ShieldCheck className="h-4 w-4" />Quote status</div>
-                    <Badge variant={approvalBadgeVariant(approval.status)}>{approval.status}</Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     <CompactMetric icon={<FileText className="h-3.5 w-3.5" />} label="Rows" value={items.length} />
-                    <CompactMetric icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Total qty" value={totalQuantityLabel} tone="ready" />
+                    <CompactMetric icon={<FileSpreadsheet className="h-3.5 w-3.5" />} label="Qty" value={totalQuantityLabel} tone="ready" />
                     <CompactMetric icon={<Download className="h-3.5 w-3.5" />} label="Total" value={`${grandTotal.toFixed(2)} ${currency}`} tone="ready" />
                     <CompactMetric
                       icon={<ShieldCheck className="h-3.5 w-3.5" />}
@@ -5909,7 +5873,14 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       tone={pricingSummary.approvalRequired ? "check" : approval.status === "approved" ? "ready" : "neutral"}
                     />
                   </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                </div>
+
+                <details className="rounded-md border bg-background">
+                  <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2">
+                    <span className="text-sm font-medium">Step checklist</span>
+                    <span className="text-xs text-muted-foreground">{quotationChecklist.filter((item) => item.done).length}/{quotationChecklist.length} done</span>
+                  </summary>
+                  <div className="grid gap-2 border-t p-3">
                     {quotationChecklist.map((item) => (
                       <div key={item.label} className="flex items-center gap-2 rounded-md border bg-muted/20 px-2 py-1.5 text-xs">
                         {item.done ? <Check className="h-4 w-4 text-emerald-600" /> : <Circle className="h-4 w-4 text-muted-foreground" />}
@@ -5917,32 +5888,16 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                       </div>
                     ))}
                   </div>
-                </div>
-
-                <div className="rounded-md border bg-background p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="inline-flex items-center gap-2 text-sm font-medium"><FileText className="h-4 w-4" />Sales notes</div>
-                    <Badge variant="outline">{getString(quote.stage_meta?.sales_notes) ? "Saved notes" : "No notes"}</Badge>
-                  </div>
-                  <div className="space-y-3">
-                    <Field
-                      label="Notes / extra details"
-                      value={getString(quote.stage_meta?.sales_notes)}
-                      onChange={(value) => updateQuoteDraft({ stage_meta: { ...(quote.stage_meta ?? {}), sales_notes: value } })}
-                      textarea
-                      disabled={!canAddDetails}
-                    />
-                  </div>
-                </div>
+                </details>
               </div>
 
-              <Tabs defaultValue="setup" className="min-w-0 space-y-3">
+              <Tabs defaultValue="pricing" className="min-w-0 space-y-3">
                 <TabsList className="grid h-auto grid-cols-2 md:grid-cols-5">
-                  <TabsTrigger value="setup" className="gap-2"><FileText className="h-4 w-4" />Setup</TabsTrigger>
                   <TabsTrigger value="pricing" className="gap-2"><SlidersHorizontal className="h-4 w-4" />Pricing</TabsTrigger>
                   <TabsTrigger value="items" className="gap-2"><FileSpreadsheet className="h-4 w-4" />Items</TabsTrigger>
                   <TabsTrigger value="terms" className="gap-2"><ListFilter className="h-4 w-4" />Terms</TabsTrigger>
                   <TabsTrigger value="approval" className="gap-2"><ShieldCheck className="h-4 w-4" />Approval</TabsTrigger>
+                  <TabsTrigger value="setup" className="gap-2"><FileText className="h-4 w-4" />Setup</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="setup" className="space-y-3">
@@ -6243,6 +6198,69 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
                   </div>
                 </TabsContent>
               </Tabs>
+
+              <Dialog open={quotationSetupOpen} onOpenChange={setQuotationSetupOpen}>
+                <DialogContent className="max-h-[90vh] max-w-5xl overflow-auto">
+                  <DialogHeader>
+                    <DialogTitle>Quotation setup</DialogTitle>
+                    <DialogDescription>Set customer context, workflow stage, sales representative, and notes.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="grid gap-3 lg:grid-cols-[1fr_1fr_minmax(240px,0.75fr)] lg:items-end">
+                      <Field label="Customer" value={quote.customer} onChange={(value) => updateQuoteDraft({ customer: value })} disabled={!canAddDetails} />
+                      <Field label="Project / PO reference" value={quote.project_ref} onChange={(value) => updateQuoteDraft({ project_ref: value })} disabled={!canAddDetails} />
+                      <div className="space-y-1.5">
+                        <Label>Quotation stage</Label>
+                        <Select value={quotationStage} onValueChange={(value) => setQuotationStage(value as QuotationStageId)} disabled={!canEditWorkflow}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {QUOTATION_STAGES.map((stage, index) => (
+                              <SelectItem key={stage.id} value={stage.id}>{index + 1}. {stage.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 border-t pt-4 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="space-y-1.5">
+                        <Label>Sales rep</Label>
+                        <Select
+                          value={salesRepUsers.some((user) => user.id === getString(qd.sales_rep_user_id)) ? getString(qd.sales_rep_user_id) : CUSTOM_SALES_REP_VALUE}
+                          onValueChange={selectSalesRep}
+                          disabled={!canEditQuotation}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {salesRepUsers.map((user) => (
+                              <SelectItem key={user.id} value={user.id}>
+                                {user.name} - {roleLabels[user.role]}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value={CUSTOM_SALES_REP_VALUE}>{quotationSalesRepLabel}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Field label="Rep designation" value={getString(qd.rep_designation)} onChange={(value) => updateQd("rep_designation", value)} disabled={!canEditQuotation} />
+                      <Field label="Rep contact" value={getString(qd.rep_contact)} onChange={(value) => updateQd("rep_contact", value)} disabled={!canEditQuotation} />
+                      <Field label="Rep email" value={getString(qd.rep_email)} onChange={(value) => updateQd("rep_email", value)} disabled={!canEditQuotation} />
+                    </div>
+
+                    <div className="border-t pt-4">
+                      <Field
+                        label="Sales notes / extra details"
+                        value={getString(quote.stage_meta?.sales_notes)}
+                        onChange={(value) => updateQuoteDraft({ stage_meta: { ...(quote.stage_meta ?? {}), sales_notes: value } })}
+                        textarea
+                        disabled={!canAddDetails}
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="secondary" onClick={() => setQuotationSetupOpen(false)}>Close</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </CardContent>
         </Card>
