@@ -275,32 +275,31 @@ export function SettingsClient() {
 
   return (
     <div className="grid gap-3 lg:grid-cols-2">
-      <PageIntro className="lg:col-span-2" title="Manage workspace settings" description="Maintain customer defaults, user accounts, and access rules used throughout the quotation workflow." />
-      <Card>
+      <PageIntro className="lg:col-span-2" title="Workspace setup" description="Users, access rules, and business defaults." />
+      <Card className="order-5">
         <CardHeader className="border-b px-4 py-3">
-          <CardTitle className="flex items-center gap-2 text-base"><UserCog className="h-4 w-4" />Account</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><UserCog className="h-4 w-4" />Current account</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 p-3">
+        <CardContent className="grid gap-2 p-3 sm:grid-cols-2">
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <div>
               <div className="text-sm font-medium">Authentication</div>
-              <div className="text-sm text-muted-foreground">Username and password sign in</div>
+              <div className="text-xs text-muted-foreground">Username and password</div>
             </div>
             <Badge variant="secondary">Active</Badge>
           </div>
           <div className="rounded-md border px-3 py-2">
-            <Label>Signed in user</Label>
-            <div className="mt-1 text-sm font-medium">{currentUser.id}</div>
+            <div className="text-sm font-medium">{currentUser.id}</div>
             <div className="text-xs text-muted-foreground">{currentUser.name} - {roleLabels[currentUser.role]}</div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="order-5">
         <CardHeader className="border-b px-4 py-3">
           <CardTitle className="flex items-center gap-2 text-base"><Bell className="h-4 w-4" />Preferences</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 p-3">
+        <CardContent className="p-3">
           <div className="flex items-center justify-between rounded-md border px-3 py-2">
             <Label htmlFor="email-alerts" className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-secondary" />
@@ -311,28 +310,35 @@ export function SettingsClient() {
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2">
+      <Card className="order-3 lg:col-span-2">
         <CardHeader className="border-b px-4 py-3">
-          <CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" />Business master data</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" />Business data</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4 p-3">
-          <div className="text-xs text-muted-foreground">Maintain repeated business details once. Enquiry and quotation forms use these values as selectable defaults while keeping manual override available.</div>
+        <CardContent className="space-y-3 p-3">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <Badge variant="outline">{masterData.customers.length} customers</Badge>
+            <Badge variant="outline">{masterData.epc_names.length} EPC presets</Badge>
+            <span>Used as defaults in enquiry and quotation forms.</span>
+          </div>
           {!canManage ? <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">Only admin users can edit master data.</div> : null}
           {canManage ? (
-            <div className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
-              <Input placeholder="Customer name *" value={draftCustomer.name} onChange={(event) => setDraftCustomer({ ...draftCustomer, name: event.target.value })} />
-              <Input placeholder="Address line 1" value={draftCustomer.address_line1} onChange={(event) => setDraftCustomer({ ...draftCustomer, address_line1: event.target.value })} />
-              <Input placeholder="City" value={draftCustomer.city} onChange={(event) => setDraftCustomer({ ...draftCustomer, city: event.target.value })} />
-              <Input placeholder="Country" value={draftCustomer.country} onChange={(event) => setDraftCustomer({ ...draftCustomer, country: event.target.value })} />
-              <Input placeholder="Contact person" value={draftCustomer.contact_name} onChange={(event) => setDraftCustomer({ ...draftCustomer, contact_name: event.target.value })} />
-              <Input placeholder="Designation" value={draftCustomer.designation} onChange={(event) => setDraftCustomer({ ...draftCustomer, designation: event.target.value })} />
-              <Input placeholder="Email" value={draftCustomer.email} onChange={(event) => setDraftCustomer({ ...draftCustomer, email: event.target.value })} />
-              <Input placeholder="Phone" value={draftCustomer.phone} onChange={(event) => setDraftCustomer({ ...draftCustomer, phone: event.target.value })} />
-              <Input placeholder="GST number" value={draftCustomer.gst_no} onChange={(event) => setDraftCustomer({ ...draftCustomer, gst_no: event.target.value })} />
-              <Input placeholder="Payment terms default" value={draftCustomer.payment_terms} onChange={(event) => setDraftCustomer({ ...draftCustomer, payment_terms: event.target.value })} />
-              <Input placeholder="Delivery terms default" value={draftCustomer.delivery_terms} onChange={(event) => setDraftCustomer({ ...draftCustomer, delivery_terms: event.target.value })} />
-              <Button size="sm" onClick={addCustomer}><Plus className="h-4 w-4" />Add customer</Button>
-            </div>
+            <details className="rounded-md border bg-background">
+              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Add customer</summary>
+              <div className="grid gap-2 border-t p-3 md:grid-cols-3">
+                <Input placeholder="Customer name *" value={draftCustomer.name} onChange={(event) => setDraftCustomer({ ...draftCustomer, name: event.target.value })} />
+                <Input placeholder="Address line 1" value={draftCustomer.address_line1} onChange={(event) => setDraftCustomer({ ...draftCustomer, address_line1: event.target.value })} />
+                <Input placeholder="City" value={draftCustomer.city} onChange={(event) => setDraftCustomer({ ...draftCustomer, city: event.target.value })} />
+                <Input placeholder="Country" value={draftCustomer.country} onChange={(event) => setDraftCustomer({ ...draftCustomer, country: event.target.value })} />
+                <Input placeholder="Contact person" value={draftCustomer.contact_name} onChange={(event) => setDraftCustomer({ ...draftCustomer, contact_name: event.target.value })} />
+                <Input placeholder="Designation" value={draftCustomer.designation} onChange={(event) => setDraftCustomer({ ...draftCustomer, designation: event.target.value })} />
+                <Input placeholder="Email" value={draftCustomer.email} onChange={(event) => setDraftCustomer({ ...draftCustomer, email: event.target.value })} />
+                <Input placeholder="Phone" value={draftCustomer.phone} onChange={(event) => setDraftCustomer({ ...draftCustomer, phone: event.target.value })} />
+                <Input placeholder="GST number" value={draftCustomer.gst_no} onChange={(event) => setDraftCustomer({ ...draftCustomer, gst_no: event.target.value })} />
+                <Input placeholder="Payment terms default" value={draftCustomer.payment_terms} onChange={(event) => setDraftCustomer({ ...draftCustomer, payment_terms: event.target.value })} />
+                <Input placeholder="Delivery terms default" value={draftCustomer.delivery_terms} onChange={(event) => setDraftCustomer({ ...draftCustomer, delivery_terms: event.target.value })} />
+                <Button size="sm" onClick={addCustomer}><Plus className="h-4 w-4" />Add customer</Button>
+              </div>
+            </details>
           ) : null}
           <div className="overflow-auto rounded-md border">
             <table className="w-full min-w-[820px] text-sm">
@@ -344,16 +350,21 @@ export function SettingsClient() {
               </tr>)}</tbody>
             </table>
           </div>
-          {canManage ? <div className="flex gap-2"><Input placeholder="Add EPC / project company preset" value={draftEpc} onChange={(event) => setDraftEpc(event.target.value)} /><Button size="sm" onClick={addEpc}><Plus className="h-4 w-4" />Add EPC</Button></div> : null}
-          <div className="flex flex-wrap gap-2">{masterData.epc_names.map((epc) => <Badge key={epc} variant="secondary">{epc}{canManage ? <button className="ml-1" onClick={() => void persistMasterData({ ...masterData, epc_names: masterData.epc_names.filter((row) => row !== epc) }, "EPC option removed")}><X className="h-3 w-3" /></button> : null}</Badge>)}</div>
+          <details className="rounded-md border bg-background">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium">EPC presets</summary>
+            <div className="space-y-3 border-t p-3">
+              {canManage ? <div className="flex gap-2"><Input placeholder="Add EPC / project company preset" value={draftEpc} onChange={(event) => setDraftEpc(event.target.value)} /><Button size="sm" onClick={addEpc}><Plus className="h-4 w-4" />Add EPC</Button></div> : null}
+              <div className="flex flex-wrap gap-2">{masterData.epc_names.map((epc) => <Badge key={epc} variant="secondary">{epc}{canManage ? <button className="ml-1" onClick={() => void persistMasterData({ ...masterData, epc_names: masterData.epc_names.filter((row) => row !== epc) }, "EPC option removed")}><X className="h-3 w-3" /></button> : null}</Badge>)}</div>
+            </div>
+          </details>
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2">
+      <Card className="order-2 lg:col-span-2">
         <CardHeader className="flex flex-row items-center justify-between gap-3 border-b px-4 py-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <SlidersHorizontal className="h-4 w-4" />
-            Admin access controls
+            Access controls
           </CardTitle>
           <div className="text-right" aria-live="polite">
             {accessSaveState === "idle" && <span className="text-xs text-muted-foreground">Ready to edit</span>}
@@ -362,18 +373,19 @@ export function SettingsClient() {
             {accessSaveState === "error" && <span className="flex items-center gap-1 text-xs text-red-700 dark:text-red-300"><AlertCircle className="h-3.5 w-3.5" />Could not save. Server settings restored.</span>}
           </div>
         </CardHeader>
-        <CardContent className="space-y-4 p-3">
+        <CardContent className="space-y-3 p-3">
           {!canManage && (
             <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
               Only admin users can change access controls.
             </div>
           )}
 
-          <div className="rounded-md border p-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          <details className="rounded-md border bg-background">
+            <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2">
               <div className="text-sm font-medium">With whom options</div>
               <Badge variant="outline">{accessSettings.with_whom_options.length} options</Badge>
-            </div>
+            </summary>
+            <div className="border-t p-3">
             {canManage && (
               <div className="mb-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
                 <Input value={draftWithWhom} onChange={(event) => setDraftWithWhom(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addWithWhomOption(); }} disabled={accessSavePending} />
@@ -395,7 +407,8 @@ export function SettingsClient() {
                 </Badge>
               ))}
             </div>
-          </div>
+            </div>
+          </details>
 
           <div className="overflow-auto rounded-md border">
             <table className="w-full min-w-[980px] text-sm">
@@ -434,10 +447,11 @@ export function SettingsClient() {
             </table>
           </div>
 
-          <div className="rounded-md border bg-muted/20 p-3">
+          <details className="rounded-md border bg-background">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Permission preview</summary>
+            <div className="border-t p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-sm font-medium">Permission preview</div>
                 <div className="text-xs text-muted-foreground">Check what a configured role can open or change.</div>
               </div>
               <Select value={previewRole} onValueChange={(value) => setPreviewRole(value as AppRole)}>
@@ -450,15 +464,16 @@ export function SettingsClient() {
             <div className="mt-3 text-sm">
               Users with this role can access: <span className="text-muted-foreground">{previewCapabilities.join(", ") || "No configured pages or actions"}</span>
             </div>
-          </div>
+            </div>
+          </details>
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2">
+      <Card className="order-1 lg:col-span-2">
         <CardHeader className="border-b px-4 py-3">
           <CardTitle className="flex items-center gap-2 text-base">
             <UserCog className="h-4 w-4" />
-            Admin user management
+            Users
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 p-3">
@@ -472,7 +487,7 @@ export function SettingsClient() {
             <div className="flex items-center justify-between gap-3 rounded-md border p-3">
               <div>
                 <div className="text-sm font-medium">Employee users</div>
-                <div className="text-xs text-muted-foreground">Add a permanent username with editable employee details.</div>
+                <div className="text-xs text-muted-foreground">{users.length} user(s) in this workspace.</div>
               </div>
               <Button size="sm" onClick={() => setAddUserOpen(true)}>
                 <Plus className="h-4 w-4" />
