@@ -24,6 +24,7 @@ from app.services.quote_rules import (
     QuoteConflictError,
     QuoteValidationError,
     normalize_identity,
+    po_snapshot,
     quote_summary,
     workflow_transition_blockers,
 )
@@ -172,6 +173,8 @@ def _require_patch_capabilities(user: CurrentUser, current: QuoteRead, payload: 
     for field in {"customer", "project_ref", "custom_label", "quote_no"} & changes.keys():
         _require_any_capability(user, {"edit_sales_details", "edit_quotation"})
     if "items" in changes:
+        if current.stage == "po" and (changes["items"] or []) != current.items:
+            raise HTTPException(status_code=409, detail="Purchase order line items are locked after PO receipt")
         require_capability(user, "edit_line_items")
     if "quote_data" in changes:
         changed_quote_data = _changed_keys(current.quote_data or {}, changes["quote_data"] or {})
@@ -555,6 +558,11 @@ def advance_stage(
         raise HTTPException(status_code=409, detail={"message": "Workflow transition blocked", "blockers": blockers})
     if payload.stage == "sent" and not (can_approve(user) or _is_quote_approved(current)):
         raise HTTPException(status_code=403, detail="Quotation must be approved before it can be marked sent")
+    if payload.stage == "po":
+        metadata = {
+            **metadata,
+            "po_snapshot": po_snapshot(current, user_id=user.user_id),
+        }
     try:
         quote = repo.advance_stage(
             user.org_id,

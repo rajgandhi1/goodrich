@@ -197,6 +197,87 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int | None = None) -> tuple[str
             score += 1
         return score
 
+    def _looks_like_subheader(row) -> bool:
+        cells = [_norm(c) for c in row if str(c).strip()]
+        if not cells:
+            return False
+        joined = ' | '.join(cells)
+        header_terms = sum(
+            1
+            for term in (
+                'size', 'inch', 'class', 'rating', 'facing', 'face', 'material',
+                'standard', 'thick', 'connection', 'type', 'uom', 'qty',
+            )
+            if term in joined
+        )
+        item_terms = sum(
+            1
+            for term in ('gasket', 'spiral', 'wound', 'ring type', 'asme b16', 'ansi b16')
+            if term in joined
+        )
+        return header_terms >= 2 and item_terms == 0
+
+    def _merge_stacked_headers(parent_row, child_row) -> list[str]:
+        generic_parent = {
+            'design data', 'standards', 'standard', 'technical data',
+            'dimension', 'dimensions', 'data', 'item details',
+        }
+        merged: list[str] = []
+        seen: dict[str, int] = {}
+
+        for index, parent in enumerate(parent_row):
+            parent_clean = _clean(parent)
+            child_clean = _clean(child_row[index] if index < len(child_row) else '')
+            parent_norm = _norm(parent_clean)
+            child_norm = _norm(child_clean)
+
+            if child_clean and (not parent_clean or parent_norm in generic_parent or parent_norm == child_norm):
+                name = child_clean
+            elif parent_clean and child_clean:
+                name = f'{parent_clean} {child_clean}'
+            else:
+                name = parent_clean or child_clean or f'Column {index + 1}'
+
+            key = name.strip().lower()
+            seen[key] = seen.get(key, 0) + 1
+            if seen[key] > 1:
+                name = f'{name} {seen[key]}'
+            merged.append(name)
+
+        return merged
+
+    def _looks_like_non_item_row(row) -> bool:
+        cells = [_clean(cell) for cell in row if _clean(cell)]
+        if not cells:
+            return True
+        joined = ' | '.join(_norm(cell) for cell in cells)
+        first = _norm(cells[0])
+        if first.startswith('additional requirement') or first in {'total', 'grand total', 'subtotal'}:
+            return True
+        if re.search(
+            r'\b(material to be supplied|mill certificates?|test certificates?|commercial terms|packing forwarding)\b',
+            joined,
+        ) and not re.search(
+            r'\b(gasket|spw|spiral|wound|rtj|ring|insulat|isolat|kamm|camprofile)\b',
+            joined,
+        ):
+            return True
+        if re.search(r'\b(total|grand total|subtotal)\b', joined) and not re.search(
+            r'\b(gasket|spw|spiral|wound|rtj|ring|insulat|isolat|kamm|camprofile)\b',
+            joined,
+        ):
+            return True
+        return False
+
+    def _render_table_cell(header: object, value: object) -> str:
+        cell = str(value).replace('|', '/')
+        header_norm = _norm(header)
+        if header_norm in {'size', 'sizes', 'size inch', 'size in inch', 'nps'}:
+            stripped = cell.strip()
+            if re.fullmatch(r'\d+(?:\.\d+)?|\d+\s+\d+/\d+|\d+/\d+', stripped):
+                return f'{stripped}"'
+        return cell
+
     def _sheet_score(sheet_name: str, df) -> tuple[int, int]:
         name = _norm(sheet_name)
         best_idx = df.index[0]
@@ -252,8 +333,22 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int | None = None) -> tuple[str
         df = sheet['df']
         header_idx = sheet['header_idx']
 
-        df.columns = df.loc[header_idx].tolist()
-        df = df[df.index > header_idx].copy()
+        header_values = df.loc[header_idx].tolist()
+        data_start_idx = header_idx
+        following_indices = [idx for idx in df.index if idx > header_idx]
+        if following_indices:
+            candidate_idx = following_indices[0]
+            candidate_values = df.loc[candidate_idx].tolist()
+            has_sparse_or_generic_parent = (
+                sum(1 for cell in header_values if not _clean(cell)) >= 2
+                or any(_norm(cell) in {'design data', 'standards', 'standard', 'technical data'} for cell in header_values)
+            )
+            if has_sparse_or_generic_parent and _looks_like_subheader(candidate_values):
+                header_values = _merge_stacked_headers(header_values, candidate_values)
+                data_start_idx = candidate_idx
+
+        df.columns = header_values
+        df = df[df.index > data_start_idx].copy()
 
         # Drop columns where >95% of values are empty. Keep sparse but meaningful
         # columns such as MOC, remarks, ring material, or drawing references.
@@ -272,6 +367,7 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int | None = None) -> tuple[str
 
         # Remove rows that are entirely empty after column filtering
         df = df[df.apply(lambda r: any(c for c in r), axis=1)]
+        df = df[~df.apply(_looks_like_non_item_row, axis=1)]
         if df.empty:
             continue
 
@@ -300,7 +396,7 @@ def _excel_to_text(excel_bytes: bytes, max_rows: int | None = None) -> tuple[str
             '| ' + ' | '.join(sep) + ' |',
         ]
         for _, row in df.iterrows():
-            cells = [str(v).replace('|', '/') for v in row]
+            cells = [_render_table_cell(header, value) for header, value in zip(headers, row)]
             md_rows.append('| ' + ' | '.join(cells) + ' |')
 
         parts.append(f'=== Sheet: {sheet_name} ===')

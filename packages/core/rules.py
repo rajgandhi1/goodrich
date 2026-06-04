@@ -26,14 +26,25 @@ _MOC_CANONICAL = {
     'IIR': 'BUTYL RUBBER',
     'CNAF': 'CNAF',
     'NAF': 'CNAF',
+    'NON ASBESTOS': 'CNAF',
+    'NON-ASBESTOS': 'CNAF',
+    'NON ASBESTOS FIBRE': 'CNAF',
+    'NON ASBESTOS FIBER': 'CNAF',
+    'COMPRESSED NON ASBESTOS FIBRE': 'CNAF',
+    'COMPRESSED NON ASBESTOS FIBER': 'CNAF',
+    'COMPRESSED NON-ASBESTOS FIBRE': 'CNAF',
+    'COMPRESSED NON-ASBESTOS FIBER': 'CNAF',
     'CAF': 'COMPRESSED ASBESTOS FIBRE',
     'NR': 'NATURAL RUBBER',
     'CR': 'NEOPRENE',
     'EPDM': 'EPDM',
     'PTFE': 'PTFE',
+    'MODIFIED PTFE': 'MODIFIED PTFE',
     'NEOPRENE': 'NEOPRENE',
     'VITON': 'VITON',
     'GRAPHITE': 'GRAPHITE',
+    'GRAFOIL': 'GRAPHITE SHEET',
+    'GRAPHITE SHEET': 'GRAPHITE SHEET',
     'TEFLON': 'PTFE',
 }
 
@@ -1427,12 +1438,56 @@ def _sanitize_llm_nulls(item: dict) -> dict:
     return item
 
 
+def _recover_compact_size_rating(item: dict) -> None:
+    """Split compact table values like `2 X 150` into NPS size and ASME class."""
+    size_text = str(item.get('size') or '').strip()
+    if not size_text or item.get('size_type') == 'OD_ID':
+        return
+
+    match = re.match(
+        r'^(?P<size>\d+(?:\.\d+)?|\d+\s+\d+/\d+|\d+/\d+)\s*(?:"|INCH|IN)?\s*(?:X|×|BY|-)\s*'
+        r'(?P<rating>150|300|400|600|900|1500|2500)\s*#?\s*$',
+        size_text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return
+
+    item['size'] = f'{match.group("size")}"'
+    item['size_type'] = 'NPS'
+    if not item.get('rating'):
+        item['rating'] = f'{match.group("rating")}#'
+
+
+def _recover_common_fields_from_description(item: dict) -> None:
+    raw = str(item.get('raw_description') or item.get('description') or '')
+    if not raw:
+        return
+    upper = raw.upper()
+
+    if not item.get('standard'):
+        standard_match = re.search(r'\b(?:ASME|ANSI)?\s*B\s*16\.(20|21|47)\b', upper)
+        if standard_match:
+            item['standard'] = f'ASME B16.{standard_match.group(1)}'
+
+    if not item.get('thickness_mm'):
+        thickness_match = re.search(
+            r'\b(?P<thk>\d+(?:\.\d+)?)\s*(?:MM)?\s*(?:NOM\s+)?(?:GASKET\s+)?(?:THK|THICK)\b'
+            r'|\b(?:THK|THICKNESS)\s*[:=]?\s*(?P<thk2>\d+(?:\.\d+)?)\s*(?:MM)?\b',
+            upper,
+        )
+        if thickness_match:
+            item['thickness_mm'] = float(thickness_match.group('thk') or thickness_match.group('thk2'))
+
+
 def apply_rules(item: dict) -> dict:
     """
     Normalize, apply defaults, validate, and assign status + flags.
     Returns updated item dict.
     """
     _sanitize_llm_nulls(item)
+    _recover_compact_size_rating(item)
+    _recover_common_fields_from_description(item)
     flags = []
     applied_defaults = []
 
@@ -1567,6 +1622,10 @@ def apply_rules(item: dict) -> dict:
                     or 'RENFORCEMENT' in raw_moc
                 )
             )
+            _is_described_composite = (
+                any(token in raw_moc for token in ('GRAPHITE', 'PTFE', 'CNAF', 'RUBBER'))
+                and any(token in raw_moc for token in ('SS', '316', '304', 'PERFORATED', 'PLATE', 'COVER', 'INSERT', 'REINFORCEMENT'))
+            )
             # "X / EQUIVALENT" or "X OR EQUIVALENT" specs are passed through verbatim — don't flag
             _is_equivalent_spec = (
                 '/ EQUIVALENT' in raw_moc
@@ -1574,7 +1633,7 @@ def apply_rules(item: dict) -> dict:
                 or 'OR EQUIVALENT' in raw_moc
                 or '/ EQUAL' in raw_moc
             )
-            if not _is_composite and not _is_equivalent_spec and normalized not in ACCEPTED_MOC and raw_moc not in _MOC_CANONICAL:
+            if not _is_composite and not _is_described_composite and not _is_equivalent_spec and normalized not in ACCEPTED_MOC and raw_moc not in _MOC_CANONICAL:
                 flags.append(f'MOC "{normalized}" not in standard list — verify spelling')
 
         # --- Default: face_type ---

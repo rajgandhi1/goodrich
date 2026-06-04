@@ -1312,9 +1312,10 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const isPoSection = section === "po";
   const isQuotationSection = isFinalSection || isPoSection;
   const sectionBasePath = isPoSection ? "/purchase-orders" : isFinalSection ? "/quotes/final" : isMaterialSection ? "/material-planning" : "/quotes";
+  const isPurchaseOrderLocked = quote?.stage === "po";
   const canCreateEnquiry = canRole(currentUser.role, "create_enquiry", accessSettings);
   const canAddDetails = canRole(currentUser.role, "edit_sales_details", accessSettings);
-  const canEditLineItems = canRole(currentUser.role, "edit_line_items", accessSettings);
+  const canEditLineItems = canRole(currentUser.role, "edit_line_items", accessSettings) && !isPurchaseOrderLocked;
   const canEditWorkflow = canRole(currentUser.role, "edit_workflow", accessSettings);
   const canEditQuotation = canRole(currentUser.role, "edit_quotation", accessSettings);
   const canEditQuote = canCreateEnquiry || canEditLineItems || canEditWorkflow || canEditQuotation;
@@ -1450,17 +1451,12 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
   const selectedOrVisibleRows = selectedOrVisibleIndices.map((index) => items[index]).filter(Boolean);
   const hasActionRows = selectedOrVisibleRows.length > 0;
   const hasRowsWithCustomerText = selectedOrVisibleRows.some((item) => getString(item.raw_description).trim());
-  const hasRequiredMarketType = Boolean(QUOTATION_NUMBER_PREFIX[getString(quote?.stage_meta?.market_type)]);
-  const emailCreateDisabled = startingExtraction || saving || !emailText.trim() || !hasRequiredMarketType;
-  const emailCreateTitle = !hasRequiredMarketType
-    ? "Select Export or Domestic first"
-    : !emailText.trim()
+  const emailCreateDisabled = startingExtraction || saving || !emailText.trim();
+  const emailCreateTitle = !emailText.trim()
       ? "Paste enquiry text first"
       : "Create line items from the pasted email";
-  const excelCreateDisabled = startingExtraction || saving || !excelFile || !hasRequiredMarketType;
-  const excelCreateTitle = !hasRequiredMarketType
-    ? "Select Export or Domestic first"
-    : !excelFile
+  const excelCreateDisabled = startingExtraction || saving || !excelFile;
+  const excelCreateTitle = !excelFile
       ? "Choose an Excel or CSV file first"
       : "Create line items from the selected Excel or CSV file";
   const rereadRowsDisabled = saving || startingExtraction || !hasRowsWithCustomerText;
@@ -2271,11 +2267,6 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
     }
     if (!quote) {
       toast.error("Create a quote workspace first");
-      return;
-    }
-    const marketType = getString(quote.stage_meta?.market_type);
-    if (!QUOTATION_NUMBER_PREFIX[marketType]) {
-      toast.error("Select Export or Domestic before processing the enquiry.");
       return;
     }
     if (sourceType === "email" && !emailText.trim()) {
@@ -4260,7 +4251,7 @@ export function QuotesClient({ section = "drafts" }: { section?: QuoteSection })
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px] md:items-center">
               <div>
                 <div className="text-sm font-medium">Quote type</div>
-                <div className="text-xs text-muted-foreground">Required before processing the enquiry or creating the final quotation.</div>
+                <div className="text-xs text-muted-foreground">Required before creating the final quotation.</div>
               </div>
               <div className="space-y-1.5">
                 <Label>Export or domestic *</Label>

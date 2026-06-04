@@ -160,6 +160,23 @@ def test_quote_workflow_exports_and_tenant_isolation():
     )
     assert advanced.status_code == 200
     assert advanced.json()["stage"] == "po"
+    assert advanced.json()["stage_meta"]["po_snapshot"]["items"] == advanced.json()["items"]
+    assert advanced.json()["stage_meta"]["po_snapshot"]["source_quote_version"] == sent.json()["version"]
+
+    changed_po_items = client.patch(
+        f"/api/v1/quotes/{quote_id}",
+        headers=headers,
+        json={"items": [{**advanced.json()["items"][0], "quantity": 99}]},
+    )
+    assert changed_po_items.status_code == 409
+    assert "line items are locked" in changed_po_items.json()["detail"]
+
+    same_po_items = client.patch(
+        f"/api/v1/quotes/{quote_id}",
+        headers=headers,
+        json={"items": advanced.json()["items"]},
+    )
+    assert same_po_items.status_code == 200
 
     cross_org = client.get(
         f"/api/v1/quotes/{quote_id}",

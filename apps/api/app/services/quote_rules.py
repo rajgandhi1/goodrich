@@ -299,6 +299,8 @@ def apply_update_invariants(current: QuoteRead, data: dict[str, Any], *, actor_i
     next_version = current.version + 1
     old_items = current.items
     new_items = data.get("items") or []
+    if current.stage == "po" and old_items != new_items:
+        raise QuoteValidationError("Purchase order line items are locked after PO receipt")
     old_meta = dict(current.stage_meta or {})
     stage_meta = dict(data.get("stage_meta") or {})
     owner_before = normalize_identity(old_meta.get("owner_id"))
@@ -384,3 +386,18 @@ def workflow_transition_blockers(quote: QuoteRead, target_stage: str) -> list[st
 
 def clone_quote_data(quote: QuoteRead) -> dict[str, Any]:
     return deepcopy(quote.model_dump())
+
+
+def po_snapshot(quote: QuoteRead, *, user_id: str = "") -> dict[str, Any]:
+    return {
+        "captured_at": now_iso(),
+        "captured_by": user_id,
+        "source_quote_id": quote.id,
+        "source_quote_no": quote.quote_no,
+        "source_quote_version": quote.version,
+        "source_enquiry_id": str((quote.stage_meta or {}).get("source_enquiry_id") or ""),
+        "source_enquiry_version": (quote.stage_meta or {}).get("source_enquiry_version"),
+        "items": deepcopy(quote.items),
+        "quote_data": deepcopy(quote.quote_data or {}),
+        "item_signature": extraction_summary(quote.items, quote.version, quote.stage_meta or {})["item_signature"],
+    }
