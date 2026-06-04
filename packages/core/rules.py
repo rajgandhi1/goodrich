@@ -1480,6 +1480,18 @@ def _recover_common_fields_from_description(item: dict) -> None:
             item['thickness_mm'] = float(thickness_match.group('thk') or thickness_match.group('thk2'))
 
 
+def _requires_review_for_default(default: str, gasket_type: str, item: dict) -> bool:
+    if (
+        gasket_type == 'SPIRAL_WOUND'
+        and default == 'standard defaulted to ASME B16.20'
+        and item.get('size_norm')
+        and item.get('rating_norm')
+        and item.get('moc')
+    ):
+        return False
+    return True
+
+
 def apply_rules(item: dict) -> dict:
     """
     Normalize, apply defaults, validate, and assign status + flags.
@@ -1734,9 +1746,14 @@ def apply_rules(item: dict) -> dict:
         flags.append('Quantity not provided')
 
     # --- Assign status ---
+    review_defaults = [
+        default for default in applied_defaults
+        if _requires_review_for_default(default, gasket_type, item)
+    ]
+
     if missing_critical or any('ambiguous' in f.lower() or 'missing critical' in f.lower() for f in flags):
         item['status'] = STATUS_MISSING
-    elif applied_defaults or flags:
+    elif review_defaults or flags:
         item['status'] = STATUS_CHECK
         item['applied_defaults'] = applied_defaults
     else:

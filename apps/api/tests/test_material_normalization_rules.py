@@ -67,6 +67,27 @@ def test_spw_recovers_explicit_standard_and_thickness_before_defaults():
     assert item["status"] == "ready"
 
 
+def test_spw_asme_standard_default_does_not_force_review_when_core_fields_are_complete():
+    item = apply_rules(
+        {
+            "gasket_type": "SPIRAL_WOUND",
+            "raw_description": '1in x 4.5mm Nom Thk Gasket SPW CL900 Incoloy 825 Winding Flexible Graphite Filler CS IR Alloy 825 OR',
+            "size": '1"',
+            "rating": "900#",
+            "quantity": 1,
+            "thickness_mm": 4.5,
+            "sw_winding_material": "ALLOY 825",
+            "sw_filler": "GRAPHITE",
+            "sw_inner_ring": "ALLOY 825",
+            "sw_outer_ring": "CS",
+        }
+    )
+
+    assert item["standard"] == "ASME B16.20"
+    assert item["flags"] == []
+    assert item["status"] == "ready"
+
+
 def test_common_soft_cut_material_phrases_do_not_get_spelling_flags():
     modified_ptfe = apply_rules(
         {
